@@ -1,0 +1,9 @@
+Package: phasealign
+Version: __VERSION__
+Section: sound
+Priority: optional
+Architecture: amd64
+Maintainer: Leigh Pierce <leighpierce@me.com>
+Description: Phase Align plugin (VST3)
+ IBP-inspired phase alignment utility: variable all-pass phase, sample-accurate delay and a
+ correlation meter, built with JUCE.
