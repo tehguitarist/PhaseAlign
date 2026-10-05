@@ -1,0 +1,34 @@
+﻿component,file,x,y,w,h,description
+analyse button,analyse-in-off,1737,1002,249,249,when button is off and button is pressed
+analyse button,analyse-in-on,1737,1002,249,249,When meter is on and button is pressed
+analyse button,analyse-out-off,1737,1002,249,249,when meter is off
+analyse button,analyse-out-on,1737,1002,249,249,when meter is on
+delay button,button-in,807,377,117,117,when delay is enabled
+delay button,button-out,807,377,117,117,when delay is disabled
+phase invert button,button-in,977,377,117,117,when phase is inverted
+phase invert button,button-out,977,377,117,117,when phase is not inverted
+phase button,button-in,1145,377,117,117,when phase option is enabled
+phase button,button-out,1145,377,117,117,when phase option is disabled
+delay led,led-off,807,270,99,99,when delay is disabled
+delay led,led-on,807,270,99,99,when delay is enabled
+phase invert led,led-off,977,270,99,99,when phase is normal
+phase invert led,led-on,977,270,99,99,when phase is inverted
+phase led,led-off,1145,270,99,99,when phase option is disabled
+phase led,led-on,1145,270,99,99,when phase option is enabled
+meter button,meter-in-off,1737,723,249,249,when button is off and button is pressed
+meter button,meter-in-on,1737,723,249,249,When meter is on and button is pressed
+meter button,meter-out-off,1737,723,249,249,when meter is off
+meter button,meter-out-on,1737,723,249,249,when meter is on
+base image,plugin-base,,,1954,1224,base of the plugin UI
+delay switch,toggle-switch-centre,473,340,77,194,"text left aligned, to the right of the switch"
+delay switch,toggle-switch-down,473,340,77,194,"text left aligned, to the right of the switch"
+delay switch,toggle-switch-up,473,340,77,194,"text left aligned, to the right of the switch"
+phase switch,toggle-switch-centre,1487,340,77,194,"text right aligned, to the left of the switch"
+phase switch,toggle-switch-down,1487,340,77,194,"text right aligned, to the left of the switch"
+phase switch,toggle-switch-up,1487,340,77,194,"text right aligned, to the left of the switch"
+delay display,,251,507,282,100,"on base image already, to hold delay value text"
+phase display,,1710,507,282,100,"on base image already, to hold phase value text"
+meter display,,827,859,1480,555,"on base image already, to hold metering and analysis options"
+full example,full example,,,,,example of full layout - illustrative purposes only
+delay knob,knobs,253,272,,,rotate on centre of image
+phase knob,knobs,1710,272,245,245,rotate on centre of image
