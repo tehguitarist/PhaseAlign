@@ -48,6 +48,10 @@ jobs:
       - name: Validate AU (auval)
         if: runner.os == 'macOS'
         run: |
+          # CMake doesn't install the AU after building (COPY_PLUGIN_AFTER_BUILD is off so local
+          # builds don't touch ~/Library), so copy it where auval and the registrar look.
+          mkdir -p "$HOME/Library/Audio/Plug-Ins/Components"
+          cp -R "build/PhaseAlign_artefacts/Release/AU/Phase Align.component" "$HOME/Library/Audio/Plug-Ins/Components/"
           # On a clean CI runner the freshly-copied .component isn't registered with the
           # AudioComponentRegistrar yet, so auval reports "didn't find the component" / -50.
           # Bounce the registrar so it rescans ~/Library/Audio/Plug-Ins/Components and retry.
