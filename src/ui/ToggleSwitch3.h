@@ -35,6 +35,7 @@ class ToggleSwitch3 : public DesignComponent
     void mouseDrag(const juce::MouseEvent&) override;
     void mouseUp(const juce::MouseEvent&) override;
     juce::String getTooltip() override;
+    const juce::String& getItemTooltip(int item) const { return items[(size_t)item].tooltip; }
 
   private:
     static juce::Rectangle<float> boundsFor(juce::Rectangle<float> switchSlot, LabelSide);

@@ -5,7 +5,8 @@ project(PhaseAlign VERSION 0.1.0)   # release.yml greps this line for the versio
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_OSX_DEPLOYMENT_TARGET "10.13" CACHE STRING "Minimum macOS deployment version")
-# Universal builds are produced in CI by passing -DCMAKE_OSX_ARCHITECTURES (see release.yml).
+# macOS ships two separate builds, not a universal binary (R14): arm64, the default here and locally, and x86_64
+# ("Intel"), which release.yml cross-compiles with -DCMAKE_OSX_ARCHITECTURES=x86_64.
 
 option(PA_BUILD_TESTS "Build the unit tests (tests/, Catch2 v3)" ON)
 option(PA_STANDALONE "Also build a Standalone app, for checking the UI without a host" OFF)

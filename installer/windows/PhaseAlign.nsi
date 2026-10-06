@@ -2,16 +2,21 @@
 ; here — VST3 only, installed to the shared system VST3 folder.
 ;
 ; Build with (from repo root, after building PhaseAlign_VST3):
-;   makensis /DVERSION=0.4.0 /DARTEFACTS_DIR=build\PhaseAlign_artefacts\Release\VST3 installer\windows\PhaseAlign.nsi
+;   bash installer/stage_docs.sh build/docs 0.4.0
+;   makensis /DVERSION=0.4.0 /DARTEFACTS_DIR=build\PhaseAlign_artefacts\Release\VST3 /DDOCS_DIR=build\docs installer\windows\PhaseAlign.nsi
 ;
 ; ARTEFACTS_DIR should point at the directory CONTAINING "Phase Align.vst3" (i.e. the VST3 release
-; output folder), not the bundle itself.
+; output folder), not the bundle itself. DOCS_DIR is the readme and licences staged by stage_docs.sh,
+; installed to Program Files\Phase Align (not into the signed bundle).
 
 !ifndef VERSION
   !define VERSION "0.0.0"
 !endif
 !ifndef ARTEFACTS_DIR
   !define ARTEFACTS_DIR "..\..\build\PhaseAlign_artefacts\Release\VST3"
+!endif
+!ifndef DOCS_DIR
+  !define DOCS_DIR "..\..\build\docs"
 !endif
 
 Name "Phase Align"
@@ -41,7 +46,14 @@ Section "Phase Align VST3 Plugin" SecVST3
         "Publisher" "Leigh Pierce"
 SectionEnd
 
+Section "Read me and licences" SecDocs
+    SectionIn RO
+    SetOutPath "$PROGRAMFILES64\Phase Align"
+    File /r "${DOCS_DIR}\*.*"
+SectionEnd
+
 Section "Uninstall"
     RMDir /r "$INSTDIR\Phase Align.vst3"
+    RMDir /r "$PROGRAMFILES64\Phase Align"
     DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Phase Align"
 SectionEnd

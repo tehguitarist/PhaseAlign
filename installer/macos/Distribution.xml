@@ -4,6 +4,7 @@
     <organization>com.leighpierce</organization>
     <domains enable_localSystem="true"/>
     <options customize="allow" require-scripts="false" rootVolumeOnly="true"/>
+    <readme file="Readme.txt"/>
 
     <!-- Two installable components, both selected by default. AU is macOS-only, so this is the
          one platform where a plugin-format choice screen makes sense. AU/VST3 sit at the top
@@ -11,6 +12,7 @@
     <choices-outline>
         <line choice="au"/>
         <line choice="vst3"/>
+        <line choice="docs"/>
     </choices-outline>
 
     <choice id="au"
@@ -27,6 +29,12 @@
         <pkg-ref id="com.leighpierce.phasealign.vst3"/>
     </choice>
 
+    <!-- The readme and licences (third-party and the AGPLv3): always installed, not shown as a choice. -->
+    <choice id="docs" title="Read me and licences" visible="false" start_selected="true" enabled="false">
+        <pkg-ref id="com.leighpierce.phasealign.docs"/>
+    </choice>
+
     <pkg-ref id="com.leighpierce.phasealign.au" version="__VERSION__" onConclusion="none">au.pkg</pkg-ref>
     <pkg-ref id="com.leighpierce.phasealign.vst3" version="__VERSION__" onConclusion="none">vst3.pkg</pkg-ref>
+    <pkg-ref id="com.leighpierce.phasealign.docs" version="__VERSION__" onConclusion="none">docs.pkg</pkg-ref>
 </installer-gui-script>

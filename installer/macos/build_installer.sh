@@ -48,6 +48,18 @@ pkgbuild --root "$VST3_ROOT" \
     --install-location "/Library/Audio/Plug-Ins/VST3" \
     "$WORK/vst3.pkg"
 
+# The readme and licences (installer/stage_docs.sh): installed to /Library/Application Support/Phase Align, not into
+# the plugin bundles (they are signed before packaging), and the readme also shown as a page of the installer.
+DOCS_ROOT="$WORK/docs-root"
+"$SCRIPT_DIR/../stage_docs.sh" "$DOCS_ROOT" "$VERSION"
+mkdir -p "$WORK/resources"
+cp "$DOCS_ROOT/Readme.txt" "$WORK/resources/Readme.txt"
+pkgbuild --root "$DOCS_ROOT" \
+    --identifier com.leighpierce.phasealign.docs \
+    --version "$VERSION" \
+    --install-location "/Library/Application Support/Phase Align" \
+    "$WORK/docs.pkg"
+
 sed "s/__VERSION__/$VERSION/g" "$SCRIPT_DIR/Distribution.xml" > "$WORK/Distribution.xml"
 
 mkdir -p "$OUTDIR"
@@ -55,6 +67,7 @@ OUT_PKG="$OUTDIR/PhaseAlign-macOS-v${VERSION}-Installer.pkg"
 
 productbuild --distribution "$WORK/Distribution.xml" \
     --package-path "$WORK" \
+    --resources "$WORK/resources" \
     "$OUT_PKG"
 
 echo "Built $OUT_PKG"

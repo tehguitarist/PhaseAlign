@@ -17,6 +17,34 @@ const juce::String resetModifier = "Ctrl";
 
 const juce::String knobHint = "Double-click to type a value, " + resetModifier + "/Alt-click to reset.";
 
+// Latencies quoted in tooltips, computed from the DSP so the text can't drift from what the plugin reports.
+juce::String latencyMs(int samples, double fs, int decimals = 1)
+{
+    const auto ms = 1000.0 * samples / fs;
+    return (decimals > 0 ? juce::String(ms, decimals) : juce::String(juce::roundToInt(ms))) + " ms";
+}
+
+int delayLatencyAt(double fs)
+{
+    return pa::dsp::Chain::delayLatencyFor(fs, pa::params::maxDelayTenths(fs));
+}
+
+using pa::dsp::HiLoStage;
+
+const juce::String delayLatencyText = "On adds " + latencyMs(delayLatencyAt(44100.0), 44100.0) +
+                                      " of latency at 44.1 kHz (" + latencyMs(delayLatencyAt(48000.0), 48000.0) +
+                                      " at 48 kHz, " + latencyMs(delayLatencyAt(96000.0), 96000.0) + " at 96 kHz)";
+
+const juce::String hiLoLatencyText = "Adds " + latencyMs(HiLoStage::latencyFor(44100.0), 44100.0) +
+                                     " of latency at 44.1 kHz, " + latencyMs(HiLoStage::latencyFor(48000.0), 48000.0) +
+                                     " at 48 kHz, " + juce::String(HiLoStage::latencyFor(96000.0)) +
+                                     " samples at 96 kHz and none from 176.4 kHz up, which the host "
+                                     "compensates; that is what lets it sound the same at every sample rate.";
+
+const juce::String constantLatencyText =
+    "Adds about " + latencyMs(pa::dsp::ConstantRotator::latencyFor(48000.0), 48000.0, 0) +
+    " of latency, which the host compensates; switching into or out of it fades the audio out and back in briefly.";
+
 // The latching buttons and their LEDs (if any). Adding one is CSV rows (tools/build_assets.sh) and a row here.
 struct ToggleSpec
 {
@@ -27,13 +55,12 @@ struct ToggleSpec
 };
 
 const ToggleSpec toggleSpecs[] = {
-    {id::delayOn, layout::delayButton, &layout::delayLed,
-     "Delay on/off. The LED is lit while the delay is applied. On adds about 4.5 ms of latency, which the host "
-     "compensates, so the delay can move this track earlier as well as later."},
+    {id::delayOn, layout::delayButton, &layout::delayLed, nullptr}, // built in the constructor: it quotes the latency
     {id::polarity, layout::phaseInvertButton, &layout::phaseInvertLed,
      "Polarity invert. The LED is lit while the polarity is inverted."},
     {id::phaseOn, layout::phaseButton, &layout::phaseLed,
-     "Phase rotation on/off. The LED is lit while the phase stage is active."},
+     "Phase rotation on/off. The LED is lit while the phase stage is active. Off passes the track through with "
+     "the same latency, so switching is seamless."},
     {id::phaseRange, layout::rangeButton, nullptr,
      "Phase range: the knob's full travel is 90\xc2\xb0 (out) or 180\xc2\xb0 (in). The knob keeps its position, so "
      "switching doubles or halves the angle."},
@@ -93,10 +120,14 @@ PhaseAlignEditor::PhaseAlignEditor(PhaseAlignProcessor& p)
                    {"SAMPLES", "Show the delay in samples at the current sample rate."},
                    {"CENTIMETERS", "Show the delay as a distance in centimetres (sound at 343 m/s)."}}}),
       modeSwitch(images, layout::phaseSwitch.bounds(), pa::ui::ToggleSwitch3::LabelSide::left,
-                 {{{"HIGH", "High: frequency-dependent rotation centred higher up. No latency."},
-                   {"LOW", "Low: frequency-dependent rotation centred an octave lower. No latency."},
-                   {"CONSTANT", "Constant: the same rotation at every frequency. Adds about 43 ms of latency, "
-                                "which the host compensates."}}}),
+                 {{{"HIGH", juce::String::fromUTF8("High: an all-pass rotation that turns the highs further than the "
+                                                   "lows; the knob's angle is the shift at 150 Hz. ") +
+                                hiLoLatencyText},
+                   {"LOW", juce::String::fromUTF8("Low: the same, an octave lower; the knob's angle is the shift at "
+                                                  "75 Hz (past 90\xc2\xb0, the extra turn is centred near 1.5 kHz). ") +
+                               hiLoLatencyText},
+                   {"CONSTANT",
+                    "Constant: the same rotation at every frequency, from about 20 Hz up. " + constantLatencyText}}}),
       meterButton(
           images, layout::meterButton.bounds(),
           {layout::Image::meterInOff, layout::Image::meterInOn, layout::Image::meterOutOff, layout::Image::meterOutOn}),
@@ -136,10 +167,13 @@ PhaseAlignEditor::PhaseAlignEditor(PhaseAlignProcessor& p)
     delayKnob.onEditRequest = [this] { delayReadout.showEditor(); };
     phaseKnob.onEditRequest = [this] { phaseReadout.showEditor(); };
 
-    delayReadout.setTooltip("Effective delay, in the unit chosen with the switch. Double-click to type a value; "
-                            "add ms, samp or cm to type it in another unit.");
-    phaseReadout.setTooltip("Phase rotation in degrees, plus 180 while the polarity is inverted. Double-click to "
-                            "type a value.");
+    delayReadout.setTooltip("The delay knob's setting (applied while DELAY is on), in the unit chosen with the switch: "
+                            "how far this track moves, net of the latency. Double-click to type a value; add ms, samp "
+                            "or cm to type it in another unit.");
+    phaseReadout.setTooltip(
+        "The rotation applied, in degrees: the knob's angle, plus 180 while the polarity is "
+        "inverted (just 180 while PHASE is off). In High it is the shift at 150 Hz, in Low the shift "
+        "at 75 Hz (past 90, 90 plus the extra turn near 1.5 kHz). Double-click to type a value.");
     phaseReadout.setAnchor(pa::design::phaseReadoutInterior.getCentreX());
     delayReadout.onTextEntered = [this](const juce::String& text)
     {
@@ -167,7 +201,11 @@ PhaseAlignEditor::PhaseAlignEditor(PhaseAlignProcessor& p)
     {
         Toggle t;
         t.button = std::make_unique<pa::ui::PanelButton>(images, spec.button.bounds(), parameter(spec.parameterId));
-        t.button->setTooltip(juce::String::fromUTF8(spec.tooltip));
+        t.button->setTooltip(spec.tooltip != nullptr
+                                 ? juce::String::fromUTF8(spec.tooltip)
+                                 : "Delay on/off. The LED is lit while the delay is applied. " + delayLatencyText +
+                                       ", which the host compensates, so the delay can move this track earlier as "
+                                       "well as later. Switching it fades the audio out and back in briefly.");
         if (spec.led != nullptr)
         {
             t.led = std::make_unique<pa::ui::ImageIndicator>(images, spec.led->bounds(), layout::Image::ledOn,
@@ -182,9 +220,10 @@ PhaseAlignEditor::PhaseAlignEditor(PhaseAlignProcessor& p)
 
     // Meter.
     meterButton.setTooltip(
-        juce::String::fromUTF8("Correlation meter on/off: how well this track lines up with the sidechain in each band "
-                               "(+1 in phase, \xe2\x88\x92"
-                               "1 out of phase). Needs a sidechain input."));
+        juce::String::fromUTF8("Correlation meter on/off: how well this track lines up with the sidechain, per "
+                               "frequency band (+1 in phase, \xe2\x88\x92"
+                               "1 out of phase) or as the time offset between them. Needs a sidechain input; it "
+                               "only runs while this window is open."));
     meterButton.onClick = [this]
     { uiState.setProperty(PhaseAlignProcessor::UiProps::meterOn, ! meterButton.isLit(), nullptr); };
     analyseButton.setTooltip("Auto-suggest: coming in a future version");

@@ -216,6 +216,34 @@ TEST_CASE("toggle switches: click halves, drag and labels", "[interaction]")
     }
 }
 
+TEST_CASE("tooltips quote the latencies the DSP reports", "[interaction]")
+{
+    // Every number in them comes from the DSP, so a change there can't leave the text stale.
+    Fixture f;
+    const auto switches = f.controls<pa::ui::ToggleSwitch3>();
+    REQUIRE(switches.size() == 2);
+    const auto& mode = *switches[1];
+    const auto ms = [](int samples, double fs, int decimals)
+    {
+        const auto v = 1000.0 * samples / fs;
+        return (decimals > 0 ? juce::String(v, decimals) : juce::String(juce::roundToInt(v))) + " ms";
+    };
+    using pa::dsp::HiLoStage;
+    for (const auto item : {0, 1}) // High, Low
+    {
+        const auto& text = mode.getItemTooltip(item);
+        CHECK(text.contains(ms(HiLoStage::latencyFor(44100.0), 44100.0, 1) + " of latency at 44.1 kHz"));
+        CHECK(text.contains(ms(HiLoStage::latencyFor(48000.0), 48000.0, 1) + " at 48 kHz"));
+        CHECK(text.contains(juce::String(HiLoStage::latencyFor(96000.0)) + " samples at 96 kHz"));
+        CHECK(HiLoStage::latencyFor(176400.0) == 0); // "none from 176.4 kHz up"
+        CHECK_FALSE(text.containsIgnoreCase("no latency"));
+    }
+    CHECK(mode.getItemTooltip(0).contains("150 Hz"));
+    CHECK(mode.getItemTooltip(1).contains("75 Hz"));
+    CHECK(mode.getItemTooltip(2).contains("about " + ms(pa::dsp::ConstantRotator::latencyFor(48000.0), 48000.0, 0) +
+                                          " of latency"));
+}
+
 TEST_CASE("buttons: latching toggles, METER and ANALYSE", "[interaction]")
 {
     Fixture f;
@@ -228,8 +256,10 @@ TEST_CASE("buttons: latching toggles, METER and ANALYSE", "[interaction]")
     click(*buttons[1], centre);
     CHECK(f.param(id::polarity) == 0.0f);
     click(*buttons[0], centre);
-    CHECK(f.param(id::delayOn) == 1.0f);                           // off by default
-    CHECK(buttons[0]->getTooltip().contains("4.5 ms of latency")); // the compensated latency it adds (plan 4.4)
+    CHECK(f.param(id::delayOn) == 1.0f); // off by default
+    // The compensated latency it adds (plan 4.4), as the chain reports it.
+    const auto delayMs44 = 1000.0 * pa::dsp::Chain::delayLatencyFor(44100.0, maxDelayTenths(44100.0)) / 44100.0;
+    CHECK(buttons[0]->getTooltip().contains(juce::String(delayMs44, 1) + " ms of latency at 44.1 kHz"));
     click(*buttons[2], centre);
     CHECK(f.param(id::phaseOn) == 0.0f);
 

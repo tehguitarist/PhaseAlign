@@ -20,7 +20,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest, ubuntu-latest]
+        # Ubuntu pinned: ubuntu-latest moves to 26.04 from 2026-10-19, which may rename apt packages or change the
+        # fonts the editor tests render with. Move the pin deliberately, after one green run on the new image.
+        os: [macos-latest, windows-latest, ubuntu-24.04]
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -58,7 +60,7 @@ jobs:
           fi
 
       - name: Benchmark the DSP (information only)
-        # Numbers for IMPLEMENTATION_PLAN 2.6 on every OS: Windows and Linux use the generic FFT engine (no vDSP).
+        # Numbers for IMPLEMENTATION_PLAN 2.6 on every OS: Windows and Linux use PFFFT (no vDSP).
         # Budgets per stereo frame: Hi/Lo under 50 ns, Constant under 150 ns. Never fails the build.
         continue-on-error: true
         shell: bash
@@ -97,10 +99,26 @@ jobs:
           pluginval.app/Contents/MacOS/pluginval --strictness-level 10 --validate-in-process \
             --timeout-ms 300000 --output-dir pluginval-logs "build/PhaseAlign_artefacts/Release/VST3/Phase Align.vst3"
 
+      - name: Validate VST3 (pluginval, Windows and Linux; information only)
+        # Not yet seen green on these runners, so it can't fail the build; drop continue-on-error once it has passed.
+        if: runner.os != 'macOS'
+        continue-on-error: true
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then zip=pluginval_Windows.zip; bin=./pluginval.exe; else zip=pluginval_Linux.zip; bin=./pluginval; fi
+          curl -sSL -o pluginval.zip "https://github.com/Tracktion/pluginval/releases/latest/download/$zip"
+          unzip -q -o pluginval.zip
+          chmod +x "$bin" 2>/dev/null || true
+          run="$bin"
+          [ "$RUNNER_OS" = "Linux" ] && run="xvfb-run -a $bin"
+          $run --strictness-level 10 --validate-in-process --timeout-ms 300000 --output-dir pluginval-logs \
+            "build/PhaseAlign_artefacts/Release/VST3/Phase Align.vst3"
+
       - name: Upload pluginval logs
-        if: failure() && runner.os == 'macOS'
+        # On failure; on Windows and Linux always, while their pluginval step is information only.
+        if: failure() || (always() && runner.os != 'macOS')
         uses: actions/upload-artifact@v4
         with:
-          name: pluginval-logs
+          name: pluginval-logs-${{ matrix.os }}
           path: pluginval-logs
           if-no-files-found: ignore

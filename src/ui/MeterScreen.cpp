@@ -31,7 +31,8 @@ MeterScreen::MeterScreen(const SourceAssets& assetsIn, meter::MeterCapture& capt
 {
     setOpaque(true);
     setInterceptsMouseClicks(true, false); // only the view labels: see hitTest
-    setTooltip("Meter view: correlation against frequency, or the time offset between this track and the sidechain.");
+    setTooltip("Click to switch the view: FREQUENCY, the correlation with the sidechain per band; TIME OFFSET, how far "
+               "this track is from the sidechain. INPUT is this track before the plugin, OUTPUT after it.");
     for (auto& s : scratch)
         s.resize((size_t)meter::MeterCapture::capacity);
 }

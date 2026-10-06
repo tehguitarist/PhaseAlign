@@ -28,6 +28,7 @@ Items marked **[verify]** are things I believe are right but have not confirmed.
 | R10 | **Delay −4 to +4 ms** (user, 2026-10-06; built 2026-10-06, branch `dsp-negative-delay`): delay on reports 4 ms of latency so the delay can be negative; delay off reports none (2.1a) | Align either track without moving clips | Yes (3.1, 3.4 "zero latency") |
 | R12 | **Delay in steps of 0.1 sample** (user, 2026-10-06; built on `dsp-negative-delay`), replacing whole samples (PLAN decision 12) | Whole samples leave up to 2.4 dB of dip at 20 kHz on a coherent pair at 44.1 kHz; 0.1 sample leaves 0.02 dB (2.1a) | Yes (2.1, decision 12, open question 7) |
 | R13 | **Hi/Lo runs oversampled** (4× below 85 kHz, 2× below 170 kHz) between linear-phase halfbands, and **reports a small latency whenever Constant isn't selected**: 32 samples at 44.1 kHz (0.73 ms), 18 at 48 kHz (0.38 ms), 5 at 88.2/96 kHz, none from 176.4 kHz (user, 2026-10-06; merged to master, the user's listening still to come) | De-cramping: within 2.5° of analog sections to 20 kHz at every rate (was up to 80° at 44.1 kHz), so a setting sounds the same at every rate. Impossible at zero latency (Foster's reactance theorem, 2.3) | Yes (3.4 and 4.8 "zero latency", decision 4 "oversampling dropped") |
+| R14 | **macOS ships two separate builds, not a universal binary** (user, 2026-10-06): arm64, and x86_64 labelled "Intel" in the GitHub release (`release.yml`'s `macos` and `macos-intel` jobs). Local builds are arm64 only | Each download stays half the size; only a small minority need Intel, but it is still offered | Yes (10, "universal binary") |
 | R11 | **Dim a switched-off section** (user, 2026-10-06; not built yet): its knob, switch, readout values and buttons go semi-transparent but stay usable; the on/off toggles stay at full opacity (4.5) | Shows at a glance what's in the signal path | New |
 
 ---
@@ -795,8 +796,19 @@ Each item has a "done when" check. P* (Python) and U* (UI) work can run in paral
   NO SIDECHAIN after 1 s of silence with no further repaints, capture stops on meter off, hidden window and close;
   writes `meter_*.png` snapshots).
 - [x] Latency alignment of the meter streams (2026-10-06, with the −4..+4 ms delay); Constant only raises its maximum.
-- [ ] The Instruments check below (the tests already check it with counters: nothing is captured or queued while the
-  editor is closed or hidden or the meter is off, and the timer stops).
+- [x] The Instruments check (2026-10-06): `tools/meter_profile.py` records `PhaseAlignTests "[profile]"` (about 10 s of
+  audio with a live sidechain, in real time) with the Time Profiler in four conditions and counts the samples whose
+  stack holds a meter function, over the steady part of each run (Debug build, M1 Pro):
+
+  | condition | samples (s) | CorrelationAnalyser | MeterScreen | MeterCapture | processBlock |
+  |---|---|---|---|---|---|
+  | metering (the control) | 2116 (11.6) | 331 | 448 | 57 | 757 |
+  | editor showing, meter off | 1093 (11.5) | 0 | 0 | 0 | 646 |
+  | window hidden | 963 (11.3) | 0 | 0 | 0 | 618 |
+  | editor closed | 828 (11.2) | 0 | 0 | 1 | 666 |
+
+  The one sample when closed is `MeterCapture::isActive()`, the per-block gate itself (not inlined in Debug). So
+  nothing of the meter runs while it is off, hidden or closed; the counters in the tests say the same.
 - Checked (2026-10-06): a delayed copy reads +1 once aligned in Hi, Lo and Constant (`ProcessorTests`, M4 case).
 - **Done when:** a delayed copy as sidechain reads +1 once aligned, in all three modes; nothing runs when the meter is off or the editor is closed (confirm in Instruments).
 
@@ -811,13 +823,33 @@ Each item has a "done when" check. P* (Python) and U* (UI) work can run in paral
   instance); no allocation in `processBlock` or `processBlockBypassed` in every mode with automation and the meter on
   (counted per thread). The click checks were shown to fail with a hard latency switch.
 - [ ] Hosts: Logic, Live, Reaper, Cubase/Nuendo, Studio One, Bitwig. Check sidechain routing, automation, state recall, sample-rate changes, offline bounce, mono/stereo, **latency changes when entering or leaving Constant**, and host bypass in Constant.
-- [ ] Release checklist from PLAN section 10 (universal binary, notarisation, JUCE licence tier, OFL font notices).
+- [ ] Release checklist from PLAN section 10 (separate arm64 and Intel builds (R14), notarisation, JUCE licence tier,
+  OFL font notices). Done 2026-10-06, needing no credentials:
+  - **Both macOS architectures:** built once with both slices to check them (`lipo -info`: x86_64 + arm64 for the AU,
+    the VST3 and the DSP runner); the DSP tests pass on arm64 and as x86_64 under Rosetta (the code the Intel build
+    ships: the SSE2 paths of `Simd.h`, PFFFT's x86 build), 31 test cases each. Releases stay separate builds (R14);
+    `release.yml`'s arm64 job now states its architecture.
+  - **Licence: GNU AGPLv3** (user, 2026-10-06; `LICENSE`, the FSF's text as JUCE ships it). JUCE is used under its
+    AGPLv3 option, so no JUCE licence tier needs buying.
+  - **Notices:** `installer/stage_docs.sh` writes `Readme.txt` (the README's quick start, the AGPLv3 source pointer)
+    and `licenses/` (the AGPLv3, PFFFT's licence, both fonts' OFL, `THIRD_PARTY_NOTICES.md`). Every installer and
+    every release zip ships them, beside the plugins rather than inside the signed bundles: macOS
+    `/Library/Application Support/Phase Align` plus a readme page in the .pkg (checked locally: built, expanded, the
+    docs package and the readme page present), Windows `Program Files\Phase Align` (removed by the uninstaller), Linux
+    `/usr/share/doc/phasealign`. The Windows and Linux packaging is unverified until the release workflow runs.
+  - **`release.yml` review** (read, not run): (1) the release builds turn the tests off, so a release can be cut from a
+    commit whose CI failed: run it only on a green commit, or have it check CI's status first (the user's call);
+    (2) the zips lacked the notices (fixed above); (3) Windows and Linux binaries are unsigned (needs credentials);
+    (4) `codesign --deep` for signing is deprecated by Apple (works; signing nested code first is the modern way).
+    The separate arm64 and Intel jobs are as intended (R14). Its Linux build is pinned to Ubuntu 24.04 as in CI.
+  - Left: notarisation (credentials), the trademark search, the host checks.
 - [ ] **Quick-start guide** (README section + installer readme). The essential point: the plugin can only *delay*, so it goes on the track that arrives **earlier** (usually the closer mic), with the later track as the sidechain. Also covers routing a sidechain in the major hosts, what the meter's two markers mean, and that Constant mode adds compensated latency.
 - [ ] Name check: search for existing products called "Phase Align" before publishing, since the name is baked into the panel art.
   Web search (2026-10-06): no audio product of that name found; "phase alignment" is common as a description of other
   products. Not a trademark search: check the trademark registers before publishing.
 - [ ] Quick-start guide: **drafted in README (2026-10-06)** with the −4..+4 ms delay (it can move a track either way, so
-  "only delay" no longer applies); host routing steps to be checked in each host; installer readme not started.
+  "only delay" no longer applies); host routing steps to be checked in each host; the installer readme is generated
+  from it (`installer/stage_docs.sh`), draft note included until the routing is checked.
 
 ### v0.8: Record and compare
 - Capture into a lazily allocated buffer (allocated on the message thread when ANALYSE is pressed). Analyse on a background thread with the same `Chain` code.

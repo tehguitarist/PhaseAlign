@@ -28,6 +28,9 @@ ROOT="$WORK/phasealign"
 mkdir -p "$ROOT/DEBIAN" "$ROOT/usr/lib/vst3"
 cp -R "$VST3_SRC" "$ROOT/usr/lib/vst3/"
 
+# The readme and licences (installer/stage_docs.sh), where Debian keeps a package's documents.
+"$SCRIPT_DIR/../stage_docs.sh" "$ROOT/usr/share/doc/phasealign" "$VERSION"
+
 sed "s/__VERSION__/$VERSION/" "$SCRIPT_DIR/control" > "$ROOT/DEBIAN/control"
 
 find "$ROOT" -type d -exec chmod 755 {} +

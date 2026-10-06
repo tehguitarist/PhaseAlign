@@ -442,6 +442,56 @@ TEST_CASE("meter on screen: reads +1 when aligned, and stops when off", "[.][des
     CHECK_FALSE(capture.isActive());
 }
 
+// Hidden: for the M4 Instruments check (plan 5, M4). Plays about 10 s of audio with a live sidechain through
+// processBlock, in real time with the message loop running, in one condition chosen by PA_PROFILE_PHASE: "metering"
+// (the control: the meter must show up in the profile), "meterOff" (editor showing, meter off), "hidden" (window
+// hidden) or "closed" (no editor). Record it with
+//   xctrace record --template 'Time Profiler' --env PA_PROFILE_PHASE=meterOff --launch -- PhaseAlignTests "[profile]"
+// and look for CorrelationAnalyser, MeterScreen::paint* / timerCallback and MeterCapture::queue in the samples.
+TEST_CASE("meter profile run", "[.][profile]")
+{
+    const auto phase = juce::SystemStats::getEnvironmentVariable("PA_PROFILE_PHASE", "metering");
+    const auto fs = 48000.0;
+    const int block = 512;
+    PhaseAlignProcessor proc;
+    proc.prepareToPlay(fs, block);
+    auto* mm = juce::MessageManager::getInstance();
+
+    std::unique_ptr<PhaseAlignEditor> editor;
+    if (phase != "closed")
+    {
+        editor = makeEditor(proc);
+        editor->addToDesktop(juce::ComponentPeer::windowHasTitleBar);
+        editor->setVisible(true);
+        mm->runDispatchLoopUntil(300);
+        if (phase == "meterOff")
+            proc.getUiState().setProperty(UiProps::meterOn, false, nullptr);
+        if (phase == "hidden")
+            editor->setVisible(false);
+        mm->runDispatchLoopUntil(300);
+    }
+    const auto expectActive = phase == "metering";
+    CHECK(proc.getMeterCapture().isActive() == expectActive);
+
+    juce::Random rng(5);
+    juce::MidiBuffer midi;
+    juce::AudioBuffer<float> b(4, block);
+    for (int done = 0; done < (int)(10.0 * fs); done += block)
+    {
+        for (int i = 0; i < block; ++i)
+        {
+            const auto x = (rng.nextFloat() - 0.5f) * 0.6f;
+            for (int ch = 0; ch < 4; ++ch)
+                b.setSample(ch, i, ch < 2 ? x : 0.8f * x);
+        }
+        proc.processBlock(b, midi);
+        mm->runDispatchLoopUntil(10);
+    }
+    CHECK(proc.getMeterCapture().isActive() == expectActive);
+    if (editor != nullptr)
+        editor->removeFromDesktop();
+}
+
 TEST_CASE("a new instance opens at 80% of the reference size", "[editor]")
 {
     PhaseAlignProcessor proc;

@@ -55,7 +55,8 @@ jobs:
         with: { submodules: recursive }
 
       - name: Configure
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DPA_BUILD_TESTS=OFF
+        # arm64 only, stated rather than left to the runner, so this job never ships a universal or Intel binary.
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 -DPA_BUILD_TESTS=OFF
 
       - name: Build AU + VST3
         run: cmake --build build --config Release --target PhaseAlign_AU --target PhaseAlign_VST3 --parallel
@@ -130,6 +131,7 @@ jobs:
           PKG_DIR="$RUNNER_TEMP/Phase Align"
           mkdir -p "$PKG_DIR"
           cp -R "build/PhaseAlign_artefacts/Release/AU" "build/PhaseAlign_artefacts/Release/VST3" "$PKG_DIR/"
+          installer/stage_docs.sh "$PKG_DIR" "$VERSION" # the readme and licences, which the licences require
           ditto -c -k --sequesterRsrc --keepParent "$PKG_DIR" "PhaseAlign-macOS-v${VERSION}.zip"
 
       - name: Build installer
@@ -259,6 +261,7 @@ jobs:
           PKG_DIR="$RUNNER_TEMP/Phase Align"
           mkdir -p "$PKG_DIR"
           cp -R "build/PhaseAlign_artefacts/Release/AU" "build/PhaseAlign_artefacts/Release/VST3" "$PKG_DIR/"
+          installer/stage_docs.sh "$PKG_DIR" "$VERSION" # the readme and licences, which the licences require
           ditto -c -k --sequesterRsrc --keepParent "$PKG_DIR" "PhaseAlign-macOS-Intel-v${VERSION}.zip"
 
       - name: Build installer
@@ -321,8 +324,12 @@ jobs:
         shell: pwsh
         run: |
           $version = "${{ needs.version.outputs.version }}"
-          Compress-Archive -Path "build/PhaseAlign_artefacts/Release/VST3/Phase Align.vst3" `
-            -DestinationPath "PhaseAlign-Windows-v$version.zip"
+          # The bundle plus the readme and licences, which the licences require with a binary copy.
+          $stage = "$env:RUNNER_TEMP\Phase Align"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item -Recurse "build/PhaseAlign_artefacts/Release/VST3/Phase Align.vst3" $stage
+          bash installer/stage_docs.sh "$($stage -replace '\\','/')" $version
+          Compress-Archive -Path $stage -DestinationPath "PhaseAlign-Windows-v$version.zip"
 
       # makensis ships on windows-latest runners but is NOT on PATH — locate it rather than
       # assume a bare `makensis` call works (it doesn't).
@@ -349,7 +356,8 @@ jobs:
           }
 
           Write-Host "Using makensis at $makensisPath"
-          & $makensisPath /DVERSION=$version /DARTEFACTS_DIR="$PWD\build\PhaseAlign_artefacts\Release\VST3" installer\windows\PhaseAlign.nsi
+          bash installer/stage_docs.sh build/docs $version
+          & $makensisPath /DVERSION=$version /DARTEFACTS_DIR="$PWD\build\PhaseAlign_artefacts\Release\VST3" /DDOCS_DIR="$PWD\build\docs" installer\windows\PhaseAlign.nsi
 
           # NSIS resolves a relative OutFile against the .nsi's own directory, not this process's
           # CWD — move the built installer to the repo root so the upload-artifact glob finds it.
@@ -365,7 +373,7 @@ jobs:
   linux:
     name: Linux build
     needs: version
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # pinned as in ci.yml (ubuntu-latest moves to 26.04 on 2026-10-19)
     steps:
       - uses: actions/checkout@v6
         with: { submodules: recursive }
@@ -388,8 +396,12 @@ jobs:
       - name: Package
         run: |
           VERSION="${{ needs.version.outputs.version }}"
-          (cd build/PhaseAlign_artefacts/Release/VST3 && \
-            zip -r "${GITHUB_WORKSPACE}/PhaseAlign-Linux-v${VERSION}.zip" "Phase Align.vst3")
+          # The bundle plus the readme and licences, which the licences require with a binary copy.
+          STAGE="$RUNNER_TEMP/Phase Align"
+          mkdir -p "$STAGE"
+          cp -R "build/PhaseAlign_artefacts/Release/VST3/Phase Align.vst3" "$STAGE/"
+          installer/stage_docs.sh "$STAGE" "$VERSION"
+          (cd "$RUNNER_TEMP" && zip -r "${GITHUB_WORKSPACE}/PhaseAlign-Linux-v${VERSION}.zip" "Phase Align")
 
       - name: Build installer
         run: |

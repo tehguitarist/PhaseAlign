@@ -99,6 +99,11 @@ job, better.
    7. **PFFFT engine: merged to master (user, 2026-10-06; not pushed).** `libs/pffft` (submodule) behind `RealFft`
       where vDSP isn't; within a few ns of vDSP on the M1. CI's x86 numbers for both 6 and 7 come with the next push
       (HANDOVER items 1 and 2).
+   8. **2026-10-06, after the merge (HANDOVER items 3–5):** Ubuntu pinned to 24.04 in CI and release (pluginval on
+      Windows/Linux added as information only; unverified until a push); M4's Instruments check done
+      (`tools/meter_profile.py`); tooltips audited, latencies in them computed from the DSP (a test pins them);
+      **licence: GNU AGPLv3 (user, 2026-10-06; `LICENSE`, JUCE under its AGPLv3 option)**; every installer and release
+      zip ships `installer/stage_docs.sh`'s readme (the README quick start) and licences.
    - The stem analysis and auto-suggest (ANALYSE) work is dead last. Real multi-mic stem pairs are still wanted for the
      P2/P3 listening.
    - Installing (when the user asks): `/Library/Audio/Plug-Ins/{Components,VST3}`, not ~/Library.

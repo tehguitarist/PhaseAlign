@@ -36,8 +36,8 @@ it on one of the pair and feed the other into its **sidechain**; the meter then 
 5. Check by ear: solo the pair and listen for the low end filling in.
 
 **Latency.** HIGH and LOW add 0.7 ms at 44.1 kHz (0.4 ms at 48 kHz, almost none at 96 kHz and up), so their sections
-behave the same at every sample rate; Constant adds about 43 ms instead. The delay adds about 4.5 ms while it is on, so
-it can go negative. All of it is reported to the host, which compensates. Switching the delay or entering or leaving
+behave the same at every sample rate; Constant adds about 43 ms instead. The delay adds about 4 to 4.5 ms while it is on
+(depending on the sample rate), so it can go negative. All of it is reported to the host, which compensates. Switching the delay or entering or leaving
 Constant fades the audio out and back in over about 20 ms; some hosts only re-align at the next transport start.
 
 ## Build

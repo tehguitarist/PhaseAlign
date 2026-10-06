@@ -118,6 +118,10 @@ runners. The goldens and every test still pass with each engine, and plan 2.6 ha
 
 ## 3. CI hygiene
 
+**Status (2026-10-06): done, unverified until the next push.** `ubuntu-24.04` pinned in `ci.yml` (and `release.yml`'s
+Linux build); pluginval at strictness 10 on the VST3 added for Windows and Linux as information only
+(`continue-on-error`, logs uploaded per OS): make it required once it has passed there.
+
 - GitHub moves `ubuntu-latest` to Ubuntu 26 from 2026-10-19 (an annotation on the runs). Pin `ubuntu-24.04`, or run
   once on the new image and fix what breaks (fonts for the editor tests under xvfb, package names in the apt step).
 - Optional: pluginval at strictness 10 on the VST3 on Linux and Windows too (`pluginval_Linux.zip`,
@@ -125,6 +129,9 @@ runners. The goldens and every test still pass with each engine, and plan 2.6 ha
 - **Done when:** CI is green on all three after the change.
 
 ## 4. M4's Instruments check
+
+**Status (2026-10-06): done.** `tools/meter_profile.py`; results in plan 5 (M4): no meter samples when off, hidden or
+closed, hundreds when metering.
 
 Confirm, with a profiler rather than counters, that nothing of the meter runs when the meter is off, the editor is
 closed or the window is hidden: no `CorrelationAnalyser` and no `MeterScreen` paint/timer samples.
@@ -136,7 +143,13 @@ closed or the window is hidden: no `CorrelationAnalyser` and no `MeterScreen` pa
 
 ## 5. Release checklist items that need no credentials
 
-- **Universal binary:** build `-DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"` locally, run the DSP tests natively and under
+**Status (2026-10-06):** both macOS architectures checked (plan M5; releases stay separate arm64 and Intel builds, R14). Notices: every installer and release zip now ships
+`installer/stage_docs.sh`'s output: `Readme.txt` (the README's quick start, with the AGPLv3 source pointer) and
+`licenses/` (the project's AGPLv3, PFFFT's licence, both fonts' OFL, `THIRD_PARTY_NOTICES.md`), installed beside the
+plugins (not into the signed bundles): `/Library/Application Support/Phase Align` (and a readme page in the .pkg),
+`Program Files\Phase Align`, `/usr/share/doc/phasealign`. `release.yml` reviewed (plan M5).
+
+- **Both architectures** (separate releases, not universal: R14): build `-DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"` once to check, run the DSP tests natively and under
   Rosetta (`arch -x86_64 <binary>`; Rosetta is installed), and `lipo -info` the AU and VST3.
 - **OFL font notices:** check each installer (`installer/macos`, `installer/windows`, `installer/linux`) ships
   `assets/fonts/licenses/`, and add them where missing.
