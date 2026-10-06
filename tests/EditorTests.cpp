@@ -5,6 +5,8 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <complex>
+
 using namespace pa::params;
 using Catch::Approx;
 using UiProps = PhaseAlignProcessor::UiProps;
@@ -612,4 +614,85 @@ TEST_CASE("range states", "[.][snapshot]")
         juce::FileOutputStream out(file);
         REQUIRE(juce::PNGImageFormat().writeImageToStream(image, out));
     }
+}
+
+// The number on the panel is the phase the plugin applies, measured end to end: set the parameters, run a sine at the
+// reference frequency through the processor, and compare the measured lag (against the input delayed by the reported
+// latency) with the phase readout's digits. High at RANGE 180 is the exception that the asterisk marks: its readout is
+// the first section's angle, and the lag at its first reference (75 Hz) is that plus the second section's small share.
+TEST_CASE("the phase readout is the phase the plugin applies", "[editor][readout]")
+{
+    const auto fs = 48000.0;
+    struct Case
+    {
+        float range, mode; // RANGE 0 / 1; mode 0 High, 1 Low, 2 Constant
+        double frequency;  // the reference frequency of the number shown
+        const char* name;
+        bool marked; // High at RANGE 180
+    };
+    const Case cases[] = {
+        {0.0f, 1.0f, 75.1, "Low, RANGE 90", false},        {0.0f, 0.0f, 150.1, "High, RANGE 90", false},
+        {1.0f, 1.0f, 150.1, "Low, RANGE 180", false},      {1.0f, 0.0f, 75.1, "High, RANGE 180", true},
+        {0.0f, 2.0f, 1000.0, "Constant, RANGE 90", false}, {1.0f, 2.0f, 1000.0, "Constant, RANGE 180", false}};
+    for (const auto& c : cases)
+        for (const auto knob : {0.1f, 0.25f, 0.5f, 0.75f, 1.0f})
+        {
+            INFO(c.name << ", knob " << knob);
+            PhaseAlignProcessor proc;
+            proc.prepareToPlay(fs, 512);
+            setParam(proc, id::phaseRange, c.range);
+            setParam(proc, id::phaseMode, c.mode);
+            setParam(proc, id::phase, knob);
+            proc.dispatchPendingMessages();
+
+            auto editor = makeEditor(proc);
+            const auto readouts = childrenOfType<pa::ui::Readout>(*editor);
+            REQUIRE(readouts.size() == 2);
+            auto* phaseReadout = readouts[0]->getX() > readouts[1]->getX() ? readouts[0] : readouts[1];
+            const auto shown = phaseReadout->getDigits().getDoubleValue();
+
+            // 1.5 s of a sine at the reference frequency, then the lag from the last 0.5 s.
+            const auto total = (int)(1.5 * fs), block = 512;
+            const auto w = 2.0 * M_PI * c.frequency / fs;
+            std::vector<float> in((size_t)total), out((size_t)total);
+            for (int i = 0; i < total; ++i)
+                in[(size_t)i] = (float)(0.5 * std::sin(w * i));
+            juce::MidiBuffer midi;
+            for (int start = 0; start < total; start += block)
+            {
+                const auto n = std::min(block, total - start);
+                juce::AudioBuffer<float> b(4, n);
+                b.clear();
+                for (int i = 0; i < n; ++i)
+                {
+                    b.setSample(0, i, in[(size_t)(start + i)]);
+                    b.setSample(1, i, in[(size_t)(start + i)]);
+                }
+                proc.processBlock(b, midi);
+                for (int i = 0; i < n; ++i)
+                    out[(size_t)(start + i)] = b.getSample(0, i);
+                proc.dispatchPendingMessages();
+            }
+            const auto latency = proc.getLatencySamples();
+            std::complex<double> cin = 0.0, cout = 0.0;
+            for (int i = total - (int)(0.5 * fs); i < total; ++i)
+            {
+                const auto e = std::polar(1.0, -w * i);
+                cin += (double)in[(size_t)i] * e;
+                cout += (double)out[(size_t)i] * e;
+            }
+            // out(n) = in(n - latency) rotated by the lag: arg(cin) - w L - arg(cout) = lag
+            auto lag = std::arg(cin) - w * latency - std::arg(cout);
+            lag = std::fmod(lag * 180.0 / M_PI, 360.0); // the latency's own turn can be many cycles
+            if (lag < 0.0)
+                lag += 360.0;
+
+            if (c.marked)
+            {
+                CHECK(lag - shown >= -0.3);
+                CHECK(lag - shown <= 6.0); // the second section's share at the first reference
+            }
+            else
+                CHECK(lag == Approx(shown).margin(0.3));
+        }
 }
