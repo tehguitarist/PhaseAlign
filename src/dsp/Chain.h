@@ -86,9 +86,10 @@ class PolarityStage
 
 // Phase stage: Hi/Lo (AllpassCascade, no latency) or Constant (ConstantRotator, latency L). The on/off crossfade mixes
 // the wet path with the dry one: the input in Hi/Lo, the input delayed by L in Constant, so phase on/off never changes
-// the latency. In Hi/Lo the cascade runs while the stage is off (warm, R2), and the rotator keeps only its history, so
-// it can start at once. Which of the two is active (Constant or not) changes only through setConstant(), which the
-// chain calls while its output is silent (a latency change). Settled off in Hi/Lo, the output is the input, bit-exact.
+// the latency. The cascade always runs (warm, R2), even while the stage is off or Constant is active, and in Hi/Lo the
+// rotator keeps only its history, so either can start at once. Which of the two is active (Constant or not) changes
+// only through setConstant(), which the chain calls while its output is silent (a latency change). Settled off in
+// Hi/Lo, the output is the input, bit-exact.
 class PhaseStage
 {
   public:
@@ -104,7 +105,6 @@ class PhaseStage
     void reset(const ChainSettings& s)
     {
         constant = s.phaseMode == PhaseMode::constant;
-        thetaTarget = s.phaseDegrees;
         hiLoMode = s.phaseMode == PhaseMode::low ? AllpassCascade::Mode::lo : AllpassCascade::Mode::hi;
         cascade.reset(hiLoMode, s.phaseDegrees);
         rotator.reset(s.phaseDegrees);
@@ -114,7 +114,6 @@ class PhaseStage
     void setTargets(const ChainSettings& s)
     {
         wetGain.setTarget(s.phaseOn ? 1.0f : 0.0f);
-        thetaTarget = s.phaseDegrees;
         cascade.setTarget(s.phaseDegrees);
         rotator.setTarget(s.phaseDegrees);
         if (s.phaseMode != PhaseMode::constant)
@@ -126,14 +125,10 @@ class PhaseStage
 
     // Only while the output is silent. Back to Hi/Lo, the cascade (which doesn't run in Constant) starts from a clear
     // state at the current mode and angle.
-    void setConstant(bool on)
-    {
-        if (on == constant)
-            return;
-        constant = on;
-        if (! constant)
-            cascade.reset(hiLoMode, thetaTarget);
-    }
+    // Only while the output is silent. The cascade keeps running in Constant (warm, unheard), so going back to Hi/Lo
+    // never restarts it from a clear state on a signal that is already playing (a restart left a burst near Nyquist
+    // in its state; plan 2.3).
+    void setConstant(bool on) { constant = on; }
 
     bool isConstant() const { return constant; }
     int latency() const { return constant ? rotator.getLatency() : 0; }
@@ -146,52 +141,59 @@ class PhaseStage
 
     void process(float* const* io, int numChannels, int n)
     {
-        float wet[maxChannels][DelayStage::maxBlock], dry[maxChannels][DelayStage::maxBlock];
-        float *wetPtr[maxChannels], *dryPtr[maxChannels];
+        float scratch[maxChannels][DelayStage::maxBlock];
+        float* scratchPtr[maxChannels];
         for (int ch = 0; ch < numChannels; ++ch)
-        {
-            wetPtr[ch] = wet[ch];
-            dryPtr[ch] = dry[ch];
-        }
-        const auto settledOff = wetGain.isSettled() && wetGain.getCurrent() <= 0.0f;
+            scratchPtr[ch] = scratch[ch];
+        const auto settled = wetGain.isSettled();
+        const auto on = wetGain.getCurrent() > 0.0f; // settled: on (1) or off (0)
 
         if (constant)
         {
-            rotator.process(io, wetPtr, dryPtr, numChannels, n, ! settledOff);
+            float warm[maxChannels][DelayStage::maxBlock];
+            float* warmPtr[maxChannels];
+            for (int ch = 0; ch < numChannels; ++ch)
+            {
+                warmPtr[ch] = warm[ch];
+                std::copy(io[ch], io[ch] + n, warm[ch]);
+            }
+            cascade.process(warmPtr, numChannels, n); // warm and unheard, ready for Hi/Lo
+
+            if (settled) // the wet or the dry path alone, straight into io
+            {
+                if (on)
+                    rotator.process(io, io, scratchPtr, numChannels, n, true);
+                else
+                    rotator.process(io, nullptr, io, numChannels, n, false);
+                return;
+            }
+            rotator.process(io, scratchPtr, io, numChannels, n, true); // wet into scratch, dry into io
         }
         else
         {
             rotator.process(io, nullptr, nullptr, numChannels, n, false); // history only
-            for (int ch = 0; ch < numChannels; ++ch)
+            if (settled && on)
             {
-                std::copy(io[ch], io[ch] + n, wet[ch]);
-                std::copy(io[ch], io[ch] + n, dry[ch]);
+                cascade.process(io, numChannels, n);
+                return;
             }
-            cascade.process(wetPtr, numChannels, n); // warm even while off (R2)
-        }
-
-        if (wetGain.isSettled())
-        {
-            const auto* from = settledOff ? dry : wet;
             for (int ch = 0; ch < numChannels; ++ch)
-                std::copy(from[ch], from[ch] + n, io[ch]);
-            return;
+                std::copy(io[ch], io[ch] + n, scratch[ch]);
+            cascade.process(scratchPtr, numChannels, n); // warm even while off (R2)
+            if (settled)
+                return; // off: the output is the input
         }
 
         float w[DelayStage::maxBlock];
         wetGain.fill(w, n);
         for (int ch = 0; ch < numChannels; ++ch)
-        {
-            std::copy(dry[ch], dry[ch] + n, io[ch]);
-            crossfadeInto(io[ch], wet[ch], w, n);
-        }
+            crossfadeInto(io[ch], scratch[ch], w, n);
     }
 
   private:
     AllpassCascade cascade;
     ConstantRotator rotator;
     AllpassCascade::Mode hiLoMode = AllpassCascade::Mode::hi;
-    double thetaTarget = 0.0;
     bool constant = false;
     LinearRamp wetGain;
 };

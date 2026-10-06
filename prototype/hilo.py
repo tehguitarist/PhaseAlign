@@ -89,7 +89,10 @@ class HiLo:
     """Stereo-linked Hi/Lo cascade with angle smoothing and the Hi<->Lo k-glide (R3). The reference for
     src/dsp/AllpassCascade.h (golden-tested, tests/golden/).
 
-    TPT section: v = (x - s)*G, lp = v + s, s' = lp + v, y = 2*lp - x, with G = 1/(1 + k).
+    Each section is the all-pass of a TPT one-pole with G = 1/(1 + k): H(z) = (-p + z^-1)/(1 - p z^-1), p = 1 - 2G,
+    run in direct form I (y = -p x + x1 + p y1; the state is the last input and output). Until 2026-10-06 it ran as the
+    TPT structure, whose state at k = kMin holds a near-lossless Nyquist resonance that came out as a burst when the
+    knob left 0 or 90 degrees; the transfer function is the same, so static settings are unchanged.
 
     Coefficients run on a fixed grid of `sub` samples: at the start of each cell the angle (a linear ramp of fixed
     length) and the glide move on by one cell, and each section's G is interpolated linearly per sample from its value
@@ -105,7 +108,8 @@ class HiLo:
         self.smooth_n = max(1, round(smooth_ms * 1e-3 * fs))
         self.glide_n = max(1, round(glide_ms * 1e-3 * fs))
         self.glide = 1.0  # 0 → previous mode's k, 1 → current mode's k
-        self.s = None
+        self.x1 = None  # per section: last input and last output (direct form I)
+        self.y1 = None
         self.until = 0  # samples left in the current cell
         self.g0 = self.g1 = None
 
@@ -140,8 +144,9 @@ class HiLo:
 
     def process(self, x):
         x = np.atleast_2d(np.asarray(x, dtype=np.float64))
-        if self.s is None:
-            self.s = np.zeros((2, x.shape[0]))
+        if self.x1 is None:
+            self.x1 = np.zeros((2, x.shape[0]))
+            self.y1 = np.zeros((2, x.shape[0]))
         y = np.empty_like(x)
         n = x.shape[1]
         i = 0
@@ -153,28 +158,29 @@ class HiLo:
                     self.g1 = self._g()
                 else:
                     self.g1 = self.g0
-                self.s[np.abs(self.s) < 1e-20] = 0.0
+                for v in (self.x1, self.y1):
+                    v[np.abs(v) < 1e-20] = 0.0
                 self.until = self.sub
             m = min(n - i, self.until)
             done = self.sub - self.until
             seg = x[:, i:i + m].copy()
             if np.array_equal(self.g0, self.g1):  # static: a plain first-order filter per section
                 for k in range(2):
-                    G = self.g0[k]
-                    c = 2.0 * G - 1.0
-                    zi = (2.0 * (1.0 - G) * self.s[k])[:, None]
-                    seg, zf = lfilter([c, 1.0], [1.0, c], seg, axis=-1, zi=zi)
-                    self.s[k] = zf[:, 0] / (2.0 * (1.0 - G))
+                    p = 1.0 - 2.0 * self.g0[k]
+                    zi = (self.x1[k] + p * self.y1[k])[:, None]  # transposed form's state from the last x and y
+                    out = lfilter([-p, 1.0], [1.0, -p], seg, axis=-1, zi=zi)[0]
+                    self.x1[k], self.y1[k] = seg[:, -1], out[:, -1]
+                    seg = out
             else:
                 for j in range(m):
                     t = (done + j + 1) / self.sub
                     v_in = seg[:, j]
                     for k in range(2):
                         G = self.g0[k] + (self.g1[k] - self.g0[k]) * t
-                        v = (v_in - self.s[k]) * G
-                        lp = v + self.s[k]
-                        self.s[k] = lp + v
-                        v_in = 2.0 * lp - v_in
+                        p = 1.0 - 2.0 * G
+                        out = self.x1[k] - p * v_in + p * self.y1[k]
+                        self.x1[k], self.y1[k] = v_in, out
+                        v_in = out
                     seg[:, j] = v_in
             y[:, i:i + m] = seg
             self.until -= m

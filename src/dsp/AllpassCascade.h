@@ -7,7 +7,7 @@
 #include <cmath>
 #include <functional>
 
-// Hi/Lo phase modes (IMPLEMENTATION_PLAN 2.3): two first-order TPT all-pass sections in series, double state, the
+// Hi/Lo phase modes (IMPLEMENTATION_PLAN 2.3): two first-order all-pass sections in series, double state, the
 // knob angle smoothed linearly over smoothMs and mapped to the sections' k (PhaseMapping.h). Switching Hi <-> Lo glides
 // log k from the old mode's mapping to the new one's over glideMs, so the signal stays all-pass throughout (R3);
 // switching back during a glide reverses it from where it is. Reference: prototype/hilo.py (HiLo), golden-tested.
@@ -19,7 +19,13 @@
 // from near Nyquist (just past 0 and 90 degrees) would step and click. While the angle is static and no glide is
 // running, no tan() runs and G is constant.
 //
-// TPT section: v = (x - s) G, lp = v + s, s' = lp + v, y = 2 lp - x, with G = 1 / (1 + k).
+// Each section is the first-order all-pass of a TPT one-pole with G = 1 / (1 + k), H(z) = (-p + z^-1) / (1 - p z^-1)
+// with p = 1 - 2G, run in direct form I: y = -p x + x1 + p y1, where x1 and y1 are its last input and output. (It was
+// run as the TPT structure itself until 2026-10-06. Near identity, k = kMin, the pole is just inside z = -1 and the TPT
+// state holds a near-lossless resonance at Nyquist driven by the input's top end, hidden from the output while k stays
+// there; when the knob left 0 or 90 degrees it came out as a burst, up to 12 times the input on white noise. Direct
+// form I keeps only past samples as state, so there is nothing hidden to come out. The transfer function is the same,
+// so a static setting sounds the same; plan 2.3.)
 namespace pa::dsp
 {
 class AllpassCascade
@@ -51,8 +57,8 @@ class AllpassCascade
         step = 0.0;
         glide = 1.0;
         untilUpdate = 0;
-        for (auto& section : state)
-            section.fill(0.0);
+        for (auto& channel : state)
+            channel.fill(0.0);
         stale = true;
     }
 
@@ -104,31 +110,57 @@ class AllpassCascade
                 startCell();
             const auto m = std::min(n - start, untilUpdate);
             const auto done = updateInterval - untilUpdate;
-            for (int ch = 0; ch < numChannels; ++ch)
-            {
-                auto& s = state[(size_t)ch];
-                auto* x = io[ch] + start;
-                for (int i = 0; i < m; ++i)
-                {
-                    const auto t = interpolating ? (double)(done + i + 1) / updateInterval : 1.0;
-                    double y = x[i];
-                    for (int k = 0; k < 2; ++k)
-                    {
-                        const auto g = g0[k] + (g1[k] - g0[k]) * t;
-                        const auto v = (y - s[(size_t)k]) * g;
-                        const auto lp = v + s[(size_t)k];
-                        s[(size_t)k] = lp + v;
-                        y = 2.0 * lp - y;
-                    }
-                    x[i] = (float)y;
-                }
-            }
+            // Channels in pairs: their recursions are independent, so running two at once hides each one's latency.
+            int ch = 0;
+            for (; ch + 2 <= numChannels; ch += 2)
+                runCell<2>(io + ch, state.data() + ch, start, m, done);
+            if (ch < numChannels)
+                runCell<1>(io + ch, state.data() + ch, start, m, done);
             untilUpdate -= m;
             start += m;
         }
     }
 
   private:
+    // m samples of C channels from `start`, `done` samples into the cell. While not interpolating g0 == g1. State per
+    // channel: the cascade's last input, section 1's last output (section 2's last input) and section 2's last output.
+    template <int C>
+    void runCell(float* const* io, std::array<double, 3>* s, int start, int m, int done)
+    {
+        double x1[C], y1[C], y2[C];
+        float* x[C];
+        for (int c = 0; c < C; ++c)
+        {
+            x1[c] = s[c][0];
+            y1[c] = s[c][1];
+            y2[c] = s[c][2];
+            x[c] = io[c] + start;
+        }
+        for (int i = 0; i < m; ++i)
+        {
+            auto ga = g1[0], gb = g1[1];
+            if (interpolating)
+            {
+                const auto t = (double)(done + i + 1) / updateInterval;
+                ga = g0[0] + (g1[0] - g0[0]) * t;
+                gb = g0[1] + (g1[1] - g0[1]) * t;
+            }
+            const auto pa = 1.0 - 2.0 * ga, pb = 1.0 - 2.0 * gb;
+            for (int c = 0; c < C; ++c)
+            {
+                const double in = x[c][i];
+                const auto a = x1[c] - pa * in + pa * y1[c];
+                const auto b = y1[c] - pb * a + pb * y2[c];
+                x1[c] = in;
+                y1[c] = a;
+                y2[c] = b;
+                x[c][i] = (float)b;
+            }
+        }
+        for (int c = 0; c < C; ++c)
+            s[c] = {x1[c], y1[c], y2[c]};
+    }
+
     static const mapping::ModeShape& shape(Mode m) { return m == Mode::hi ? mapping::hi : mapping::lo; }
 
     // A new cell: from the coefficients now (g0) to those after one cell's move of the angle and glide (g1).
@@ -168,8 +200,8 @@ class AllpassCascade
     // use).
     void flushDenormals()
     {
-        for (auto& section : state)
-            for (auto& v : section)
+        for (auto& channel : state)
+            for (auto& v : channel)
                 if (std::abs(v) < 1.0e-20)
                     v = 0.0;
     }
@@ -193,6 +225,6 @@ class AllpassCascade
     int untilUpdate = 0;
     bool stale = true, interpolating = false;
     double g0[2] = {1.0, 1.0}, g1[2] = {1.0, 1.0};
-    std::array<std::array<double, 2>, maxChannels> state{};
+    std::array<std::array<double, 3>, maxChannels> state{}; // per channel: x1, section 1's y1, section 2's y1
 };
 } // namespace pa::dsp
