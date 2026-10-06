@@ -2,6 +2,7 @@
 #include "params/Parameters.h"
 #include "ui/Design.h"
 
+#include <array>
 #include <cmath>
 
 namespace pa::ui
@@ -31,15 +32,20 @@ MeterScreen::MeterScreen(const SourceAssets& assetsIn, meter::MeterCapture& capt
 {
     setOpaque(true);
     setInterceptsMouseClicks(true, false); // only the view labels: see hitTest
-    setTooltip("Click a label to switch the view: FREQUENCY, the correlation with the sidechain per frequency; TIME "
-               "OFFSET, how far this track is from the sidechain, by waveform and by attack (for drums); PHASE, the angle between them (a slope is a delay, "
-               "a flat offset a rotation); BANDS, the correlation in six wide bands. SLOW or FAST sets the "
-               "averaging. HOLD freezes the screen (it also freezes while the host is stopped); frozen, drag across "
-               "TIME OFFSET to preview a delay on every view. INPUT is this track before the plugin, OUTPUT after it.");
+    setTooltip("Click the middle label to choose the view: FREQUENCY, the correlation with the sidechain per "
+               "frequency; TIME OFFSET, how far this track is from the sidechain, by waveform and by attack (for "
+               "drums); PHASE, the angle between them (a slope is a delay, a flat offset a rotation); BANDS, the "
+               "correlation in six wide bands; SCOPE, the waveforms on top of each other around a hit (wheel to "
+               "zoom). SLOW or FAST sets the averaging. HOLD freezes the screen (it also freezes while the host is "
+               "stopped); frozen, drag across TIME OFFSET, or slide the input in SCOPE, to preview a delay on every "
+               "view. INPUT is this track before the plugin, OUTPUT after it.");
     for (auto& s : scratch)
         s.resize((size_t)meter::MeterCapture::capacity);
     if (capture.getSampleRate() > 0.0)
+    {
         analyser.prepare(capture.getSampleRate());
+        scopeBuffer.prepare(capture.getSampleRate());
+    }
 }
 
 MeterScreen::~MeterScreen()
@@ -62,7 +68,85 @@ void MeterScreen::setView(View newView)
     view = newView;
     if (view == View::time)
         analyser.computeLag(isFrozen());
+    if (view == View::scope)
+        refreshTrigger(true);
     repaint();
+}
+
+void MeterScreen::setScopeSpanMs(double ms)
+{
+    scopeSpanMs = juce::jlimit(0.5, 200.0, ms);
+    repaint();
+}
+
+// The trigger is the loudest recent onset of the sidechain. While live, it is looked for every few ticks and kept
+// while it stays in the buffer, unless a clearly stronger one arrives; frozen, it stays where it is.
+void MeterScreen::refreshTrigger(bool force)
+{
+    if (isFrozen() && ! force)
+        return;
+    const auto onset = scopeBuffer.findOnset(3.0);
+    const auto gone = triggerIndex < 0 || triggerIndex < scopeBuffer.end() - (long long)(3.2 * scopeBuffer.getSampleRate());
+    if (onset.index >= 0 && (force || gone || onset.strength > 1.25f * triggerStrength))
+    {
+        triggerIndex = onset.index;
+        triggerStrength = onset.strength;
+    }
+    else if (gone && onset.index < 0)
+    {
+        triggerIndex = -1;
+        triggerStrength = 0.0f;
+    }
+}
+
+void MeterScreen::mouseWheelMove(const juce::MouseEvent&, const juce::MouseWheelDetails& wheel)
+{
+    if (view != View::scope || state != State::metering)
+        return;
+    // A notch is a step of a quarter of the span; scroll up zooms in.
+    setScopeSpanMs(scopeSpanMs * std::pow(0.8, (double)wheel.deltaY * 4.0));
+}
+
+void MeterScreen::showViewMenu()
+{
+    if (viewMenuHook)
+    {
+        viewMenuHook();
+        return;
+    }
+    // A menu in the screen's own look: black, phosphor text, opening upwards from the selector.
+    struct MenuLook : juce::LookAndFeel_V4
+    {
+        explicit MenuLook(juce::Font f) : font(std::move(f))
+        {
+            setColour(juce::PopupMenu::backgroundColourId, design::screenBlack);
+            setColour(juce::PopupMenu::textColourId, design::meterAxisText);
+            setColour(juce::PopupMenu::highlightedBackgroundColourId, design::phosphor.withAlpha(0.25f));
+            setColour(juce::PopupMenu::highlightedTextColourId, design::phosphor);
+        }
+        juce::Font getPopupMenuFont() override { return font; }
+        juce::Font font;
+    };
+    menuLookAndFeel = std::make_unique<MenuLook>(meterFont(assets, 13.0f * getScale(), true).withExtraKerningFactor(0.15f));
+
+    juce::PopupMenu menu;
+    menu.setLookAndFeel(menuLookAndFeel.get());
+    const std::pair<View, const char*> items[] = {{View::frequency, "FREQUENCY"}, {View::time, "TIME OFFSET"},
+                                                  {View::phase, "PHASE"},         {View::bands, "BANDS"},
+                                                  {View::scope, "SCOPE"}};
+    for (const auto& [v, name] : items)
+        menu.addItem((int)v + 1, name, true, v == view);
+    const auto area = localAreaToGlobal(controlArea(Control::view)).getSmallestIntegerContainer();
+    juce::Component::SafePointer<MeterScreen> safe(this);
+    menu.showMenuAsync(juce::PopupMenu::Options()
+                           .withTargetScreenArea(area)
+                           .withPreferredPopupDirection(juce::PopupMenu::Options::PopupDirection::upwards)
+                           .withMinimumWidth(area.getWidth()),
+                       [safe](int result)
+                       {
+                           if (safe != nullptr && result > 0)
+                               safe->chooseView((View)(result - 1));
+                       });
 }
 
 void MeterScreen::setSpeed(Speed newSpeed)
@@ -137,6 +221,8 @@ bool MeterScreen::poll()
     const auto fs = capture.getSampleRate();
     if (! juce::exactlyEqual(fs, analyser.getSampleRate()))
         analyser.prepare(fs);
+    if (! juce::exactlyEqual(fs, scopeBuffer.getSampleRate()))
+        scopeBuffer.prepare(fs);
 
     float* dest[meter::MeterCapture::numStreams];
     for (int s = 0; s < meter::MeterCapture::numStreams; ++s)
@@ -148,6 +234,8 @@ bool MeterScreen::poll()
     lastSamplesMs = nowMs();
     if (isFrozen()) // drained and dropped: the picture stays as it was
         return false;
+    scopeBuffer.push(dest[meter::MeterCapture::input], dest[meter::MeterCapture::output],
+                     dest[meter::MeterCapture::sidechain], n);
     const auto frames = analyser.process(dest[meter::MeterCapture::input], dest[meter::MeterCapture::output],
                                          dest[meter::MeterCapture::sidechain], n);
     if (frames > 0 && view == View::time)
@@ -174,6 +262,8 @@ void MeterScreen::timerCallback()
 
     const auto fresh = isTimerRunning() && poll();
     freezeChanged(); // the host's transport can stop or start under us
+    if (view == View::scope && ++triggerTick % 3 == 0)
+        refreshTrigger(false);
     const auto newState = currentState();
     if (newState == state && ! (fresh && state == State::metering))
         return;
@@ -212,14 +302,28 @@ namespace
 {
 const char* controlText(int control)
 {
-    static const char* const text[] = {"", "FREQUENCY", "TIME OFFSET", "PHASE", "BANDS", "SLOW", "FAST", "HOLD"};
+    static const char* const text[] = {"", "", "SLOW", "FAST", "HOLD"};
     return text[control];
+}
+
+const char* viewName(MeterScreen::View v)
+{
+    switch (v)
+    {
+        case MeterScreen::View::frequency: return "FREQUENCY";
+        case MeterScreen::View::time: return "TIME OFFSET";
+        case MeterScreen::View::phase: return "PHASE";
+        case MeterScreen::View::bands: return "BANDS";
+        case MeterScreen::View::scope: return "SCOPE";
+    }
+    return "";
 }
 } // namespace
 
 juce::Rectangle<float> MeterScreen::controlArea(Control c) const
 {
-    // The bottom row: the three views centred under the plot, SLOW and FAST at its left end, HOLD at its right end.
+    // The bottom row: SLOW and FAST at its left end, the view selector in the middle (the name of the view, with an
+    // up-pointing triangle: its menu opens upwards), HOLD at its right end.
     const auto s = getScale();
     const auto font = meterFont(assets, 13.0f * s).withExtraKerningFactor(0.2f);
     const auto left = lx(design::meterPlotLeft), right = lx(design::meterPlotRight);
@@ -227,23 +331,19 @@ juce::Rectangle<float> MeterScreen::controlArea(Control c) const
     const auto rowY = ly(design::meterFreqTitleY) - 14.0f * s;
     const auto pad = 14.0f * s, gap = 28.0f * s, height = 26.0f * s;
     const auto width = [&](Control k) { return textWidth(font, controlText((int)k)) + 2.0f * pad; };
-    const auto box = [&](float x, Control k) { return juce::Rectangle<float>(x, rowY, width(k), height); };
+    const auto box = [&](float x, float w) { return juce::Rectangle<float>(x, rowY, w, height); };
 
-    const auto viewsWidth =
-        width(Control::frequency) + width(Control::time) + width(Control::phase) + width(Control::bands) + 3.0f * gap;
-    // Centred under the plot, but never over SLOW and FAST.
-    const auto speedRight = left - pad + width(Control::slow) + 0.5f * gap + width(Control::fast);
-    const auto viewsLeft = juce::jmax(centre - 0.5f * viewsWidth, speedRight + gap);
     switch (c)
     {
-        case Control::frequency: return box(viewsLeft, c);
-        case Control::time: return box(viewsLeft + width(Control::frequency) + gap, c);
-        case Control::phase: return box(viewsLeft + width(Control::frequency) + width(Control::time) + 2.0f * gap, c);
-        case Control::bands:
-            return box(viewsLeft + width(Control::frequency) + width(Control::time) + width(Control::phase) + 3.0f * gap, c);
-        case Control::slow: return box(left - pad, c);
-        case Control::fast: return box(left - pad + width(Control::slow) + 0.5f * gap, c);
-        case Control::hold: return box(right + pad - width(c), c);
+        case Control::view:
+        {
+            // Wide enough for the longest name, so the selector doesn't move as the view changes.
+            const auto w = textWidth(font, "TIME OFFSET") + 2.0f * pad + 26.0f * s;
+            return box(centre - 0.5f * w, w);
+        }
+        case Control::slow: return box(left - pad, width(c));
+        case Control::fast: return box(left - pad + width(Control::slow) + 0.5f * gap, width(c));
+        case Control::hold: return box(right + pad - width(c), width(c));
         case Control::none: break;
     }
     return {};
@@ -251,7 +351,7 @@ juce::Rectangle<float> MeterScreen::controlArea(Control c) const
 
 MeterScreen::Control MeterScreen::controlAt(juce::Point<float> p) const
 {
-    for (const auto c : {Control::frequency, Control::time, Control::phase, Control::bands, Control::slow, Control::fast, Control::hold})
+    for (const auto c : {Control::view, Control::slow, Control::fast, Control::hold})
         if (controlArea(c).contains(p))
             return c;
     return Control::none;
@@ -259,7 +359,7 @@ MeterScreen::Control MeterScreen::controlAt(juce::Point<float> p) const
 
 bool MeterScreen::scrubArea(juce::Point<float> p) const
 {
-    return isFrozen() && view == View::time && state == State::metering &&
+    return isFrozen() && (view == View::time || view == View::scope) && state == State::metering &&
            juce::Rectangle<float>::leftTopRightBottom(lx(design::meterPlotLeft), ly(design::meterPlusOneY),
                                                       lx(design::meterPlotRight), ly(design::meterMinusOneY))
                .contains(p);
@@ -275,24 +375,32 @@ bool MeterScreen::hitTest(int x, int y)
 
 void MeterScreen::scrubTo(float x)
 {
-    setPreviewDelayMs(msForX(x));
+    if (view == View::scope)
+    {
+        // Sliding: the input moves with the mouse, so the delay is how far it has been dragged, from where it was.
+        const auto width = lx(design::meterPlotRight) - lx(design::meterPlotLeft);
+        setPreviewDelayMs(slipStartMs + (double)(x - slipStartX) * scopeSpanMs / (double)width);
+    }
+    else
+        setPreviewDelayMs(msForX(x));
 }
 
 void MeterScreen::mouseDown(const juce::MouseEvent& e)
 {
     switch (controlAt(e.position))
     {
-        case Control::frequency: onViewSelected ? onViewSelected(View::frequency) : setView(View::frequency); return;
-        case Control::time: onViewSelected ? onViewSelected(View::time) : setView(View::time); return;
-        case Control::phase: onViewSelected ? onViewSelected(View::phase) : setView(View::phase); return;
-        case Control::bands: onViewSelected ? onViewSelected(View::bands) : setView(View::bands); return;
+        case Control::view: showViewMenu(); return;
         case Control::slow: onSpeedSelected ? onSpeedSelected(Speed::slow) : setSpeed(Speed::slow); return;
         case Control::fast: onSpeedSelected ? onSpeedSelected(Speed::fast) : setSpeed(Speed::fast); return;
         case Control::hold: setHeld(! held); return;
         case Control::none: break;
     }
     if (scrubArea(e.position))
+    {
+        slipStartX = e.position.x;
+        slipStartMs = analyser.isPreviewing() ? analyser.previewDelayMs() : 0.0;
         scrubTo(e.position.x);
+    }
 }
 
 void MeterScreen::mouseDrag(const juce::MouseEvent& e)
@@ -392,6 +500,10 @@ void MeterScreen::paintGrid(juce::Graphics& g) const
                 g.drawDashedLine({left + slot * (float)b, top, left + slot * (float)b, bottom}, dashes, 2, thin);
         }
     }
+    else if (view == View::scope)
+    {
+        // The time ticks move with the zoom, so they are drawn with the traces.
+    }
     else if (view != View::time)
     {
         for (const auto hz : gridHz)
@@ -460,19 +572,21 @@ void MeterScreen::paintGrid(juce::Graphics& g) const
         const auto x = j == juce::Justification::left ? area.getX() + pad : area.getRight() - pad;
         drawTextAt(g, viewFont, controlText((int)c), x, titleY, j);
     };
-    label(Control::frequency, view == View::frequency, juce::Justification::left);
-    label(Control::time, view == View::time, juce::Justification::left);
-    label(Control::phase, view == View::phase, juce::Justification::left);
-    label(Control::bands, view == View::bands, juce::Justification::left);
     label(Control::slow, analyser.getSpeed() == Speed::slow, juce::Justification::left);
     label(Control::fast, analyser.getSpeed() == Speed::fast, juce::Justification::left);
     label(Control::hold, isFrozen(), juce::Justification::right);
-    g.setColour(design::meterAxisText.withAlpha(0.3f));
-    for (const auto between : {std::pair{Control::frequency, Control::time}, std::pair{Control::time, Control::phase},
-                               std::pair{Control::phase, Control::bands}})
+
+    // The view selector: the current view's name, with a triangle pointing up (the menu opens upwards), in a thin frame.
     {
-        const auto sepX = 0.5f * (controlArea(between.first).getRight() + controlArea(between.second).getX());
-        g.drawLine(sepX, titleY - 11.0f * s, sepX, titleY + 2.0f * s, thin);
+        const auto area = controlArea(Control::view);
+        g.setColour(design::meterAxisText.withAlpha(0.95f));
+        drawTextAt(g, viewFont, viewName(view), area.getX() + 14.0f * s, titleY, juce::Justification::left);
+        juce::Path triangle;
+        const auto cx = area.getRight() - 18.0f * s, cy = titleY - 5.0f * s;
+        triangle.addTriangle(cx - 6.0f * s, cy + 3.5f * s, cx + 6.0f * s, cy + 3.5f * s, cx, cy - 4.0f * s);
+        g.fillPath(triangle);
+        g.setColour(design::meterAxisText.withAlpha(0.35f));
+        g.drawRect(juce::Rectangle<float>(area.getX(), titleY - 17.0f * s, area.getWidth(), 26.0f * s), thin);
     }
     if (isFrozen()) // a frame round HOLD while the picture is frozen
     {
@@ -524,6 +638,10 @@ void MeterScreen::paintLive(juce::Graphics& g) const
     else if (view == View::bands)
     {
         paintBands(g);
+    }
+    else if (view == View::scope)
+    {
+        paintScope(g);
     }
     else
     {
@@ -617,6 +735,149 @@ void MeterScreen::paintBands(juce::Graphics& g) const
     }
 }
 
+void MeterScreen::paintScope(juce::Graphics& g) const
+{
+    // The three streams around the trigger, on top of each other, each scaled to its own peak: this is for comparing
+    // shapes and lining up where the hit starts. The sidechain is the pale one, the input dim green, the output
+    // bright green (the preview, while there is one, in its place).
+    const auto s = getScale();
+    const auto left = lx(design::meterPlotLeft), right = lx(design::meterPlotRight);
+    const auto top = ly(design::meterPlusOneY), bottom = ly(design::meterMinusOneY);
+    const auto fs = scopeBuffer.getSampleRate();
+    const auto labelFont = meterFont(assets, 14.0f * s);
+    const auto labelY = ly(design::meterFreqLabelY) + 7.0f * s;
+
+    if (triggerIndex < 0 || fs <= 0.0)
+    {
+        g.setColour(design::meterAxisText.withAlpha(0.5f));
+        drawTextAt(g, meterFont(assets, 16.0f * s, true), "WAITING FOR A HIT ON THE SIDECHAIN",
+                   0.5f * (left + right), ly(design::meterZeroY) + 6.0f * s, juce::Justification::horizontallyCentred);
+        return;
+    }
+
+    const auto width = right - left;
+    const auto spanSamples = scopeSpanMs * fs / 1000.0;
+    const auto firstSample = (double)triggerIndex - 0.25 * spanSamples; // the hit starts a quarter of the way in
+    const auto xOf = [&](double sampleIndex) { return left + (float)((sampleIndex - firstSample) / spanSamples) * width; };
+    const auto previewSamples = analyser.isPreviewing() ? analyser.previewDelayMs() * fs / 1000.0 : 0.0;
+
+    // Time ticks, in ms from the hit, at a round step with about ten across.
+    {
+        double step = 0.1;
+        for (const auto candidate : {0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0})
+        {
+            step = candidate;
+            if (scopeSpanMs / candidate <= 10.0)
+                break;
+        }
+        const auto dashes = std::array<float, 2>{3.0f * s, 6.0f * s};
+        for (auto t = std::ceil(-0.25 * scopeSpanMs / step) * step; t <= 0.75 * scopeSpanMs + 1.0e-9; t += step)
+        {
+            const auto x = left + (float)((t + 0.25 * scopeSpanMs) / scopeSpanMs) * width;
+            if (std::abs(t) > 1.0e-9)
+            {
+                g.setColour(design::meterGrid.withAlpha(0.7f));
+                g.drawDashedLine({x, top, x, bottom}, dashes.data(), 2, juce::jmax(1.0f, 1.2f * s));
+            }
+            const auto text = std::abs(t) < 1.0e-9 ? juce::String("0")
+                                                    : (t > 0 ? "+" : "") + juce::String(t, step < 1.0 ? 1 : 0);
+            g.setColour(design::meterAxisText);
+            drawTextAt(g, labelFont, text, juce::jlimit(left + 8.0f * s, right - 8.0f * s, x), labelY,
+                       juce::Justification::horizontallyCentred);
+        }
+        g.setColour(design::meterAxisText.withAlpha(0.9f)); // the trigger
+        const auto tx = xOf((double)triggerIndex);
+        g.drawLine(tx, top, tx, bottom, juce::jmax(1.0f, 1.5f * s));
+        g.setColour(design::meterAxisText.withAlpha(0.6f));
+        drawTextAt(g, meterFont(assets, 12.0f * s).withExtraKerningFactor(0.1f), "SPAN " + juce::String(scopeSpanMs, scopeSpanMs < 10.0 ? 1 : 0) + " MS",
+                   left + 14.0f * s, top + 20.0f * s, juce::Justification::left);
+    }
+
+    // One trace: `sampleAt(index)` for a (possibly fractional) index. Dense spans draw a min-to-max line per pixel,
+    // sparse ones join the samples.
+    const auto drawTrace = [&](const std::function<float(double)>& sampleAt, juce::Colour colour, float thickness)
+    {
+        const auto pixels = std::max(1, (int)width);
+        const auto perPixel = spanSamples / (double)pixels;
+        const auto lastIndex = scopeBuffer.end() - 1;
+
+        // Its own peak over the window.
+        float peak = 1.0e-6f;
+        const auto count = std::min<long long>((long long)spanSamples + 2, 20000);
+        const auto stride = std::max(1.0, spanSamples / (double)count);
+        for (double i = firstSample; i < firstSample + spanSamples; i += stride)
+            peak = std::max(peak, std::abs(sampleAt(i)));
+        const auto yOf = [&](float v) { return yForR(0.95f * v / peak); };
+
+        g.setColour(colour);
+        const auto clip = juce::Rectangle<float>::leftTopRightBottom(left, top - 4.0f * s, right, bottom + 4.0f * s);
+        juce::Graphics::ScopedSaveState save(g);
+        g.reduceClipRegion(clip.getSmallestIntegerContainer());
+        if (perPixel <= 1.5)
+        {
+            juce::Path path;
+            bool started = false;
+            const auto from = (long long)std::floor(firstSample) - 1, to = (long long)std::ceil(firstSample + spanSamples) + 1;
+            for (auto i = from; i <= to && i <= lastIndex; ++i)
+            {
+                const auto x = xOf((double)i), y = yOf(sampleAt((double)i));
+                if (! started)
+                {
+                    path.startNewSubPath(x, y);
+                    started = true;
+                }
+                else
+                    path.lineTo(x, y);
+            }
+            g.strokePath(path, juce::PathStrokeType(thickness, juce::PathStrokeType::curved));
+        }
+        else
+        {
+            float previousMid = 0.0f;
+            bool havePrevious = false;
+            for (int px = 0; px < pixels; ++px)
+            {
+                const auto a = firstSample + perPixel * px, b = a + perPixel;
+                if ((long long)a > lastIndex)
+                    break;
+                float lo = 1.0e9f, hi = -1.0e9f;
+                const auto step = std::max(1.0, perPixel / 12.0);
+                for (double i = a; i < b; i += step)
+                {
+                    const auto v = sampleAt(i);
+                    lo = std::min(lo, v);
+                    hi = std::max(hi, v);
+                }
+                const auto x = left + (float)px + 0.5f;
+                const auto yHi = yOf(hi), yLo = yOf(lo);
+                // Join to the previous column so a rising or falling stretch stays one line.
+                if (havePrevious)
+                    g.drawLine(x - 1.0f, previousMid, x, 0.5f * (yHi + yLo), thickness);
+                g.drawLine(x, yHi, x, std::max(yLo, yHi + 0.5f), thickness);
+                previousMid = 0.5f * (yHi + yLo);
+                havePrevious = true;
+            }
+        }
+    };
+
+    const auto thickness = juce::jmax(1.0f, 1.6f * s);
+    drawTrace([&](double i) { return scopeBuffer.interpolated(2, i); }, design::meterAxisText.withAlpha(0.85f), thickness);
+    drawTrace([&](double i) { return scopeBuffer.interpolated(0, i); }, design::phosphor.withAlpha(0.45f), thickness);
+    if (analyser.isPreviewing()) // the input slid later by the preview delay
+        drawTrace([&](double i) { return scopeBuffer.interpolated(0, i - previewSamples); }, design::phosphor,
+                  juce::jmax(1.0f, 2.2f * s));
+    else
+        drawTrace([&](double i) { return scopeBuffer.interpolated(1, i); }, design::phosphor, juce::jmax(1.0f, 2.2f * s));
+
+    // The sidechain's name goes with the legend (INPUT and OUTPUT are in the grid).
+    const auto legendFont = meterFont(assets, 14.0f * s).withExtraKerningFactor(0.1f);
+    const auto legendY = top - 12.0f * s;
+    const auto inputRight = right - textWidth(legendFont, analyser.isPreviewing() ? "PREVIEW" : "OUTPUT") - 24.0f * s;
+    g.setColour(design::meterAxisText.withAlpha(0.85f));
+    drawTextAt(g, legendFont, "SIDECHAIN", inputRight - textWidth(legendFont, "INPUT") - 24.0f * s, legendY,
+               juce::Justification::right);
+}
+
 void MeterScreen::paintPreviewNote(juce::Graphics& g) const
 {
     const auto s = getScale();
@@ -626,7 +887,7 @@ void MeterScreen::paintPreviewNote(juce::Graphics& g) const
         // The legend's OUTPUT becomes PREVIEW: that trace is the input as it would read with the delay set here.
         const auto legendFont = meterFont(assets, 14.0f * s).withExtraKerningFactor(0.1f);
         const auto right = lx(design::meterPlotRight), legendY = ly(design::meterPlusOneY) - 12.0f * s;
-        const auto cover = juce::Rectangle<float>(right + 4.0f * s - 300.0f * s, legendY - 17.0f * s, 300.0f * s, 24.0f * s);
+        const auto cover = juce::Rectangle<float>(right + 4.0f * s - 440.0f * s, legendY - 17.0f * s, 440.0f * s, 24.0f * s);
         g.setColour(design::screenBlack);
         g.fillRect(cover);
         g.setColour(design::phosphor);
@@ -634,12 +895,19 @@ void MeterScreen::paintPreviewNote(juce::Graphics& g) const
         g.setColour(design::phosphor.withAlpha(0.45f));
         drawTextAt(g, legendFont, "INPUT", right - textWidth(legendFont, "PREVIEW") - 24.0f * s, legendY,
                    juce::Justification::right);
+        if (view == View::scope)
+        {
+            g.setColour(design::meterAxisText.withAlpha(0.85f));
+            drawTextAt(g, legendFont, "SIDECHAIN",
+                       right - textWidth(legendFont, "PREVIEW") - textWidth(legendFont, "INPUT") - 48.0f * s, legendY,
+                       juce::Justification::right);
+        }
 
         const auto ms = std::abs(analyser.previewDelayMs()) < 0.0005 ? 0.0 : analyser.previewDelayMs();
         const auto font = meterFont(assets, 16.0f * s, true);
         // Below the time view's readouts, at the top left elsewhere.
         const auto y = view == View::bands ? ly(design::meterMinusOneY) - 14.0f * s
-                                           : ly(design::meterPlusOneY) + (view == View::time ? 112.0f : 24.0f) * s;
+                                           : ly(design::meterPlusOneY) + (view == View::time ? 112.0f : view == View::scope ? 44.0f : 24.0f) * s;
         const juce::String note = "PREVIEW  DELAY " + juce::String(ms >= 0.0 ? "+" : "") + juce::String(ms, 3) + " ms";
         g.setColour(design::screenBlack.withAlpha(0.85f));
         g.fillRect(juce::Rectangle<float>(textWidth(font, note) + 16.0f * s, 22.0f * s).withX(x - 8.0f * s).withY(y - 16.0f * s));
@@ -652,6 +920,12 @@ void MeterScreen::paintPreviewNote(juce::Graphics& g) const
             g.setColour(design::phosphor.withAlpha(0.8f));
             g.drawLine(px, ly(design::meterPlusOneY), px, ly(design::meterMinusOneY), juce::jmax(1.0f, 1.5f * s));
         }
+    }
+    else if (isFrozen() && view == View::scope)
+    {
+        g.setColour(design::meterAxisText.withAlpha(0.5f));
+        drawTextAt(g, meterFont(assets, 12.0f * s), "DRAG TO SLIDE THE INPUT", x, ly(design::meterPlusOneY) + 44.0f * s,
+                   juce::Justification::left);
     }
     else if (isFrozen() && view == View::time)
     {

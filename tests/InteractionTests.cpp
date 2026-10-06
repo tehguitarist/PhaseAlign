@@ -303,36 +303,51 @@ TEST_CASE("buttons: latching toggles, METER and ANALYSE", "[interaction]")
     CHECK(analyse.getTooltip().contains("future version"));
 }
 
-TEST_CASE("meter view: click FREQUENCY or TIME OFFSET on the screen's bottom row", "[interaction]")
+TEST_CASE("meter view: the selector in the middle of the bottom row opens a menu; choosing sets the view", "[interaction]")
 {
     Fixture f;
     auto& screen = f.editor->getMeterScreen();
     REQUIRE(screen.getView() == pa::ui::MeterScreen::View::frequency);
-
-    // The three labels sit side by side under the plot centre on the bottom row; elsewhere clicks pass through.
     using View = pa::ui::MeterScreen::View;
-    const auto time = screen.viewLabelCentreForTesting(View::time);
-    const auto freq = screen.viewLabelCentreForTesting(View::frequency);
-    const auto phase = screen.viewLabelCentreForTesting(View::phase);
-    CHECK(screen.hitTest(juce::roundToInt(time.x), juce::roundToInt(time.y)));
-    CHECK_FALSE(screen.hitTest(screen.getWidth() / 2, screen.getHeight() / 3));
 
-    click(screen, time);
-    CHECK(f.proc.getUiState()[UiProps::meterView].toString() == "time");
-    CHECK(screen.getView() == pa::ui::MeterScreen::View::time);
-    click(screen, phase);
-    CHECK(f.proc.getUiState()[UiProps::meterView].toString() == "phase");
-    CHECK(screen.getView() == pa::ui::MeterScreen::View::phase);
-    click(screen, screen.viewLabelCentreForTesting(View::bands));
-    CHECK(f.proc.getUiState()[UiProps::meterView].toString() == "bands");
-    CHECK(screen.getView() == View::bands);
-    click(screen, freq);
-    CHECK(f.proc.getUiState()[UiProps::meterView].toString() == "frequency");
-    CHECK(screen.getView() == pa::ui::MeterScreen::View::frequency);
+    // The selector sits under the plot centre; elsewhere clicks pass through. A click opens the menu (here: counted).
+    const auto selector = screen.viewSelectorCentreForTesting();
+    CHECK(screen.hitTest(juce::roundToInt(selector.x), juce::roundToInt(selector.y)));
+    CHECK_FALSE(screen.hitTest(screen.getWidth() / 2, screen.getHeight() / 3));
+    int opened = 0;
+    screen.viewMenuHook = [&] { ++opened; };
+    click(screen, selector);
+    CHECK(opened == 1);
+
+    // What the menu does with a choice.
+    for (const auto& [view, name] : {std::pair{View::time, "time"}, std::pair{View::phase, "phase"},
+                                      std::pair{View::bands, "bands"}, std::pair{View::scope, "scope"},
+                                      std::pair{View::frequency, "frequency"}})
+    {
+        screen.chooseView(view);
+        CHECK(f.proc.getUiState()[UiProps::meterView].toString() == name);
+        CHECK(screen.getView() == view);
+    }
+
+    // The old three-label row is gone: a click left of the selector on the row does nothing to the view.
+    click(screen, {selector.x - 200.0f, selector.y});
+    CHECK(opened == 1);
 
     // With the meter off there is nothing to click.
     f.proc.getUiState().setProperty(UiProps::meterOn, false, nullptr);
-    CHECK_FALSE(screen.hitTest(juce::roundToInt(time.x), juce::roundToInt(time.y)));
+    CHECK_FALSE(screen.hitTest(juce::roundToInt(selector.x), juce::roundToInt(selector.y)));
+}
+
+TEST_CASE("meter scope: the wheel zooms between 0.5 and 200 ms", "[interaction]")
+{
+    Fixture f;
+    auto& screen = f.editor->getMeterScreen();
+    screen.chooseView(pa::ui::MeterScreen::View::scope);
+    CHECK(screen.getScopeSpanMs() == Approx(20.0));
+    screen.setScopeSpanMs(0.1);
+    CHECK(screen.getScopeSpanMs() == Approx(0.5));
+    screen.setScopeSpanMs(5000.0);
+    CHECK(screen.getScopeSpanMs() == Approx(200.0));
 }
 
 TEST_CASE("meter speed: SLOW and FAST at the left of the bottom row, kept in the UI state", "[interaction]")

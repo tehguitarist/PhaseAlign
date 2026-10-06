@@ -376,6 +376,8 @@ TEST_CASE("meter on screen: reads +1 when aligned, and stops when off", "[.][des
     size_t h = 0;
     int lag = d;
     float sidechainGain = 1.0f;
+    bool hits = false; // true: a drum-like hit every 0.3 s (a click and a decaying 120 Hz body) instead of noise
+    long long counter = 0;
     // Roughly real time: a block of audio, then about a block's worth of message loop.
     const auto play = [&](double seconds)
     {
@@ -385,7 +387,13 @@ TEST_CASE("meter on screen: reads +1 when aligned, and stops when off", "[.][des
             juce::AudioBuffer<float> b(4, block);
             for (int i = 0; i < block; ++i)
             {
-                const auto x = (rng.nextFloat() - 0.5f) * 0.6f;
+                auto x = (rng.nextFloat() - 0.5f) * 0.6f;
+                if (hits)
+                {
+                    const auto n = (double)(counter++ % 14400);
+                    x = (float)(0.7 * std::exp(-n / 2400.0) * std::sin(2.0 * 3.14159265 * 120.0 * n / fs)) +
+                        (n < 60.0 ? 0.4f * (rng.nextFloat() - 0.5f) * (float)(1.0 - n / 60.0) : 0.0f);
+                }
                 history[h] = x;
                 const auto late = history[(h + history.size() - (size_t)lag) % history.size()] * sidechainGain;
                 h = (h + 1) % history.size();
@@ -449,6 +457,28 @@ TEST_CASE("meter on screen: reads +1 when aligned, and stops when off", "[.][des
     proc.getUiState().setProperty(UiProps::meterSpeed, "slow", nullptr);
     setParam(proc, id::delayMs, (float)(1000.0 * d / fs));
     play(0.5);
+
+    // The scope: a hit train, not yet aligned, then zoomed in, then with a slid preview, then aligned.
+    hits = true;
+    setParam(proc, id::delayMs, 0.0f);
+    proc.getUiState().setProperty(UiProps::meterView, "scope", nullptr);
+    play(3.0);
+    CHECK(screen.getScopeTrigger() >= 0);
+    snapshot("meter_scope_unaligned.png");
+    screen.setScopeSpanMs(6.0);
+    play(0.3);
+    snapshot("meter_scope_zoom.png");
+    screen.setHeld(true);
+    screen.setPreviewDelayMs(1000.0 * d / fs);
+    snapshot("meter_scope_preview.png");
+    screen.setHeld(false);
+    setParam(proc, id::delayMs, (float)(1000.0 * d / fs));
+    play(1.5);
+    snapshot("meter_scope_aligned.png");
+    screen.setScopeSpanMs(20.0);
+    hits = false;
+    proc.getUiState().setProperty(UiProps::meterView, "frequency", nullptr);
+    play(1.0);
 
     // An offset beyond the knob's reach (4.5 ms) says so in the time view.
     lag = 216;

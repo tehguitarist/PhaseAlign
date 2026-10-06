@@ -2,9 +2,11 @@
 
 #include "meter/CorrelationAnalyser.h"
 #include "meter/MeterCapture.h"
+#include "meter/ScopeBuffer.h"
 #include "ui/DesignComponent.h"
 
 #include <functional>
+#include <memory>
 
 namespace pa::ui
 {
@@ -19,6 +21,13 @@ namespace pa::ui
 // which shows how far apart in time this track and the sidechain are; PHASE, the angle between this track and the
 // sidechain against frequency (R17). All show processed (bright) and unprocessed (dim), and the overall
 // processed/unprocessed pair on the right.
+//
+// SCOPE (R19): this track, the sidechain and the output as waveforms on top of each other, each scaled to its own
+// peak, triggered on the sidechain's loudest recent onset so a hit stays put. The mouse wheel zooms (0.5 to 200 ms
+// across). Frozen, dragging slides the input against the sidechain: the output trace becomes the PREVIEW, the input
+// as it would be with the delay knob at that distance.
+//
+// The view is chosen from a menu that opens upwards from the bottom row's middle label.
 //
 // The row also has the averaging speed (SLOW / FAST) and HOLD. The screen freezes while HOLD is on, and by itself
 // while a host that reports its transport is stopped. Frozen, a drag across the TIME view previews a delay: the
@@ -38,7 +47,8 @@ class MeterScreen : public DesignComponent, private juce::Timer
         frequency,
         time,
         phase,
-        bands
+        bands,
+        scope
     };
     using Speed = meter::CorrelationAnalyser::Speed;
 
@@ -50,7 +60,9 @@ class MeterScreen : public DesignComponent, private juce::Timer
     void setMeterOn(bool);
     void setView(View);
     View getView() const { return view; }
-    std::function<void(View)> onViewSelected; // a click on a view label
+    std::function<void(View)> onViewSelected; // a choice from the view menu
+    void chooseView(View v) { onViewSelected ? onViewSelected(v) : setView(v); }
+    std::function<void()> viewMenuHook; // for tests: called in place of opening the menu
     void setSpeed(Speed);
     Speed getSpeed() const { return analyser.getSpeed(); }
     std::function<void(Speed)> onSpeedSelected; // a click on SLOW or FAST
@@ -66,14 +78,11 @@ class MeterScreen : public DesignComponent, private juce::Timer
     bool isTimerRunningForTesting() const { return isTimerRunning(); }
     int getPaintCount() const { return paintCount; }
     // Centres of the bottom row's labels, in local coordinates (for tests).
-    juce::Point<float> viewLabelCentreForTesting(View v) const
-    {
-        return controlArea(v == View::frequency ? Control::frequency
-                           : v == View::time    ? Control::time
-                           : v == View::phase   ? Control::phase
-                                                : Control::bands)
-            .getCentre();
-    }
+    juce::Point<float> viewSelectorCentreForTesting() const { return controlArea(Control::view).getCentre(); }
+    double getScopeSpanMs() const { return scopeSpanMs; }
+    void setScopeSpanMs(double);
+    const meter::ScopeBuffer& getScopeBuffer() const { return scopeBuffer; }
+    long long getScopeTrigger() const { return triggerIndex; }
     juce::Point<float> speedLabelCentreForTesting(Speed v) const
     {
         return controlArea(v == Speed::slow ? Control::slow : Control::fast).getCentre();
@@ -87,6 +96,7 @@ class MeterScreen : public DesignComponent, private juce::Timer
     bool hitTest(int x, int y) override;
     void mouseDown(const juce::MouseEvent&) override;
     void mouseDrag(const juce::MouseEvent&) override;
+    void mouseWheelMove(const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
 
   private:
     void timerCallback() override;
@@ -107,10 +117,7 @@ class MeterScreen : public DesignComponent, private juce::Timer
     enum class Control
     {
         none,
-        frequency,
-        time,
-        phase,
-        bands,
+        view,
         slow,
         fast,
         hold
@@ -120,6 +127,8 @@ class MeterScreen : public DesignComponent, private juce::Timer
     bool scrubArea(juce::Point<float>) const;
     void scrubTo(float x);
     void freezeChanged();
+    void showViewMenu();
+    void refreshTrigger(bool force);
 
     void paintStatic(juce::Graphics&, float pixelScale) const;
     void paintGrid(juce::Graphics&) const;
@@ -129,6 +138,7 @@ class MeterScreen : public DesignComponent, private juce::Timer
     void paintDashedTrace(juce::Graphics&, const std::function<float(int)>& xAt, const std::vector<float>& values,
                           bool processed) const;
     void paintPhase(juce::Graphics&) const;
+    void paintScope(juce::Graphics&) const;
     void paintBands(juce::Graphics&) const;
     void paintLagReadout(juce::Graphics&) const;
     void paintPreviewNote(juce::Graphics&) const;
@@ -140,6 +150,14 @@ class MeterScreen : public DesignComponent, private juce::Timer
     meter::CorrelationAnalyser analyser;
     std::vector<float> scratch[meter::MeterCapture::numStreams];
     double lastSamplesMs = 0.0;
+    meter::ScopeBuffer scopeBuffer;
+    long long triggerIndex = -1;
+    float triggerStrength = 0.0f;
+    double scopeSpanMs = 20.0;
+    int triggerTick = 0;
+    float slipStartX = 0.0f;
+    double slipStartMs = 0.0;
+    std::unique_ptr<juce::LookAndFeel> menuLookAndFeel;
 
     bool meterOn = false, held = false, wasFrozen = false;
     View view = View::frequency;

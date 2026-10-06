@@ -1,6 +1,7 @@
 #include "AllocationCounter.h"
 #include "meter/CorrelationAnalyser.h"
 #include "meter/MeterCapture.h"
+#include "meter/ScopeBuffer.h"
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -671,4 +672,47 @@ TEST_CASE("attack peak trace", "[.attacktrace]")
             }
         }
     }
+}
+
+TEST_CASE("scope buffer: holds the last 4 s, and finds the loudest onset of the sidechain", "[meter]")
+{
+    const auto fs = 48000.0;
+    pa::meter::ScopeBuffer b;
+    b.prepare(fs);
+    CHECK(b.findOnset(3.0).index < 0); // nothing yet
+
+    // 6 s of quiet noise with three clicks: 0.2 of full level at 1.0 s, 0.6 at 2.5 s, 0.4 at 4.0 s, each rising over
+    // 2 ms and ringing for 30 ms.
+    const auto length = (int)(6.0 * fs);
+    auto sc = noise(length, 21, 0.0005f);
+    const std::vector<std::pair<double, float>> hits = {{1.0, 0.2f}, {2.5, 0.6f}, {4.0, 0.4f}};
+    for (const auto& [t, level] : hits)
+        for (int n = 0; n < (int)(0.03 * fs); ++n)
+            sc[(size_t)(t * fs) + (size_t)n] += level * std::min(1.0f, n / (0.002f * (float)fs)) *
+                                                  (float)std::exp(-n / (0.01 * fs)) * (float)std::sin(2.0 * M_PI * 200.0 * n / fs);
+    const auto in = noise(length, 22), out = noise(length, 23);
+    for (int pos = 0; pos < length; pos += 1000)
+    {
+        const auto n = std::min(1000, length - pos);
+        b.push(in.data() + pos, out.data() + pos, sc.data() + pos, n);
+    }
+
+    CHECK(b.total() == length);
+    CHECK(b.oldest() == length - (long long)std::ceil(4.0 * fs));
+    CHECK(b.at(0, length - 1) == in[(size_t)length - 1]);
+    CHECK(b.at(2, 0) == 0.0f); // long gone
+    CHECK(b.at(2, length) == 0.0f); // not yet
+
+    // The last 3 s (3 to 6 s) hold only the 0.4 click ...
+    const auto onset = b.findOnset(3.0);
+    REQUIRE(onset.index >= 0);
+    CHECK(onset.index / fs == Approx(4.0).margin(0.004)); // within the click's own 2 ms ramp
+    // ... while a longer look back reaches the 0.6 click.
+    const auto earlier = b.findOnset(3.9);
+    REQUIRE(earlier.index >= 0);
+    CHECK(earlier.index / fs == Approx(2.5).margin(0.004));
+    CHECK(earlier.strength > onset.strength);
+
+    // Interpolation between samples.
+    CHECK(b.interpolated(0, (double)length - 10.5) == Approx(0.5f * (in[(size_t)length - 11] + in[(size_t)length - 10])));
 }

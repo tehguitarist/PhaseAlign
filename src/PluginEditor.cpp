@@ -228,6 +228,7 @@ PhaseAlignEditor::PhaseAlignEditor(PhaseAlignProcessor& p)
                             v == pa::ui::MeterScreen::View::time    ? "time"
                             : v == pa::ui::MeterScreen::View::phase ? "phase"
                             : v == pa::ui::MeterScreen::View::bands ? "bands"
+                            : v == pa::ui::MeterScreen::View::scope ? "scope"
                                                                     : "frequency",
                             nullptr);
     };
@@ -438,6 +439,7 @@ void PhaseAlignEditor::updateMeter()
     meterScreen.setView(view == "time"    ? pa::ui::MeterScreen::View::time
                         : view == "phase" ? pa::ui::MeterScreen::View::phase
                         : view == "bands" ? pa::ui::MeterScreen::View::bands
+                        : view == "scope" ? pa::ui::MeterScreen::View::scope
                                           : pa::ui::MeterScreen::View::frequency);
     meterScreen.setSpeed(uiState.getProperty(PhaseAlignProcessor::UiProps::meterSpeed).toString() == "fast"
                              ? pa::ui::MeterScreen::Speed::fast
