@@ -21,8 +21,8 @@ in, if at all.
 ## State at handover
 
 - `dsp-hardening` is pushed with a clean history: 6 commits on origin/master, no measurement material in any of them.
-- CI: macOS green (ctest, auval, pluginval at strictness 10). Linux and Windows failed one test, which found a real
-  bug, fixed in 80d198a; that run was in progress at handover.
+- CI green on macOS, Linux and Windows (run 37396526948): ctest everywhere, auval and pluginval at strictness 10 on
+  macOS.
 - Local `master` still has its 14 old commits, which contain the removed material. `dsp-hardening-wip` is a local-only
   snapshot of the same tree. Neither should ever be pushed.
 
@@ -84,17 +84,26 @@ in, if at all.
 - Goldens and tests pass; within budget; plan 2.3 and the 2.6 table updated.
 - **Then the user listens**, and only after their OK does it merge.
 
-## 2. Windows/Linux benchmark numbers
+## 2. Constant on Windows and Linux: PFFFT
 
-When CI is green, read the "Benchmark the DSP" step on ubuntu-latest and windows-latest (`gh run view <id> --log`) and
-add the numbers to the plan 2.6 table.
+CI's numbers (plan 2.6, run 37396526948) put Constant over budget:
+- **Linux:** 119–160 ns, and 160 at 192 kHz, over 150.
+- **Windows:** 232–327 ns at every rate, and one 64-sample callback at 192 kHz took 1088 µs of 333.
 
-- **Generic FFT engine on M1 for comparison:** Constant 61 / 83 / 103 ns at 48 / 96 / 192 kHz; worst 64-sample
-  callback at 192 kHz 63–82 µs of 333.
-- **If a runner is over budget:** Constant ≥ 150 ns, or a worst callback above about half the callback time at 192 kHz.
-  Then propose PFFFT behind `src/dsp/RealFft.h`: BSD-style licence, and fetching its source is a download, so ask the
-  user first.
-- **If not:** record "not needed".
+These are shared VMs, so pessimistic, but the gap is too big to ignore. Hi/Lo is fine everywhere.
+
+1. **Ask the user** before fetching PFFFT's source (BSD-style licence): it's a download. Put it under `libs/` and note
+   the licence where the other third-party notices go.
+2. Add it as `RealFft`'s engine on non-Apple platforms, keeping the packed split format. PFFFT's ordered real
+   transform is interleaved, so repack, or use its own `zconvolve_accumulate` in its internal order if that is
+   faster.
+3. Re-tune `ConstantRotator::blockSizesFor` for the new engine from CI's convolver benchmark. On Windows today the
+   three-level 128/1024/4096 layout beats uniform 128 at 96 kHz (279 vs 525 ns).
+4. Check MSVC vectorises the register-blocked loops (head, multiply-add, fractional kernel). If not, a small SSE/NEON
+   helper.
+
+**Done when:** Constant is under 150 ns and the worst 192 kHz callback is under about half its length on both CI
+runners. The goldens and every test still pass with each engine, and plan 2.6 has the numbers.
 
 ## 3. CI hygiene
 

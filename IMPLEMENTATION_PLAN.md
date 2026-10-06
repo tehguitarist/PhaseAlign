@@ -445,6 +445,21 @@ core).
 | worst 64-sample callback, Constant, 192 kHz (µs, of 333) | 79–100 | 35–46 | 89 | 63–82 |
 | rebuild on entering Constant, 48 / 192 kHz (µs, once, while muted) | 6–8 / 15 | 3.5–4 / 22 | 8.6 / 21 | 5–6 / 36–74 |
 
+**Windows and Linux (CI, run 37396526948, 2026-10-06; GitHub-hosted x86 runners, shared VMs, so pessimistic):**
+
+| Case (ns per stereo frame) | M1, vDSP | M1, generic FFT | Linux CI | Windows CI |
+|---|---|---|---|---|
+| Hi/Lo idle | 4.0 | 4.1 | 6.4 | 10.3 |
+| Hi at 60°, fractional delay, 44.1 / 48 kHz | 9.1 / 6.0 | 9.0 / 6.0 | 39.9 / 22.8 | 35.0 / 38.6 |
+| Constant at 60°, fractional delay, 44.1 / 48 kHz | 32.8 / 30.3 | 64.7 / 62.5 | 134 / 119 | 236 / 232 |
+| Constant at 60°, fractional delay, 96 / 192 kHz | 33.8 / 38.8 | 83 / 103 | 137 / 160 | 327 / 273 |
+| worst 64-sample callback, Constant, 192 kHz (µs, of 333) | 35–46 | 63–82 | 188 | 1088 |
+
+Hi/Lo is within budget everywhere. **Constant is over budget on Linux at 192 kHz and on Windows at every rate**, and
+one Windows callback at 192 kHz took three times its length. The convolver-only layouts also rank differently there
+(Windows 96 kHz: 525 ns uniform 128, 279 ns with 128/1024/4096). **Recommended: PFFFT behind `RealFft` (fetching its
+source needs the user's OK), then re-tune the generic layouts from CI's convolver benchmark** (`HANDOVER.md` item 2).
+
 **Candidates looked at and not built:**
 - Polyphase split of the Hilbert (every other tap is zero): in the frequency domain it is the same work as doubling the
   block. Per sample, uniform 128 is 31 complex multiply-adds plus 64 head taps; polyphase at 64 decimated is 31.5 + 64,
@@ -453,9 +468,8 @@ core).
   it reads and writes the sum once per partition.
 - Packing stereo into one complex FFT: a complex FFT of n points costs about two real ones, and the multiply-add covers
   the same number of bins, so no gain is expected.
-- PFFFT: not needed on this evidence. With G and H the generic engine is within budget on this machine (103 ns at
-  192 kHz, the worst case). CI's x86 runners will say whether Windows/Linux need more. PFFFT would go behind
-  `RealFft` (BSD-style licence; adding it means fetching its source).
+- PFFFT: on the M1 the generic engine was within budget after G and H (103 ns at 192 kHz), but CI's x86 numbers
+  above say Windows and Linux need it.
 
 **Latency.**
 - Constant's L = D − 1 follows from the tap count. Nothing else in the path adds samples. The delay's Lmax + H is the
