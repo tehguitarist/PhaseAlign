@@ -19,7 +19,7 @@ Items marked **[verify]** are things I believe are right but have not confirmed.
 | R1 | **Constant mode uses a linear-phase FIR Hilbert transformer.** About 43 ms of reported latency, **only while Constant is selected**. | True constant rotation relative to the dry signal, so 0° equals the (delayed) dry signal. A zero-latency IIR pair smears the bass by about 2.3 ms even at 0°. | Yes (4.4, 4.8) |
 | R2 | Keep the IIR filters of a bypassed stage running ("warm"). Skip only the mixing. | Clicks are avoided by design, for about 10 flops per sample (section 2.6) | Yes (4.6) |
 | R3 | Hi↔Lo switches by gliding the corner frequencies instead of crossfading | The signal stays all-pass the whole way: no comb dip and no level change | Yes (4.7) |
-| R4 | The knob angle is the true phase at a per-shape reference frequency (HIGH at RANGE 180: the first section's angle, marked *; see 2.3 and R15). Sections run in sequence, and the second section is always running. | Changes of range or mode are continuous (glided). The readout means something. | Refines 4.3 |
+| R4 | The knob angle is the true phase at a per-shape reference frequency (HIGH with RANGE in: the first section's angle, marked *; see 2.3 and R15). Sections run in sequence, and the second section is always running. | Changes of range or mode are continuous (glided). The readout means something. | Refines 4.3 |
 | R5 | `phaseMode` is not automatable | Changing into or out of Constant changes the reported latency, and hosts re-compensate inconsistently | New |
 | R6 | Meter: the audio thread only copies samples to a FIFO. The GUI does an FFT cross-spectrum and computes band correlation from it. | Lightest possible audio-thread cost, sharper bands, and it reuses code for v0.8 and the deferred phase curve | Refines 6 |
 | R7 | Detect "no sidechain" from the **signal** as well as the bus layout | Logic always supplies a sidechain buffer, so the layout alone can't tell | Refines 6 |
@@ -29,7 +29,8 @@ Items marked **[verify]** are things I believe are right but have not confirmed.
 | R12 | **Delay in steps of 0.1 sample** (user, 2026-10-06; built on `dsp-negative-delay`), replacing whole samples (PLAN decision 12) | Whole samples leave up to 2.4 dB of dip at 20 kHz on a coherent pair at 44.1 kHz; 0.1 sample leaves 0.02 dB (2.1a) | Yes (2.1, decision 12, open question 7) |
 | R13 | **Hi/Lo runs oversampled** (4× below 85 kHz, 2× below 170 kHz) between linear-phase halfbands, and **reports a small latency whenever Constant isn't selected**: 32 samples at 44.1 kHz (0.73 ms), 18 at 48 kHz (0.38 ms), 5 at 88.2/96 kHz, none from 176.4 kHz (user, 2026-10-06; merged to master and approved by ear) | De-cramping: within 2.5° of analog sections to 20 kHz at every rate (was up to 80° at 44.1 kHz), so a setting sounds the same at every rate. Impossible at zero latency (Foster's reactance theorem, 2.3) | Yes (3.4 and 4.8 "zero latency", decision 4 "oversampling dropped") |
 | R14 | **macOS ships two separate builds, not a universal binary** (user, 2026-10-06): arm64, and x86_64 labelled "Intel" in the GitHub release (`release.yml`'s `macos` and `macos-intel` jobs). Local builds are arm64 only | Each download stays half the size; only a small minority need Intel, but it is still offered | Yes (10, "universal binary") |
-| R15 | **RANGE selects the Hi/Lo shape, and the modes are named for what they do** (user, 2026-10-06): the 90 range is one section (LOW 75.1 Hz, HIGH 150.1 Hz); the 180 range is two sections sharing the whole knob travel (LOW: stacked at 150.1 Hz; HIGH: 75.1 Hz and 1502 Hz), glided on a change. HIGH at RANGE 180 shows the first section's angle, 0–90°, with an asterisk. Replaces the single 0–180° knob mapping (P5) | Matches the reference unit's measured 90 and 180 behaviours (captures) with names that agree with its manual; the whole knob stays usable (no dead zones) | Refines 4.3 (2.3) |
+| R15 | **RANGE selects the Hi/Lo shape, and the modes are named for what they do** (user, 2026-10-06): RANGE out is one section (LOW 75.1 Hz, HIGH 150.1 Hz); RANGE in is two sections sharing the whole knob travel (LOW: stacked at 150.1 Hz; HIGH: 75.1 Hz and 1502 Hz), glided on a change. HIGH with RANGE in shows the first section's angle, 0–90°, with an asterisk. Replaces the single 0–180° knob mapping (P5) | Matches the reference unit's measured 90 and 180 behaviours (captures) with names that agree with its manual; the whole knob stays usable (no dead zones) | Refines 4.3 (2.3) |
+| R16 | **The RANGE button is named by its position, "out" and "in", not "90" and "180"** (user, 2026-10-07): out (the default) is one section, in is two. Only some modes read 180 with it in (Low and Constant do; High shows 0 to 90 with an asterisk), so "RANGE 180" misled. The scale label still shows the number the knob reads up to (90 or 180); the tooltips, the host text of the `phaseRange` parameter ("Out" / "In"; typed "180" and "90" still read) and all the docs use out and in. The identifiers (`phaseRange`, `phaseWide`, `range180()`) are unchanged. | Names the control for what it does | Refines 4.3 (R15) |
 | R11 | **Dim a switched-off section** (user, 2026-10-06; not built yet): its knob, switch, readout values and buttons go semi-transparent but stay usable; the on/off toggles stay at full opacity (4.5) | Shows at a glance what's in the signal path | New |
 
 ---
@@ -238,26 +239,31 @@ form I since 2026-10-06, see "As built"). Parametrise each section by
 
 **Knob mapping (RANGE redesign, 2026-10-06, R15; reference code `prototype/hilo.py`; replaces the P5 mapping):**
 
-The panel angle θ (0–90° at RANGE 90, 0–180° at RANGE 180) gives φ = θ (90) or θ/2 (180), the angle of section 1,
-which is its lag at its reference f₁. Section 2 carries θ₂ = φ at RANGE 180 and nothing (identity) at RANGE 90.
+The panel angle θ (0–90° with RANGE out, 0–180° with RANGE in) gives φ = θ (90) or θ/2 (180), the angle of section 1,
+which is its lag at its reference f₁. Section 2 carries θ₂ = φ with RANGE in and nothing (identity) with RANGE out.
 `kᵢ = max(tan(θᵢ/2) / tan(π·fᵢ/fs), k_min)`: closed form, no tables. Each (mode, range) is its own **shape** with its
 own references, all taken from measurements of the reference unit (nothing invented): 75.1 Hz, 150.1 Hz and
 1502 Hz (20 × 75.1 Hz).
 
-| Mode (named for what it does) | RANGE 90 | RANGE 180 |
+| Mode (named for what it does) | RANGE out | RANGE in |
 |---|---|---|
 | **LOW** | one section at 75.1 Hz | two stacked sections at 150.1 Hz |
 | **HIGH** | one section at 150.1 Hz | sections at 75.1 Hz and 1502 Hz |
 
-- **Why these names (user, 2026-10-06).** The manual describes the 180 range's two settings as one filter on the lows
+- **Why these names (user, 2026-10-06).** The manual describes RANGE in's two settings as one filter on the lows
   and one on the highs (the wide one, "high") and both filters on the lows (the narrow one, "low"). The captured
-  behaviours had the opposite names in the 180 range, but matched the manual in the 90 range (Lo = the lower corner),
+  behaviours had the opposite names in RANGE in, but matched the manual in RANGE out (Lo = the lower corner),
   so a pure rename could not make all four combinations consistent. Because RANGE is just a button, each combination
   takes whichever captured geometry fits its name: LOW 90 and HIGH 90 are the captured 90 behaviours unchanged;
   LOW 180 is the captured stacked pair (at 150.1 Hz), HIGH 180 the captured spread pair (75.1 and 1502 Hz).
-  The 90 range sounds exactly as it did before (identical A/B levels, `prototype/out/range/report.md`); only the 180
+  RANGE out sounds exactly as it did before (identical A/B levels, `prototype/out/range/report.md`); only the 180
   range changed, where the two sections now share the whole knob travel from 0° instead of the second one only
   joining past 90°.
+- **How to read the names (user, 2026-10-07).** LOW centres the turn lower down in frequency and HIGH higher up, in both
+  ranges: the frequency where half the full turn has happened, at full knob, is 75 Hz (LOW out), 150 Hz (HIGH out and
+  LOW in) and about 336 Hz (HIGH in); with RANGE in, HIGH is also more spread out (239° of 360° at 1 kHz against LOW's
+  326°). NARROW and WIDE were considered and rejected: with RANGE out both modes are one section of the same width, so
+  those words would describe nothing there. The README's "Where the turn sits" says this to users.
 - **Switching shape** (a RANGE press or a mode change) glides each section's k geometrically to the new shape's value
   over 30 ms (R3, the same glide as Hi↔Lo). The glide state is a weight on each of the four shapes (summing to 1);
   a change sets the target to the new shape alone and moves every weight to its target on a linear ramp of 30 ms from
@@ -268,10 +274,10 @@ own references, all taken from measurements of the reference unit (nothing inven
   the reference; fixed 2026-10-06, with a regression test over random sequences and the CI seeds that exposed it
   covered in the automation test.) The knob keeps its position through a RANGE press, so φ is unchanged.
 - **The panel angle (what the readout, scale label and host text show):** the shift at the first section's reference
-  where that is exact, else φ. LOW and HIGH at RANGE 90 read 0–90 (the lag at 75.1 / 150.1 Hz); LOW at RANGE 180 reads
-  0–180 exactly (the stacked pair's lag at 150.1 Hz); **HIGH at RANGE 180 shows φ, 0–90, marked with an asterisk**
+  where that is exact, else φ. LOW and HIGH with RANGE out read 0–90 (the lag at 75.1 / 150.1 Hz); LOW with RANGE in reads
+  0–180 exactly (the stacked pair's lag at 150.1 Hz); **HIGH with RANGE in shows φ, 0–90, marked with an asterisk**
   (on the scale label, after the readout's degree sign, and in the tooltips), because its first section's lag at
-  75.1 Hz reaches only about 96° and the second adds its own turn higher up. Constant at RANGE 180 reads 0–180.
+  75.1 Hz reaches only about 96° and the second adds its own turn higher up. Constant with RANGE in reads 0–180.
   `params::shownRangeDegrees`; the tooltips for the knob, readout, RANGE button and mode switch describe the current
   state.
 - **As built (2026-10-06, branch `hilo-range-modes`):** `src/dsp/PhaseMapping.h` (the four shapes, `knobAngle`,
@@ -292,7 +298,7 @@ own references, all taken from measurements of the reference unit (nothing inven
   which was designed with them in mind; extending them would not be an improvement we can show.
 - **Properties (P1, `prototype/out/p1/report.md`):**
   - Lag is non-decreasing in θ at every frequency in all four shapes.
-  - There is no handover at 90° any more: at RANGE 180 both sections run over the whole travel, and a RANGE press or mode change glides (see above).
+  - There is no handover at 90° any more: with RANGE in both sections run over the whole travel, and a RANGE press or mode change glides (see above).
   - The readout is exact within 0.004° at every rate. In Hi it is the true lag at 150 Hz. In Lo past 90° it is
     90° + section 2's lag at 1502 Hz, because Lo's true lag at 75 Hz only reaches 95.7° at 180°.
   - The top octave moves fast just past 0° and just past 90°, where a corner sweeps down from far above 20 kHz. That
@@ -320,7 +326,7 @@ own references, all taken from measurements of the reference unit (nothing inven
     sample at 2× on the way down to make it so): **32 at 44.1 kHz (0.73 ms), 18 at 48 kHz (0.38 ms), 5 at 88.2 and
     96 kHz, 0 at 176.4 and 192 kHz.** It is reported whenever Constant isn't selected, phase on or off, so phase on/off
     stays a crossfade (the dry path is delayed to match) and only entering or leaving Constant changes the latency.
-  - Against analog sections: within 1.6° to 16 kHz and 2.5° to 20 kHz at every rate (target 3° / 10°; LOW at RANGE 180
+  - Against analog sections: within 1.6° to 16 kHz and 2.5° to 20 kHz at every rate (target 3° / 10°; LOW with RANGE in
     stacks two sections at one corner, so its error is about double: up to 4.9° at 44.1 kHz, measured 2026-10-06); the same
     setting within 0.4° between 44.1 and 192 kHz (was 78°). Typical settings (the median over the travel) are within
     0.4° at 16–20 kHz.

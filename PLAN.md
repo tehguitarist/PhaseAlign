@@ -53,7 +53,7 @@ The parameter is stored in **ms**, so sessions are portable across sample rates.
 
 | Item | Spec |
 | --- | --- |
-| Phase knob | 0 to 90° or 0 to 180°, set by RANGE (HIGH at RANGE 180 shows 0 to 90° with an asterisk, see 2.3) |
+| Phase knob | 0 to 90° or 0 to 180°, set by RANGE (HIGH with RANGE in shows 0 to 90° with an asterisk, see 2.3) |
 | Mode switch (3-way) | Hi / Lo / Constant |
 | Polarity flip button | 180° inversion; with the knob this covers the full 360° |
 | Bypass | Independent |

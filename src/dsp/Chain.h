@@ -29,7 +29,7 @@ struct ChainSettings
     bool polarityInverted = false;
     bool phaseOn = true;
     double phaseDegrees = 0.0; // the panel angle: 0 to 90 (range 90) or 0 to 180
-    bool phaseWide = false;    // RANGE 180: Hi/Lo's shape; Constant ignores it
+    bool phaseWide = false;    // RANGE in: Hi/Lo's shape; Constant ignores it
     PhaseMode phaseMode = PhaseMode::high;
 
     // Every stage out of the signal path: the output is the input delayed by Hi/Lo's latency (0 from 176.4 kHz up).

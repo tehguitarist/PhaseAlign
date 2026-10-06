@@ -6,7 +6,7 @@ namespace pa::ui
 {
 // A scale label that changes with a setting, drawn to match the labels baked into the panel: the phase knob's
 // upper end, which reads 90° or 180° with RANGE, with an asterisk after the degree sign where the number is
-// approximate (High at RANGE 180). Digits are left-aligned in the slot under a raised degree sign.
+// approximate (High with RANGE in). Digits are left-aligned in the slot under a raised degree sign.
 class ScaleLabel : public DesignComponent
 {
   public:

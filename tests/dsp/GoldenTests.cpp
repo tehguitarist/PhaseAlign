@@ -29,7 +29,7 @@ struct Event
     int at;
     double theta;  // < 0: unchanged
     int mode;      // < 0: unchanged; else PhaseMode
-    int wide = -1; // < 0: unchanged; else 0 or 1 (RANGE 180)
+    int wide = -1; // < 0: unchanged; else 0 or 1 (RANGE in)
 };
 
 // Runs the case's input through a chain with only the phase stage on, applying the events, in blocks of `block`

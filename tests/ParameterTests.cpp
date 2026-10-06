@@ -59,16 +59,21 @@ TEST_CASE("parameter text round-trips through the host's text entry", "[params]"
     CHECK(delay->convertFrom0to1(delay->getValueForText(juce::String::fromUTF8("\xe2\x88\x92"
                                                                                "2 ms"))) == Approx(-2.0f));
 
-    // The phase parameter is the knob position; the host sees the angle at the current range (90 by default).
-    CHECK(range->getText(0.0f, 32) == deg("90\xc2\xb0"));
+    // The phase parameter is the knob position; the host sees the angle at the current range (RANGE out, 0 to 90, by
+    // default). The RANGE button reads Out or In, like the button.
+    CHECK(range->getText(0.0f, 32) == "Out");
     CHECK(phase->getText(0.5f, 32) == deg("45.0\xc2\xb0"));
     CHECK(phase->getValueForText("45") == Approx(0.5f));
     CHECK(phase->getValueForText("120") == Approx(1.0f)); // clamped to the range
 
-    // At RANGE 180 the number depends on the mode: High shows the first section's angle (0-90, marked with an
+    // With RANGE in the number depends on the mode: High shows the first section's angle (0-90, marked with an
     // asterisk on the panel), Low and Constant read the full 0-180.
     range->setValueNotifyingHost(1.0f);
-    CHECK(range->getText(1.0f, 32) == deg("180\xc2\xb0"));
+    CHECK(range->getText(1.0f, 32) == "In");
+    CHECK(range->getValueForText("In") == 1.0f);
+    CHECK(range->getValueForText("out") == 0.0f);
+    CHECK(range->getValueForText("180") == 1.0f); // the old text still reads
+    CHECK(range->getValueForText("90") == 0.0f);
     CHECK(phase->getText(0.5f, 32) == deg("45.0\xc2\xb0")); // High
     CHECK(phase->getValueForText("45") == Approx(0.5f));
 
@@ -90,7 +95,7 @@ TEST_CASE("what the phase knob's number means, by mode and range", "[params]")
     CHECK(shownRangeDegrees(true, PhaseMode::low) == 180.0);
     CHECK(shownRangeDegrees(true, PhaseMode::constant) == 180.0);
 
-    // Only High at RANGE 180 is approximate.
+    // Only High with RANGE in is approximate.
     for (const auto wide : {false, true})
         for (const auto mode : {PhaseMode::high, PhaseMode::low, PhaseMode::constant})
             CHECK(shownRangeIsApproximate(wide, mode) == (wide && mode == PhaseMode::high));

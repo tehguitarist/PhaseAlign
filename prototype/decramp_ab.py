@@ -11,7 +11,7 @@ as a host does), the way the plugin is used, and the report gives that sum's lev
 (HiLo, HiLoOversampled), which the C++ matches within 1e-6.
 
 Historical (the de-cramping was approved 2026-10-06): after the RANGE redesign the settings below are read in the new
-mapping, with an angle above 90 meaning the 180 range, so the modes' sections differ from the ones this was listened to.
+mapping, with an angle above 90 meaning RANGE in, so the modes' sections differ from the ones this was listened to.
 """
 
 import math

@@ -55,7 +55,7 @@ class PhaseAlignEditor : public juce::AudioProcessorEditor,
         return (pa::params::PhaseMode)juce::roundToInt(p.convertFrom0to1(p.getValue()));
     }
     // What the knob's number means in the current mode and range (Parameters.h shownRangeDegrees): 90, or 180 where it
-    // reads exactly. High at RANGE 180 shows the first section's angle, 0 to 90, marked with an asterisk.
+    // reads exactly. High with RANGE in shows the first section's angle, 0 to 90, marked with an asterisk.
     double shownRange() const { return pa::params::shownRangeDegrees(range180(), phaseModeNow()); }
     bool shownRangeIsApproximate() const { return pa::params::shownRangeIsApproximate(range180(), phaseModeNow()); }
     // The phase readout shows the total rotation, so it starts at 180 while the polarity is inverted.

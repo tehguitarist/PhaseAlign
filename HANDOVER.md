@@ -65,8 +65,8 @@ git history, before f1b4c30). Read CLAUDE.md first; plan sections are IMPLEMENTA
   Live and Reaper.
 - **Listening:** M2 in a DAW, P2 (is true rotation useful on real material), P3 fade tuning (`prototype/out/p3/`).
 - **Real multi-mic stems.**
-- **The RANGE redesign (branch `hilo-range-modes`):** listen to `prototype/out/range/` (current vs new, 180 range
-  only; the 90 range is identical), then merge. Pending after that: the README/plan already describe it.
+- **The RANGE redesign (branch `hilo-range-modes`):** listen to `prototype/out/range/` (current vs new, RANGE in
+  only; RANGE out is identical), then merge. Pending after that: the README/plan already describe it.
 - **Design decisions:** the meter views (to discuss, "last"); ANALYSE (dead last). Decided 2026-10-06: dimming alpha
   0.4, minimum editor size 60% (586 px), RANGE/Hi-Lo as above, no extension below the lowest corners.
 - AU in pluginval locally needs the AU installed in `/Library/Audio/Plug-Ins/Components`.

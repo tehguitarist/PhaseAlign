@@ -30,7 +30,7 @@ ChainSettings phaseOnly(PhaseMode mode, double degrees, bool wide = false)
     return s;
 }
 
-// Hi/Lo's four shapes, each with the knob positions worth checking (panel angles; the 90 range ends at 90).
+// Hi/Lo's four shapes, each with the knob positions worth checking (panel angles; RANGE out ends at 90).
 struct ShapeCase
 {
     PhaseMode mode;
@@ -365,7 +365,7 @@ TEST_CASE("leaving 0 or 90 degrees on broadband input releases no burst", "[dsp]
     {
         PhaseMode mode;
         double from, to;
-        bool wideFrom, wideTo; // RANGE 180 before and after the move
+        bool wideFrom, wideTo; // RANGE in before and after the move
         bool viaConstant;      // settled in Constant first, then Hi/Lo at `from`, then the move
     };
     for (const auto fs : {44100.0, 48000.0, 96000.0, 192000.0})

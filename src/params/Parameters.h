@@ -46,10 +46,10 @@ enum class PhaseMode
 juce::StringArray phaseModeNames();
 
 // What the phase knob's number means, on the panel and in the host's text. The knob keeps its position through a RANGE
-// change; the number is the shift at the first section's reference frequency, which is 0-90 at RANGE 90. At RANGE 180
-// Low's two stacked sections and Constant's true rotation read 0-180 exactly, but High's second section sits an octave
-// or more above the first and adds its own turn there, so High shows the first section's angle, 0-90, marked with an
-// asterisk (IMPLEMENTATION_PLAN 2.3).
+// change; the number is the shift at the first section's reference frequency, which is 0-90 with RANGE out. With RANGE
+// in, Low's two stacked sections and Constant's true rotation read 0-180 exactly, but High's second section sits an
+// octave or more above the first and adds its own turn there, so High shows the first section's angle, 0-90, marked
+// with an asterisk (IMPLEMENTATION_PLAN 2.3).
 inline constexpr double shownRangeDegrees(bool range180, PhaseMode mode)
 {
     return range180 && mode != PhaseMode::high ? 180.0 : 90.0;

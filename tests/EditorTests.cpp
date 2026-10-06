@@ -143,7 +143,7 @@ TEST_CASE("readouts follow the parameters and the unit switch", "[editor]")
     phaseReadout->onTextEntered("junk");
     CHECK(getParam(proc, id::phase) == Approx(0.2f));
     setParam(proc, id::phaseRange, 0.0f);
-    phaseReadout->onTextEntered("120"); // clamped to the 90 range
+    phaseReadout->onTextEntered("120"); // clamped to the range (RANGE out: 90)
     CHECK(getParam(proc, id::phase) == Approx(1.0f));
 }
 
@@ -161,7 +161,7 @@ TEST_CASE("the phase readout adds 180 while the polarity is inverted, up to 360"
     CHECK(phaseReadout->getDigits() == "225.0"); // range 90
     setParam(proc, id::phaseRange, 1.0f);
     setParam(proc, id::phase, 1.0f);
-    CHECK(phaseReadout->getDigits() == "270.0"); // High at RANGE 180 shows the first section's angle, 0 to 90
+    CHECK(phaseReadout->getDigits() == "270.0"); // High with RANGE in shows the first section's angle, 0 to 90
     setParam(proc, id::phaseMode, 1.0f);         // Low reads the full 0 to 180
     CHECK(phaseReadout->getDigits() == "360.0");
     setParam(proc, id::polarity, 0.0f);
@@ -535,11 +535,11 @@ TEST_CASE("the phase scale label, readout and tooltips follow mode and range", "
         const char* readoutTip; // what the readout's tooltip says it is
     };
     // Knob at 0.5. Mode: 0 High, 1 Low, 2 Constant.
-    const Case cases[] = {{0.0f, 0.0f, "45.0", 90, false, "In High at RANGE 90 it is the shift at 150 Hz"},
-                          {0.0f, 1.0f, "45.0", 90, false, "In Low at RANGE 90 it is the shift at 75 Hz"},
+    const Case cases[] = {{0.0f, 0.0f, "45.0", 90, false, "In High with RANGE out it is the shift at 150 Hz"},
+                          {0.0f, 1.0f, "45.0", 90, false, "In Low with RANGE out it is the shift at 75 Hz"},
                           {0.0f, 2.0f, "45.0", 90, false, "In Constant it is the rotation at every frequency"},
                           {1.0f, 0.0f, "45.0", 90, true, "first section's angle, 0 to 90"},
-                          {1.0f, 1.0f, "90.0", 180, false, "In Low at RANGE 180 it is the shift at 150 Hz"},
+                          {1.0f, 1.0f, "90.0", 180, false, "In Low with RANGE in it is the shift at 150 Hz"},
                           {1.0f, 2.0f, "90.0", 180, false, "In Constant it is the rotation at every frequency"}};
     setParam(proc, id::phase, 0.5f);
     for (const auto& c : cases)
@@ -563,13 +563,13 @@ TEST_CASE("the phase scale label, readout and tooltips follow mode and range", "
         if (b->getTooltip().startsWith("RANGE"))
             range = b;
     REQUIRE(range != nullptr);
-    CHECK(range->getTooltip().startsWith("RANGE 90"));
-    CHECK(range->getTooltip().contains("Press for 180"));
+    CHECK(range->getTooltip().startsWith("RANGE out"));
+    CHECK(range->getTooltip().contains("Press it in"));
     setParam(proc, id::phaseRange, 1.0f);
-    CHECK(range->getTooltip().startsWith("RANGE 180"));
+    CHECK(range->getTooltip().startsWith("RANGE in"));
     CHECK(range->getTooltip().contains("one on the lows"));
     CHECK(range->getTooltip().contains("0 to 90" + star)); // "0 to 90°*"
-    CHECK(range->getTooltip().contains("Press for 90"));
+    CHECK(range->getTooltip().contains("Press it out"));
     setParam(proc, id::phaseMode, 1.0f); // Low
     CHECK(range->getTooltip().contains("two stacked sections around 150 Hz"));
 
@@ -618,7 +618,7 @@ TEST_CASE("range states", "[.][snapshot]")
 
 // The number on the panel is the phase the plugin applies, measured end to end: set the parameters, run a sine at the
 // reference frequency through the processor, and compare the measured lag (against the input delayed by the reported
-// latency) with the phase readout's digits. High at RANGE 180 is the exception that the asterisk marks: its readout is
+// latency) with the phase readout's digits. High with RANGE in is the exception that the asterisk marks: its readout is
 // the first section's angle, and the lag at its first reference (75 Hz) is that plus the second section's small share.
 TEST_CASE("the phase readout is the phase the plugin applies", "[editor][readout]")
 {
@@ -628,12 +628,12 @@ TEST_CASE("the phase readout is the phase the plugin applies", "[editor][readout
         float range, mode; // RANGE 0 / 1; mode 0 High, 1 Low, 2 Constant
         double frequency;  // the reference frequency of the number shown
         const char* name;
-        bool marked; // High at RANGE 180
+        bool marked; // High with RANGE in
     };
     const Case cases[] = {
-        {0.0f, 1.0f, 75.1, "Low, RANGE 90", false},        {0.0f, 0.0f, 150.1, "High, RANGE 90", false},
-        {1.0f, 1.0f, 150.1, "Low, RANGE 180", false},      {1.0f, 0.0f, 75.1, "High, RANGE 180", true},
-        {0.0f, 2.0f, 1000.0, "Constant, RANGE 90", false}, {1.0f, 2.0f, 1000.0, "Constant, RANGE 180", false}};
+        {0.0f, 1.0f, 75.1, "Low, RANGE out", false},        {0.0f, 0.0f, 150.1, "High, RANGE out", false},
+        {1.0f, 1.0f, 150.1, "Low, RANGE in", false},        {1.0f, 0.0f, 75.1, "High, RANGE in", true},
+        {0.0f, 2.0f, 1000.0, "Constant, RANGE out", false}, {1.0f, 2.0f, 1000.0, "Constant, RANGE in", false}};
     for (const auto& c : cases)
         for (const auto knob : {0.1f, 0.25f, 0.5f, 0.75f, 1.0f})
         {
@@ -650,6 +650,14 @@ TEST_CASE("the phase readout is the phase the plugin applies", "[editor][readout
             REQUIRE(readouts.size() == 2);
             auto* phaseReadout = readouts[0]->getX() > readouts[1]->getX() ? readouts[0] : readouts[1];
             const auto shown = phaseReadout->getDigits().getDoubleValue();
+            const auto labels = childrenOfType<pa::ui::ScaleLabel>(*editor);
+            REQUIRE(labels.size() == 1);
+            if (knob == 1.0f) // at full knob the readout is the scale label's number (90 or 180, with the asterisk's)
+            {
+                CHECK(shown == Approx((double)labels[0]->getDegrees()).margin(0.05));
+                CHECK(labels[0]->hasAsterisk() == c.marked);
+                CHECK(phaseReadout->getSuffix() == juce::String::fromUTF8(c.marked ? "\xc2\xb0*" : "\xc2\xb0"));
+            }
 
             // 1.5 s of a sine at the reference frequency, then the lag from the last 0.5 s.
             const auto total = (int)(1.5 * fs), block = 512;

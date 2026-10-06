@@ -27,11 +27,11 @@ job, better.
 
 ## Current status (update as work progresses)
 
-1. **Hi/Lo design:** `prototype/hilo.py` (the reference for the C++). **RANGE redesign (user, 2026-10-06, R15, branch
-   `hilo-range-modes`, not merged: waiting on the user's listening, `prototype/range_ab.py` → `prototype/out/range/`):**
-   RANGE 90 is one section, RANGE 180 two sections sharing the whole knob travel; each (mode, range) is its own shape
-   from the reference unit's captured geometries (LOW 90 75.1 Hz, LOW 180 two stacked at 150.1 Hz, HIGH 90 150.1 Hz,
-   HIGH 180 75.1 Hz + 1502 Hz), and the modes are named for what they do (manual's wording). HIGH at RANGE 180 shows
+1. **Hi/Lo design:** `prototype/hilo.py` (the reference for the C++). **RANGE redesign (user, 2026-10-06, R15 and R16; merged to
+   master; the user's listening on `prototype/range_ab.py` → `prototype/out/range/` is still outstanding):**
+   RANGE out is one section, RANGE in two sections sharing the whole knob travel; each (mode, range) is its own shape
+   from the reference unit's captured geometries (LOW out 75.1 Hz, LOW in two stacked at 150.1 Hz, HIGH out 150.1 Hz,
+   HIGH in 75.1 Hz + 1502 Hz), and the modes are named for where the middle of the turn sits (LOW lower, HIGH higher; plan 2.3 "How to read the names"). HIGH with RANGE in shows
    the first section's angle, 0-90, with an asterisk (scale label, readout suffix, tooltips). Plan 2.3 has it all.
    Extending below the lowest corners is closed. The knob's whole travel is usable in all four shapes (no dead zones;
    `prototype/hf_check.py` part 5). The reference unit's captures are in `captures/` (gitignored); never name it in

@@ -6,16 +6,17 @@ Two first-order all-pass sections in series, each parametrised by k = 1/tan(pi*f
 section at f is 2*atan(k*tan(pi*f/fs)); k -> 0 is identity.
 
 The knob's travel sets phi, the angle of section 1 (its lag at its reference f1), from 0 to 90 degrees. The RANGE
-button (`wide`) selects the 90 range (one section, theta = phi) or the 180 range (two sections, theta2 = phi, so the
+button (`wide`) selects RANGE out (one section, theta = phi) or RANGE in (two sections, theta2 = phi, so the
 panel angle theta = 2 phi runs 0-180). k_i = tan(theta_i / 2) / tan(pi * f_i / fs), so the mapping is in Hz and is the
 same at every sample rate.
 
 Each (mode, range) combination is its own "shape" with its own section references, taken from the captures of the
-reference unit (75.1 Hz, 150.1 Hz and 20 x 75.1 = 1502 Hz; nothing invented). The modes are named as the manual
-describes the 180 range: HIGH is the wide setting (one section on the lows, one on the highs), LOW the narrow one (both
-sections on the lows, stacked):
+reference unit (75.1 Hz, 150.1 Hz and 20 x 75.1 = 1502 Hz; nothing invented). The modes are named for where the middle
+of the turn sits (the frequency where half the full turn has happened, at full knob): LOW 75 Hz and 150 Hz, HIGH 150 Hz
+and about 340 Hz, for RANGE out and in. With RANGE in, HIGH is also more spread out (one section on the lows, one on
+the highs, as the manual describes the wider setting) and LOW is the narrow one (both sections on the lows, stacked):
 
-  | | 90 range | 180 range |
+  | | RANGE out | RANGE in |
   |---|---|---|
   | LOW | one section at 75.1 Hz | two stacked sections at 150.1 Hz |
   | HIGH | one section at 150.1 Hz | 75.1 Hz and 1502 Hz |
@@ -55,7 +56,7 @@ SHAPES = {  # (mode, wide) -> section references
 
 
 def knob_angles(theta, wide):
-    """Panel angle theta (0-90 in the 90 range, 0-180 in the 180 range) -> (phi, w): section 1's angle and the
+    """Panel angle theta (0-90 in RANGE out, 0-180 in RANGE in) -> (phi, w): section 1's angle and the
     weight of section 2 (the targets the processor ramps)."""
     theta = min(max(theta, 0.0), 180.0 if wide else 90.0)
     return (theta / 2.0, 1.0) if wide else (theta, 0.0)
@@ -68,7 +69,7 @@ def split(mode, theta, wide):
 
 
 def angles(shape, phi):
-    """A shape's section angles at phi: section 2 carries the same angle in the 180 range and none in the 90 range."""
+    """A shape's section angles at phi: section 2 carries the same angle in RANGE in and none in RANGE out."""
     return phi, (phi if shape[1] else 0.0)
 
 
@@ -335,7 +336,7 @@ def checks(out, plt):
             P = np.array([analog_lag(mode, t, fa, wide) for t in np.arange(0, float(thetas[-1]) + 0.001, 0.05)])
             rep.append(f"- {mode} range {rname}: smallest lag change per 0.05° step over 1 Hz–1 MHz (analog, so it "
                        f"holds at every rate): {np.min(np.diff(P, axis=0)):+.5f}°")
-        # Each range is its own shape; the 180 range is not guaranteed to have more lag at every frequency than the 90
+        # Each range is its own shape; RANGE in is not guaranteed to have more lag at every frequency than the 90
         # range at the same knob position (LOW 180's stacked pair sits at 150 Hz, LOW 90's single section at 75 Hz).
         d = min(np.min(analog_lag(mode, 2 * kn, fa, True) - analog_lag(mode, kn, fa, False)) for kn in (10, 45, 90))
         rep.append(f"- {mode}: same knob position, range 180 minus range 90, smallest over 1 Hz–1 MHz: {d:+.2f}° "

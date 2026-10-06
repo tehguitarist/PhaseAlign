@@ -19,6 +19,7 @@ processed linked, so both channels get the same treatment.
 
 - [Quick start](#quick-start)
 - [The controls](#the-controls)
+- [The phase modes](#the-phase-modes)
 - [Reading the meter](#reading-the-meter)
 - [Which control for which problem](#which-control-for-which-problem)
 - [Latency and automation](#latency-and-automation)
@@ -44,9 +45,9 @@ it on one of the pair and feed the other into its **sidechain**; the meter then 
    0 ms. The delay reaches −4 to +4 ms, so it can move this track either way. Beyond that the screen says **TRANSIENTS
    OUT OF DELAY RANGE**: move a clip in the DAW first.
 3. **Then phase.** Switch to the **FREQUENCY** view and turn **PHASE** on. The bright curve (processed) should sit at
-   +1 across the band. **LOW** and **HIGH** rotate like an all-pass (under 1 ms of latency): LOW concentrates the turn on the
-   lows, HIGH is wider and reaches the highs too at the 180 range; **CONSTANT** turns every frequency by the same angle.
-   **RANGE** picks one section (90°, finer) or two (180°).
+   +1 across the band. **LOW** and **HIGH** rotate like an all-pass (under 1 ms of latency): LOW centres the turn lower down in
+   frequency, HIGH higher up (and, with RANGE in, spread wider); **CONSTANT** turns every frequency by the same angle.
+   **RANGE** out is one section (finer); pressed in it is two (a wider turn).
 4. **Polarity (Ø)** inverts the track if the curve sits near −1 everywhere.
 5. Check by ear: solo the pair and listen for the low end filling in.
 
@@ -80,10 +81,10 @@ work, so you can set them up before switching them on).
 
 | Control | What it does |
 |---|---|
-| **PHASE knob** | How far to rotate the phase, from 0° (no change) up to 90° or 180° depending on **RANGE**. |
+| **PHASE knob** | How far to rotate the phase, from 0° (no change) up to 90° (RANGE out) or 180° (RANGE in). |
 | **PHASE button** | Turns the phase section on or off. |
-| **Mode switch** | **HIGH** and **LOW** are all-pass rotations: the phase shift changes with frequency, growing as you go up the spectrum. **LOW** is the narrow one: it puts the turn on the lows (one section around 75 Hz, or two stacked around 150 Hz at RANGE 180). **HIGH** is the wide one: one section around 150 Hz, or at RANGE 180 two sections, one on the lows (around 75 Hz) and one on the highs (around 1.5 kHz). **CONSTANT** turns every frequency by the same angle, which is a true phase rotation, at the price of about 43 ms of latency. |
-| **RANGE button** | **90°** runs one section over the knob's travel, for finer control. **180°** runs two sections, for a wider turn. The knob keeps its position when you press it. The scale label above the knob shows the current range; in HIGH at 180 it reads **90°\***, because the number is then the first section's angle (the second section adds its own turn higher up). |
+| **Mode switch** | (See [The phase modes](#the-phase-modes) for how each works.) **HIGH** and **LOW** are all-pass rotations: the phase shift changes with frequency, growing as you go up the spectrum. They differ in where the middle of the turn sits. **LOW** centres it lower down: around 75 Hz with RANGE out, around 150 Hz with RANGE in (two sections stacked on top of each other). **HIGH** centres it higher up: around 150 Hz with RANGE out, around 340 Hz with RANGE in (two sections spread apart, one near 75 Hz and one near 1.5 kHz, so the turn is also more spread out). **CONSTANT** turns every frequency by the same angle, which is a true phase rotation, at the price of about 43 ms of latency. |
+| **RANGE button** | Out (the default) runs one section over the knob's travel, for finer control. Pressed **in**, it runs two sections for a wider turn. The knob keeps its position when you press it. The scale label above the knob shows the largest number the knob now reads, 90° or 180°; in HIGH with RANGE in it reads **90°\***, because the number is then the first section's angle (the second section adds its own turn higher up). |
 | **Readout** | The rotation in degrees (an asterisk where it is the first section's angle, as above). Double-click to type a value. |
 
 ### Meter (bottom)
@@ -106,6 +107,70 @@ work, so you can set them up before switching them on).
 | Hover | A tooltip says what the control does and its units, including the latency a setting adds. |
 
 Everything can be automated except the DELAY button and the HIGH / LOW / CONSTANT switch, because changing either one changes the latency.
+
+## The phase modes
+
+The PHASE section turns the phase of a track without changing its level. **HIGH** and **LOW** do it with all-pass
+filters, which turn each frequency by a different amount; **CONSTANT** turns every frequency by the same angle.
+**RANGE** doubles the reach. The figure shows what each of the six settings does to the phase across the spectrum, at a
+quarter, half, three-quarters and the full turn of the knob.
+
+![Phase turned by each mode and range](docs/images/phase-modes.png)
+
+### HIGH and LOW: all-pass sections
+
+Each section is a first-order all-pass. It turns the phase from 0° at the lowest frequencies up to 180° at the top, with
+most of the turn happening around its *corner* frequency. The knob moves that corner. At 0° the corner is far above the
+audible band, so nothing changes; as you turn the knob up the corner sweeps down through the spectrum, turning more and
+more of it. Where a filter's corner sits decides which part of the spectrum gets the turn, and that is what separates the
+modes. The dotted lines in the figure mark each setting's *reference frequency*, where the number on the panel is
+measured.
+
+| | RANGE out (one section, finer) | RANGE in (two sections, wider) |
+|---|---|---|
+| **LOW** | One section, referenced at **75 Hz**. | Two sections **stacked** at 150 Hz, so the same corner turns twice as far: a steep turn that stays on the lows. |
+| **HIGH** | One section, referenced at **150 Hz**, an octave above LOW's. | Two sections spread apart, one on the lows (**75 Hz**) and one on the highs (**1.5 kHz**): a wider, shallower turn across the whole spectrum. |
+
+### Where the turn sits
+
+What separates LOW from HIGH is **where the middle of the turn sits**: the frequency where half of the full turn has
+happened. At full knob:
+
+| | RANGE out (turns 180° in all) | RANGE in (turns 360° in all) |
+|---|---|---|
+| **LOW** | **75 Hz** (90° have turned) | **150 Hz** (180° have turned) |
+| **HIGH** | **150 Hz** | about **340 Hz** |
+
+So **LOW centres the turn lower down and HIGH higher up**, with RANGE out or in. With RANGE in, HIGH is also more
+spread out: LOW's stacked sections turn steeply and are nearly finished by 1 kHz (326° of 360°), while HIGH's spread
+sections keep turning through the highs (239° at 1 kHz, 325° at 5 kHz). Turning the knob down moves the middle of the
+turn up in frequency, so a quarter turn of LOW is centred well above 75 Hz.
+
+### CONSTANT: a true rotation
+
+CONSTANT turns every frequency from about 20 Hz upwards by the same angle, which an all-pass can't do (the flat lines in
+the figure). It costs about 43 ms of latency, which the host compensates. The angle is 0 to 90° with RANGE out or 0 to 180° with RANGE in,
+and the rotation is that angle at every frequency across the audible band, to a fraction of a degree.
+
+### What the number means
+
+The readout is the phase turned at the setting's reference frequency (the dotted line), so at full travel it reads 90° with
+RANGE out and 180° with RANGE in, and a reading of, say, 45° means 45° of phase turned at that frequency. HIGH with
+RANGE in is the one exception. Its two sections are far apart, so there's no single frequency at which the whole turn is 180°.
+It reads 0–90° with an **asterisk**, which is the angle of its first section (the true phase at 75 Hz is a few degrees
+more, about 96° at full travel). The full 180° of its total turn arrives around 340 Hz, and it keeps climbing towards
+360° at the top.
+
+The knob keeps its position when you press RANGE, so in LOW and CONSTANT the number doubles or halves, and in HIGH it
+keeps its value and gains or loses the asterisk. Pressing RANGE or switching mode glides the sections over about 30 ms
+rather than jumping.
+
+### Choosing one
+
+A reasonable way in, using the FREQUENCY meter view: if the two tracks only disagree in the bass, try **LOW**; if the
+disagreement carries up through the mids, try **HIGH**; press RANGE in when 90° doesn't reach far enough; use
+**CONSTANT** when you want the same angle at every frequency, or to nudge a track by a few degrees across the whole
+band. Set the **delay** first, and flip **Ø** if the curve sits near −1 everywhere.
 
 ## Reading the meter
 
@@ -175,14 +240,14 @@ result. The meter reads the input and output of this chain and the sidechain, an
 **All-pass phase (HIGH and LOW).** A first-order all-pass filter changes phase but not level: it shifts 0° at DC
 towards 180° at Nyquist, and the corner frequency decides where in the spectrum the turn happens. The knob angle θ is
 the shift at a reference frequency, and above it the shift keeps growing, the way any all-pass behaves. One section runs
-from 0° to 90°; past 90° a second section joins, so the phase keeps rising across the range.
+from 0° at the bottom of the spectrum to 180° at the top; RANGE in adds a second section, which doubles the turn available.
 
-| Mode | RANGE 90 | RANGE 180 |
+| Mode | RANGE out | RANGE in |
 |---|---|---|
 | LOW | one section; the angle is its shift at 75 Hz | two stacked sections; the angle is their combined shift at 150 Hz, 0–180° |
 | HIGH | one section; the angle is its shift at 150 Hz | two sections, at 75 Hz and about 1.5 kHz; the number is the first section's angle, 0–90° |
 
-At RANGE 180 the two sections share the knob's whole travel. Pressing RANGE or changing mode glides the sections from
+With RANGE in the two sections share the knob's whole travel. Pressing RANGE or changing mode glides the sections from
 one shape to the other over about 30 ms. More knob never means less phase at any frequency; the knob starts at exactly
 0° (no change) and every part of its travel does something. The corners are fixed in Hz at every sample rate, and
 the sections are in direct form I, which stays quiet when the knob moves.
@@ -190,7 +255,7 @@ the sections are in direct form I, which stays quiet when the knob moves.
 **Matching an analogue all-pass.** A digital all-pass squeezes its shift towards Nyquist ("cramping"), so near the top
 of the spectrum a plain version drifts away from an analogue one. HIGH and LOW therefore run oversampled (4× below 85 kHz, 2× below 170 kHz) between
 linear-phase half-band filters, which keeps them within about 2.5° of an analogue all-pass to 20 kHz at every sample
-rate (about 5° for LOW at RANGE 180, whose two stacked sections double the error), at the cost of the small latency listed above. A zero-latency version can't do this (it follows from Foster's
+rate (about 5° for LOW with RANGE in, whose two stacked sections double the error), at the cost of the small latency listed above. A zero-latency version can't do this (it follows from Foster's
 reactance theorem).
 
 **True rotation (CONSTANT).** The signal goes through a Hilbert transformer, which produces the signal and a copy

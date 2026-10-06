@@ -94,8 +94,15 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout(std::function<d
     layout.add(std::make_unique<AudioParameterBool>(
         pid(id::phaseRange), "Phase Range", false,
         AudioParameterBoolAttributes()
-            .withStringFromValueFunction([](bool is180, int) { return is180 ? "180" + degreeSign : "90" + degreeSign; })
-            .withValueFromStringFunction([](const String& s) { return s.trim().startsWith("180"); })));
+            // The button is pressed in for the wider range (two sections, 0 to 180) and out for the finer one (one
+            // section, 0 to 90). Typed text also accepts the old "180" and "90".
+            .withStringFromValueFunction([](bool in, int) { return in ? "In" : "Out"; })
+            .withValueFromStringFunction(
+                [](const String& s)
+                {
+                    const auto t = s.trim().toLowerCase();
+                    return t.startsWith("in") || t.startsWith("180") || t == "on" || t == "1";
+                })));
 
     // Not automatable (R5): leaving or entering Constant changes the reported latency.
     layout.add(std::make_unique<AudioParameterChoice>(pid(id::phaseMode), "Phase Mode", phaseModeNames(), 0,

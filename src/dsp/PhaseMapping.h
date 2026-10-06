@@ -9,9 +9,9 @@
 //
 // Each (mode, range) combination is a "shape" with its own section reference frequencies: LOW 90 is one section at
 // 75.1 Hz, LOW 180 two stacked sections at 150.1 Hz, HIGH 90 one section at 150.1 Hz, HIGH 180 sections at 75.1 Hz and
-// 20 x 75.1 Hz. The knob's panel angle theta (0 to 90 in the 90 range, 0 to 180 in the 180 range) gives phi, the angle
-// of section 1 (its lag at f1): phi = theta in the 90 range, theta / 2 in the 180 range. Section 2 carries phi in the
-// 180 range and nothing in the 90 range. Each section's k = max(tan(theta_i / 2) / tan(pi f_i / fs), kMin). The mapping
+// 20 x 75.1 Hz. The knob's panel angle theta (0 to 90 in RANGE out, 0 to 180 in RANGE in) gives phi, the angle
+// of section 1 (its lag at f1): phi = theta in RANGE out, theta / 2 in RANGE in. Section 2 carries phi in the
+// RANGE in and nothing in RANGE out. Each section's k = max(tan(theta_i / 2) / tan(pi f_i / fs), kMin). The mapping
 // is in Hz, so it is the same at every rate.
 namespace pa::dsp::mapping
 {
@@ -26,7 +26,7 @@ enum class Mode
 struct Shape
 {
     Mode mode = Mode::hi;
-    bool wide = false; // the 180 range
+    bool wide = false; // RANGE in
 
     friend bool operator==(const Shape& a, const Shape& b) { return a.mode == b.mode && a.wide == b.wide; }
     friend bool operator!=(const Shape& a, const Shape& b) { return ! (a == b); }

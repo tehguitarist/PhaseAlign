@@ -215,8 +215,8 @@ def main():
             lags = np.array([oversampled_phase(mode, th, fs, f) for th in thetas])
             step = np.abs(np.diff(lags, axis=0)).max(axis=1)
             i = int(step.argmin())
-            # The readout: the lag at the first reference, except High at RANGE 180, which shows section 1's own angle
-            # (half the panel angle); Low at RANGE 180's stacked pair reads the total at the shared reference.
+            # The readout: the lag at the first reference, except High with RANGE in, which shows section 1's own angle
+            # (half the panel angle); Low with RANGE in's stacked pair reads the total at the shared reference.
             err = 0.0
             fo = fs * oversampling.plan(fs)[0]
             for th in thetas:
