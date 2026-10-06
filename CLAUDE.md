@@ -86,8 +86,8 @@ job, better.
       - CI: the DSP benchmark on every OS, pluginval logs, `workflow_dispatch`, `_USE_MATH_DEFINES` for MSVC.
       - pluginval at strictness 10 passes locally on the VST3.
 
-      Open (user): de-cramping Hi/Lo's top octave (up to 80° at 16–20 kHz at 44.1 kHz, worst setting; plan 2.3); the
-      44.1 kHz fractional delay's roll-off above 20 kHz (plan 2.6). Benchmarks: `PhaseAlignDspTests "chain cost per
+      Next: **`HANDOVER.md`** (de-cramping Hi/Lo's top octave first; the 44.1 kHz delay's roll-off above 20 kHz is
+      accepted, user 2026-10-06). Benchmarks: `PhaseAlignDspTests "chain cost per
       stereo frame"` (Release); `[dump]` writes renders for comparing two builds bit for bit.
    - The stem analysis and auto-suggest (ANALYSE) work is dead last. Real multi-mic stem pairs are still wanted for the
      P2/P3 listening.
@@ -97,6 +97,7 @@ job, better.
 
 - `PLAN.md`: the design spec (what the plugin does and why).
 - `IMPLEMENTATION_PLAN.md`: how it gets built, in milestone order, plus deviations from PLAN.md that need sign-off.
+- `HANDOVER.md`: the next work that needs no input from the user, in order (de-cramping Hi/Lo first).
 - `ui/ui-info.csv`: UI artwork positions and sizes. **x/y are the centre of each image**, in a 1954x1224
   design space. The asset pipeline renders every image at 2.5x of the 782x490 default size, which is exactly its
   slot in the design space (1954x1224 for `ui/plugin-base.png`), and never enlarges a master. The user may replace

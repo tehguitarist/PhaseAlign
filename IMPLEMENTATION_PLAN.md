@@ -269,9 +269,9 @@ The knob angle θ is split into θ₁ (section 1's lag at f₁) and θ₂ (secti
   Nyquist a digital section always reaches 180°, so it bends away: worst over the knob's travel (just past 0° and 90°,
   where a corner sits highest), 11° at 5–10 kHz and 80° at 16–20 kHz at 44.1 kHz (58° at 48 kHz, 9° at 96 kHz, 2° at
   192 kHz); at a typical setting (the median over the travel), 2° (Hi) and 8° (Lo) at 16–20 kHz at 44.1 kHz. So the
-  same knob setting's top octave differs between a 44.1 kHz and a 192 kHz session by up to 78°. **Open (user):**
-  de-cramped sections (e.g. second-order all-passes fitted to the analog phase up to 20 kHz) would remove that; it
-  changes the sound and needs a design and a listen.
+  same knob setting's top octave differs between a 44.1 kHz and a 192 kHz session by up to 78°. **Next (user,
+  2026-10-06: go ahead with the plan):** de-cramped sections, so a setting sounds the same at every rate;
+  `HANDOVER.md` item 1. It changes the sound in the top octave, so the user listens before it merges.
 - **Knob feel:** `phase` is linear in degrees (an optional skew is a later detail).
 
 **Smoothing:** smooth the knob angle linearly over about 30 ms, then map it to k per 32-sample sub-block, but only
@@ -482,7 +482,8 @@ core).
 - **Above 20 kHz** (`prototype/out/hf/report.md` part 4): the Kaiser kernels' spec stops at 20 kHz, and a fractional
   setting rolls off above it, worst at half a sample: −1.6 dB at 21 kHz and −26 dB at 22 kHz at 44.1 kHz; −0.3 dB at
   21 kHz and −1.9 dB at 22 kHz at 48 kHz; flat at 96 kHz and up. Whole-sample settings are exact everywhere. Holding
-  44.1 kHz flat to about 21.5 kHz needs about twice the taps (about 0.5 ms more latency). Open (user).
+  44.1 kHz flat to about 21.5 kHz needs about twice the taps (about 0.5 ms more latency). **Accepted as is (user,
+  2026-10-06): rolling off above 20 kHz at 44.1 kHz is fine.**
 
 ---
 
@@ -748,6 +749,5 @@ Most of this plan is standard plugin engineering. The parts that could need iter
 ## 7. Still needed from you
 
 - **Real multi-mic stem pairs** for P2/P3 listening: kick in/out, snare top/bottom, bass DI/amp, guitar close/room.
-- Decisions from the 2026-10-06 pass: whether to de-cramp Hi/Lo's top octave (2.3); whether the delay's fractional
-  kernels at 44.1 kHz should stay flat above 20 kHz (they are −1.6 dB at 21 kHz; longer kernels add latency; 2.6);
-  PFFFT only if CI's Windows/Linux numbers are over budget (2.6).
+- Listening once the de-cramped Hi/Lo is built (`HANDOVER.md` item 1). Work that needs no input from the user is
+  in `HANDOVER.md`.
