@@ -70,7 +70,7 @@ job, better.
       Hi/Lo mapping without asking; regenerate the goldens (`golden.py`) whenever a reference changes.
    4. **Efficiency**: benchmarks done (plan 2.6, all within budget on macOS) and vDSP confirmed. Left: Windows/Linux
       (no vDSP) benchmarks, PFFFT only if those are over budget.
-   5. **DSP and hardening pass (2026-10-06, branch `dsp-hardening`, pushed; worktree `.claude/worktrees/dsp-hardening`).**
+   5. **DSP and hardening pass: DONE (2026-10-06, merged to master and pushed; CI green on all three platforms).**
       Before/after table in plan 2.6: Hi/Lo idle 10.9 → 4.0 ns, Constant 48 kHz 61.9 → 30 ns, 192 kHz 97 → 39 ns.
       With the generic FFT that Windows/Linux use, measured here with `-DPA_GENERIC_FFT_TESTS=ON`: 97 → 61 ns and
       148 → 103 ns. `src/dsp/RealFft.h` is the FFT interface (PFFFT would go there). Also built:

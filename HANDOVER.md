@@ -1,6 +1,6 @@
 # Handover: work that needs no input from the user
 
-Drafted 2026-10-06 at the end of the DSP and hardening pass (branch `dsp-hardening`). Read CLAUDE.md first; plan
+Drafted 2026-10-06 at the end of the DSP and hardening pass (merged to master the same day). Read CLAUDE.md first; plan
 sections are IMPLEMENTATION_PLAN.md. Items are in order of value. Each says when it is done and where the user comes
 in, if at all.
 
@@ -20,11 +20,10 @@ in, if at all.
 
 ## State at handover
 
-- `dsp-hardening` is pushed with a clean history: 6 commits on origin/master, no measurement material in any of them.
+- master (local and origin) has a clean history: the pass's commits on top of dcbb048, with no measurement material
+  in any of them. The old local commits and branches were removed (user, 2026-10-06).
 - CI green on macOS, Linux and Windows (run 37396526948): ctest everywhere, auval and pluginval at strictness 10 on
   macOS.
-- Local `master` still has its 14 old commits, which contain the removed material. `dsp-hardening-wip` is a local-only
-  snapshot of the same tree. Neither should ever be pushed.
 
 ## 1. De-cramp Hi/Lo, so a setting sounds the same at every rate
 
@@ -134,13 +133,10 @@ closed or the window is hidden: no `CorrelationAnalyser` and no `MeterScreen` pa
 - **`release.yml` review:** read it against the current tree (the tests are off there). Don't run it: it needs signing
   secrets and publishes a draft GitHub release, so it's the user's call.
 
-## 6. Housekeeping (ask before each)
+## 6. Housekeeping (ask first)
 
-- Merge `dsp-hardening` into master: the user's decision.
-- Afterwards, point local `master` at the clean history (its old commits hold the removed material) and delete
-  `dsp-hardening-wip`.
-- Remove the stale worktree `.claude/worktrees/dsp-negative-delay`: detached at 6452ea9, it still has the old files.
 - AU in pluginval locally needs the AU installed in `/Library/Audio/Plug-Ins/Components`, which is the user's call.
+- The merge, the old branches and the stale worktrees were dealt with on 2026-10-06.
 
 ## Not in this handover: needs the user
 

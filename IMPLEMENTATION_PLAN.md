@@ -389,7 +389,7 @@ core).
 | Hi ↔ Lo | k-glide (all-pass throughout), reversible mid-glide | 30 ms (built) |
 | Hi/Lo ↔ Constant | fade out, switch + latency change (delay line cleared), fade in | 10 + 10 ms (built) |
 
-### 2.6 CPU (and latency): optimisation pass, 2026-10-06 (branch `dsp-hardening`)
+### 2.6 CPU (and latency): optimisation pass, 2026-10-06
 
 - **Budgets** (checked by `PhaseAlignDspTests "[bench]"`, full chain per stereo frame): Hi/Lo **< 50 ns**; Constant
   **< 150 ns** (about 0.7% of a core at 48 kHz).
