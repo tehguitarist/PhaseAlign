@@ -14,7 +14,10 @@
 //   - the frequency view: r(f) = Σ Re(X·Y*) / sqrt(Σ|X|² Σ|Y|²) over a 1/6-octave window around each point;
 //   - the overall pair: the same over every bin from 20 Hz to 20 kHz (unweighted broadband correlation);
 //   - the time view: the PHAT lag function (each bin's cross-spectrum set to unit magnitude, inverse FFT), a unit
-//     spike at the lag of a pure delay whatever the spectrum, and at 0 ms for a pure phase rotation.
+//     spike at the lag of a pure delay whatever the spectrum, and at 0 ms for a pure phase rotation. Each bin is
+//     weighted by its squared coherence with the sidechain, so bins where the two signals have nothing in common
+//     (the whole top of the spectrum, for a kick drum) don't bury the peak in noise; with full coherence everywhere
+//     it is plain PHAT.
 //
 // Not real-time code: prepare() allocates; process() doesn't, but runs FFTs. GUI thread only.
 namespace pa::meter
@@ -30,7 +33,9 @@ class CorrelationAnalyser
         fast
     };
     static constexpr double tauFloorSeconds = 0.3, tauCycles = 8.0;
-    static constexpr double fastTauFloorSeconds = 0.1, fastTauCycles = 3.0;
+    // Fast also halves the analysis frame (4096 points at 48 kHz: 85 ms, a new result every 21 ms; 11.7 Hz bins), so
+    // it responds in about 0.1 s rather than 0.25 s. Switching speed restarts the averages.
+    static constexpr double fastTauFloorSeconds = 0.04, fastTauCycles = 2.0;
     static constexpr double gateDb = -70.0; // a signal below this in a window is not measured
     static constexpr double minHz = 20.0, maxHz = 20000.0;
     static constexpr int curvePoints = 256; // log-spaced, minHz to maxHz (or just below Nyquist)
@@ -41,7 +46,7 @@ class CorrelationAnalyser
     static constexpr double wideLagRangeMs = 40.0; // and a coarse search beyond it, well inside the frame
 
     // FFT size: 8192 at 44.1/48 kHz, scaled with the rate (5.9 Hz bins at 48 kHz).
-    static int fftSizeFor(double sampleRate);
+    static int fftSizeFor(double sampleRate, Speed speed = Speed::slow);
 
     void prepare(double sampleRate);
     void setSpeed(Speed);
@@ -120,8 +125,8 @@ class CorrelationAnalyser
     void analyseFrame();
     void updateResults();
     void setAlpha();
-    void lagFunction(const std::vector<double>& re, const std::vector<double>& im, std::vector<float>& out, Peak& peak,
-                     Peak* wide = nullptr);
+    void lagFunction(const std::vector<double>& re, const std::vector<double>& im, const std::vector<double>& power,
+                     std::vector<float>& out, Peak& peak, Peak* wide = nullptr);
     double windowLevelDb(double powerSum) const; // mean-square level, in dBFS, of a sum of |X|² over bins
 
     double fs = 0.0;
@@ -133,7 +138,8 @@ class CorrelationAnalyser
 
     std::vector<double> alpha;
     std::vector<double> xyRe, xyIm, zyRe, zyIm, xx, zz, yy;
-    double powerToMeanSquare = 0.0, lagNorm = 1.0;
+    double powerToMeanSquare = 0.0, lagNorm = 1.0, lagUnit = 1.0; // lagUnit: one unit-weight bin's value at lag 0
+    std::vector<double> lagWeight, lagFloor; // per bin: the weight and the coherence below which it is zero
 
     Speed speed = Speed::slow;
     bool previewActive = false;

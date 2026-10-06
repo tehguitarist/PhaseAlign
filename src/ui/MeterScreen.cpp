@@ -478,8 +478,7 @@ void MeterScreen::paintGrid(juce::Graphics& g) const
     {
         g.setColour(design::meterAxisText.withAlpha(0.6f));
         const auto hold = controlArea(Control::hold);
-        g.drawRect(juce::Rectangle<float>(hold.getX() + 6.0f * s, titleY - 13.0f * s, hold.getWidth() - 12.0f * s, 19.0f * s),
-                   thin);
+        g.drawRect(juce::Rectangle<float>(hold.getX(), titleY - 17.0f * s, hold.getWidth(), 26.0f * s), thin);
     }
 
     // Separator and the overall column's axis.

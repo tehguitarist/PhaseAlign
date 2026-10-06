@@ -10,10 +10,11 @@ namespace
 constexpr float notMeasured = std::numeric_limits<float>::quiet_NaN();
 }
 
-int CorrelationAnalyser::fftSizeFor(double sampleRate)
+int CorrelationAnalyser::fftSizeFor(double sampleRate, Speed speed)
 {
-    int size = 4096;
-    while (size < 8192.0 * sampleRate / 48000.0 - 1.0e-6)
+    const auto base = speed == Speed::slow ? 8192.0 : 4096.0;
+    int size = 2048;
+    while (size < base * sampleRate / 48000.0 - 1.0e-6)
         size *= 2;
     return size;
 }
@@ -21,7 +22,7 @@ int CorrelationAnalyser::fftSizeFor(double sampleRate)
 void CorrelationAnalyser::prepare(double sampleRate)
 {
     fs = sampleRate;
-    fftSize = fftSizeFor(fs);
+    fftSize = fftSizeFor(fs, speed);
     fft = std::make_unique<juce::dsp::FFT>(juce::roundToInt(std::log2((double)fftSize)));
     hop = fftSize / 4;
     numBins = fftSize / 2 + 1;
@@ -92,6 +93,8 @@ void CorrelationAnalyser::prepare(double sampleRate)
         fftData[(size_t)(2 * k)] = 1.0f;
     fft->performRealOnlyInverseTransform(fftData.data());
     lagNorm = fftData[0];
+    lagUnit = lagNorm / (double)(binHi - binLo + 1);
+    lagWeight.assign((size_t)numBins, 0.0);
 
     reset();
 }
@@ -102,18 +105,27 @@ void CorrelationAnalyser::setAlpha()
     const auto floor = speed == Speed::slow ? tauFloorSeconds : fastTauFloorSeconds;
     const auto cycles = speed == Speed::slow ? tauCycles : fastTauCycles;
     alpha.resize((size_t)numBins);
+    lagFloor.resize((size_t)numBins);
     for (int k = 0; k < numBins; ++k)
     {
         const auto tau = std::max(floor, cycles / std::max(k * binHz, 1.0e-3));
-        alpha[(size_t)k] = 1.0 - std::exp(-hopSeconds / tau);
+        const auto a = 1.0 - std::exp(-hopSeconds / tau);
+        alpha[(size_t)k] = a;
+        // Unrelated signals still show a coherence of about 0.9 / sqrt(n) over n independent frames averaged (the
+        // exponential average spans (2 - a) / a frames, a pair of 75%-overlapped ones being about one): the lag
+        // function counts a bin only above 1.2 times that.
+        const auto independent = std::max(1.0, 0.5 * (2.0 - a) / a);
+        lagFloor[(size_t)k] = std::min(0.9, 1.06 / std::sqrt(independent));
     }
 }
 
 void CorrelationAnalyser::setSpeed(Speed newSpeed)
 {
+    if (newSpeed == speed)
+        return;
     speed = newSpeed;
-    if (fft != nullptr)
-        setAlpha(); // the averages carry on from where they are
+    if (fs > 0.0)
+        prepare(fs); // a different frame size: the averages start again
 }
 
 void CorrelationAnalyser::setPreviewDelayMs(double ms)
@@ -314,8 +326,8 @@ void CorrelationAnalyser::computeLag()
 {
     if (fft == nullptr)
         return;
-    lagFunction(xyRe, xyIm, lagX, peakX);
-    lagFunction(zyRe, zyIm, lagZ, peakZ, &wideZ);
+    lagFunction(xyRe, xyIm, xx, lagX, peakX);
+    lagFunction(zyRe, zyIm, zz, lagZ, peakZ, &wideZ);
 }
 
 CorrelationAnalyser::Peak CorrelationAnalyser::inputPeak() const
@@ -331,35 +343,59 @@ bool CorrelationAnalyser::inputOutOfReach(double maxMs) const
 }
 
 void CorrelationAnalyser::lagFunction(const std::vector<double>& re, const std::vector<double>& im,
-                                      std::vector<float>& out, Peak& peak, Peak* wide)
+                                      const std::vector<double>& power, std::vector<float>& out, Peak& peak,
+                                      Peak* wide)
 {
-    // PHAT: conj(X·Y*) = X*·Y at unit magnitude, so a sidechain that is later by d peaks at +d.
+    // PHAT: conj(X·Y*) = X*·Y at unit magnitude, so a sidechain that is later by d peaks at +d. Each bin counts in
+    // proportion to its squared coherence, |X·Y*|² / (|X|²|Y|²): a bin the two signals share nothing in is noise, and
+    // there can be a thousand of those against a few that carry the signal.
     std::fill(fftData.begin(), fftData.end(), 0.0f);
+    double weightSum = 0.0;
     for (int k = binLo; k <= binHi; ++k)
     {
-        const auto r = re[(size_t)k], i = -im[(size_t)k];
-        const auto mag = std::sqrt(r * r + i * i);
-        if (mag > 0.0)
+        const auto kk = (size_t)k;
+        const auto r = re[kk], i = -im[kk];
+        const auto mag2 = r * r + i * i;
+        const auto denominator = power[kk] * yy[kk];
+        // Weight 0 at the bin's noise floor of coherence (see setAlpha), 1 at full coherence, squared.
+        const auto coherenceFloor = lagFloor[kk];
+        const auto coherence = mag2 > 0.0 && denominator > 0.0 ? std::sqrt(std::min(1.0, mag2 / denominator)) : 0.0;
+        const auto w = coherence > coherenceFloor ? std::pow((coherence - coherenceFloor) / (1.0 - coherenceFloor), 2.0) : 0.0;
+        lagWeight[kk] = w;
+        weightSum += w;
+        if (w > 0.0)
         {
-            fftData[(size_t)(2 * k)] = (float)(r / mag);
-            fftData[(size_t)(2 * k + 1)] = (float)(i / mag);
+            const auto mag = std::sqrt(mag2);
+            fftData[(size_t)(2 * k)] = (float)(w * r / mag);
+            fftData[(size_t)(2 * k + 1)] = (float)(w * i / mag);
         }
     }
     fft->performRealOnlyInverseTransform(fftData.data());
+    const auto norm = std::max(lagUnit * weightSum, 1.0e-30);
 
     // The coarse wide search: the strongest lag within +-wideHalf samples, whole samples only, with the same test for
     // being clear. Beyond the time view's range, it is what says the delay can't reach (plan 2.1a).
     const auto apart = juce::roundToInt(0.1e-3 * fs);
     if (wide != nullptr)
     {
-        const auto at = [this](int lag) { return (float)(fftData[(size_t)((lag + fftSize) % fftSize)] / lagNorm); };
+        const auto at = [&](int lag) { return (float)(fftData[(size_t)((lag + fftSize) % fftSize)] / norm); };
         int bestLag = 0;
         for (int lag = -wideHalf; lag <= wideHalf; ++lag)
             if (std::abs(at(lag)) > std::abs(at(bestLag)))
                 bestLag = lag;
+        // The runner-up is the strongest value outside the peak's main lobe (to where it first crosses zero, and at
+        // least 0.1 ms either side): a band-limited peak, a kick's, is wide and has side lobes of its own.
+        const auto sign = at(bestLag) < 0.0f ? -1.0f : 1.0f;
+        int lobeLo = bestLag, lobeHi = bestLag;
+        while (lobeLo > -wideHalf && sign * at(lobeLo - 1) > 0.0f)
+            --lobeLo;
+        while (lobeHi < wideHalf && sign * at(lobeHi + 1) > 0.0f)
+            ++lobeHi;
+        lobeLo = std::min(lobeLo, bestLag - apart);
+        lobeHi = std::max(lobeHi, bestLag + apart);
         float runnerUp = 0.0f;
         for (int lag = -wideHalf; lag <= wideHalf; ++lag)
-            if (std::abs(lag - bestLag) > apart)
+            if (lag < lobeLo || lag > lobeHi)
                 runnerUp = std::max(runnerUp, std::abs(at(lag)));
         wide->lagMs = bestLag * 1000.0 / fs;
         wide->value = at(bestLag);
@@ -371,7 +407,7 @@ void CorrelationAnalyser::lagFunction(const std::vector<double>& re, const std::
     for (int j = 0; j <= 2 * lagHalf; ++j)
     {
         const auto lag = j - lagHalf;
-        out[(size_t)j] = (float)(fftData[(size_t)((lag + fftSize) % fftSize)] / lagNorm);
+        out[(size_t)j] = (float)(fftData[(size_t)((lag + fftSize) % fftSize)] / norm);
         if (std::abs(out[(size_t)j]) > std::abs(out[(size_t)best]))
             best = j;
     }
@@ -398,14 +434,15 @@ void CorrelationAnalyser::lagFunction(const std::vector<double>& re, const std::
         double d1 = 0.0, d2 = 0.0;
         for (int k = binLo; k <= binHi; ++k)
         {
+            const auto weight = lagWeight[(size_t)k];
             const auto r = re[(size_t)k], i = -im[(size_t)k];
             const auto mag = std::sqrt(r * r + i * i);
-            if (mag <= 0.0)
+            if (weight <= 0.0 || mag <= 0.0)
                 continue;
             const auto w = 2.0 * juce::MathConstants<double>::pi * k / fftSize;
             const auto c = std::cos(w * t), sn = std::sin(w * t);
-            d1 += -w * (r * sn + i * c) / mag;
-            d2 += -w * w * (r * c - i * sn) / mag;
+            d1 += -weight * w * (r * sn + i * c) / mag;
+            d2 += -weight * w * w * (r * c - i * sn) / mag;
         }
         d1 *= sign;
         d2 *= sign;
@@ -415,9 +452,17 @@ void CorrelationAnalyser::lagFunction(const std::vector<double>& re, const std::
     }
     offset = t - centre;
 
+    const auto peakSign = out[(size_t)best] < 0.0f ? -1.0f : 1.0f;
+    int lobeLo = best, lobeHi = best;
+    while (lobeLo > 0 && peakSign * out[(size_t)lobeLo - 1] > 0.0f)
+        --lobeLo;
+    while (lobeHi < 2 * lagHalf && peakSign * out[(size_t)lobeHi + 1] > 0.0f)
+        ++lobeHi;
+    lobeLo = std::min(lobeLo, best - apart);
+    lobeHi = std::max(lobeHi, best + apart);
     float next = 0.0f;
     for (int j = 0; j <= 2 * lagHalf; ++j)
-        if (std::abs(j - best) > apart)
+        if (j < lobeLo || j > lobeHi)
             next = std::max(next, std::abs(out[(size_t)j]));
 
     peak.lagMs = lagMsAt(best) + offset * 1000.0 / fs;

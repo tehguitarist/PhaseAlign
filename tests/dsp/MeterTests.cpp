@@ -474,3 +474,90 @@ TEST_CASE("bands view: six bands, +1 when aligned, the delayed input comb-averag
     for (const auto v : b.bandsProcessed())
         CHECK(v > 0.99f);
 }
+
+namespace
+{
+// A kick: a decaying sine sweeping down from `startHz` to `endHz`, a short click at the front, every `period` samples.
+std::vector<float> kickTrain(int length, double fs, double startHz, double endHz, int period, unsigned seed)
+{
+    std::mt19937 rng(100); // the beater click is the same in both kicks; the body (pitch, sweep) is what differs
+    (void)seed;
+    std::normal_distribution<float> dist(0.0f, 1.0f);
+    std::vector<float> x((size_t)length, 0.0f);
+    const auto len = (int)(0.25 * fs);
+    for (int start = 0; start + len < length; start += period)
+    {
+        double phase = 0.0;
+        for (int n = 0; n < len; ++n)
+        {
+            const auto t = n / fs;
+            const auto hz = endHz + (startHz - endHz) * std::exp(-t / 0.03);
+            phase += 2.0 * M_PI * hz / fs;
+            const auto click = n < 40 ? 0.3f * dist(rng) * (1.0f - n / 40.0f) : 0.0f;
+            x[(size_t)(start + n)] += (float)(0.8 * std::exp(-t / 0.08) * std::sin(phase)) + click;
+        }
+    }
+    return x;
+}
+} // namespace
+
+TEST_CASE("a kick against a different kick sample: the time view finds the offset", "[meter]")
+{
+    for (const auto speed : {CorrelationAnalyser::Speed::slow, CorrelationAnalyser::Speed::fast})
+    {
+        const auto fs = 48000.0;
+        const auto d = 58; // 1.2 ms
+        const auto length = (int)(6.0 * fs);
+        const auto period = (int)(0.5 * fs);
+        const auto mic = kickTrain(length, fs, 120.0, 50.0, period, 1);
+        auto sample = kickTrain(length, fs, 90.0, 45.0, period, 2); // another kick: different click, pitch, tail
+        auto sidechain = delayed(sample, d);
+        const auto floorNoise = noise(length, 3, 0.003f);
+        for (size_t i = 0; i < sidechain.size(); ++i)
+            sidechain[i] += floorNoise[i];
+
+        CorrelationAnalyser a;
+        a.prepare(fs);
+        a.setSpeed(speed);
+        feed(a, mic, mic, sidechain);
+        a.computeLag();
+        const auto peak = a.inputPeak();
+        INFO("fast " << (speed == CorrelationAnalyser::Speed::fast) << " peak " << peak.lagMs << " ms value "
+                     << peak.value << " clear " << peak.clear);
+        if (speed == CorrelationAnalyser::Speed::slow)
+        {
+            CHECK(peak.clear);
+            CHECK(peak.lagMs == Approx(1000.0 * d / fs).margin(0.15));
+        }
+        else if (peak.clear) // fast has about two frames to go on: it may decline, but not claim a wrong offset
+            CHECK(peak.lagMs == Approx(1000.0 * d / fs).margin(0.15));
+    }
+}
+
+TEST_CASE("fast: a delay on steady material is found, and the meter follows a change within about 0.3 s", "[meter]")
+{
+    for (const auto fs : {44100.0, 48000.0, 96000.0})
+    {
+        INFO("fs " << fs);
+        const auto d = (int)std::lround(0.0013 * fs);
+        const auto source = noise((int)(2.0 * fs), 11);
+        CorrelationAnalyser a;
+        a.prepare(fs);
+        a.setSpeed(CorrelationAnalyser::Speed::fast);
+        CHECK(a.getFftSize() == CorrelationAnalyser::fftSizeFor(fs, CorrelationAnalyser::Speed::fast));
+        feed(a, source, source, delayed(source, d));
+        a.computeLag();
+        CHECK(a.inputPeak().clear);
+        CHECK(a.inputPeak().lagMs == Approx(1000.0 * d / fs).margin(0.02));
+
+        // From matched to inverted: reads negative within 0.3 s.
+        auto inverted = source;
+        for (auto& v : inverted)
+            v = -v;
+        const auto n = (int)(0.3 * fs);
+        const std::vector<float> head(source.begin(), source.begin() + n), flipped(inverted.begin(), inverted.begin() + n);
+        feed(a, head, head, head);
+        feed(a, head, head, flipped);
+        CHECK(a.overallProcessed() < 0.0f);
+    }
+}

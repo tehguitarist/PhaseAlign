@@ -93,7 +93,7 @@ work, so you can set them up before switching them on).
 |---|---|
 | **METER button** | Turns the meter on or off. When it's off (or the window is closed) the meter does no work at all, which saves CPU. |
 | **FREQUENCY / TIME OFFSET / PHASE / BANDS** | Click a label under the screen to switch views. See [Reading the meter](#reading-the-meter). |
-| **SLOW / FAST** | How much the meter averages. SLOW is steadier (it settles in about 0.75 s); FAST follows your changes sooner (about a third of that) but flickers more. |
+| **SLOW / FAST** | How much the meter averages. SLOW is steadier (it settles in about 0.75 s); FAST follows your changes much sooner (about 0.25 s) but flickers more, and it is less sure of an offset on sparse material such as a lone kick. Switching restarts the averaging. |
 | **HOLD** | Freezes the screen so you can study it. It also freezes by itself while your DAW's transport is stopped (if the DAW reports it). Frozen, you can drag across the TIME OFFSET view to preview a delay (see below). |
 | **ANALYSE** | Reserved for a future automatic-suggestion feature. It doesn't do anything yet. |
 
@@ -178,7 +178,7 @@ band. Set the **delay** first, and flip **Ø** if the curve sits near −1 every
 
 The meter compares the track Phase Align is on with the track in its **sidechain**. It shows a correlation, *r*, which
 is **+1** when the two agree perfectly, **0** when they are unrelated, and **−1** when one is the exact opposite of the
-other. Both tracks need to be playing the same source at the same time; the meter settles within about a second (a third of that on FAST).
+other. Both tracks need to be playing the same source at the same time; the meter settles within about a second (about a quarter of that on FAST).
 
 Each view draws two things: the **INPUT** (what the pair looks like without Phase Align, dim) and the **OUTPUT** (with
 it, bright), so "better or worse" is the gap between them.
@@ -294,8 +294,8 @@ crossfades two read taps over 50 ms, so it doesn't click. At 44.1 kHz the delay 
 **The meter.** The sidechain, the input and the output are analysed in overlapping FFT frames (8192 points at 44.1 and 48 kHz,
 Hann window, 75% overlap), and the cross-spectrum between each of the pair and the sidechain is averaged over about
 a second per frequency bin. *r* is the normalised correlation of the two signals within a band, the real part of that
-cross-spectrum divided by the geometric mean of the two powers (FAST averages over about a third of that). The FREQUENCY view plots it per 1/6 octave; the BANDS view takes it over six wide bands; the PHASE view is the angle of that cross-spectrum over 1/24 octave, drawn only where it is coherent. The delay preview turns each bin of the input's cross-spectrum by the phase of the chosen delay before it is summed. The TIME OFFSET view whitens the cross-spectrum (every bin set to unit
-magnitude, the "PHAT" weighting) and takes the inverse FFT: a pure delay then shows as a single sharp peak at its lag,
+cross-spectrum divided by the geometric mean of the two powers (FAST uses half-length frames and averages over about a third of that). The FREQUENCY view plots it per 1/6 octave; the BANDS view takes it over six wide bands; the PHASE view is the angle of that cross-spectrum over 1/24 octave, drawn only where it is coherent. The delay preview turns each bin of the input's cross-spectrum by the phase of the chosen delay before it is summed. The TIME OFFSET view whitens the cross-spectrum (every bin set to unit
+magnitude, the "PHAT" weighting) and weights each bin by how coherent the two signals are in it (so the bins a kick drum has nothing in, which are most of them, don't bury its peak), and takes the inverse FFT: a pure delay then shows as a single sharp peak at its lag,
 and a phase rotation as a peak at 0 ms, which a plain cross-correlation would blur into a hump that suggests a delay
 that isn't there. The audio thread only copies samples into a buffer; the analysis runs on the interface's 30 Hz timer, and only while
 the editor is open and the meter is on.
