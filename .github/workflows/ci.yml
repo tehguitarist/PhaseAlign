@@ -1,4 +1,5 @@
-# Build CI for Phase Align (AU/VST3, JUCE 8+). No unit tests; macOS also runs auval to check the AU loads.
+# Build CI for Phase Align (AU/VST3, JUCE 9). Runs the Catch2 tests (ctest) on every OS; macOS also runs
+# auval and pluginval to check the plugin loads and behaves.
 name: CI
 
 on:
@@ -33,7 +34,7 @@ jobs:
             libasound2-dev libjack-jackd2-dev ladspa-sdk libcurl4-openssl-dev \
             libfreetype6-dev libx11-dev libxcomposite-dev libxcursor-dev libxext-dev \
             libxinerama-dev libxrandr-dev libxrender-dev libwebkit2gtk-4.1-dev \
-            libglu1-mesa-dev mesa-common-dev
+            libglu1-mesa-dev mesa-common-dev xvfb
 
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
@@ -44,6 +45,16 @@ jobs:
         # on juce_gui_basics translation units). JUCE's CMake helpers don't share object files across
         # targets, so each extra target recompiles the JUCE modules. Windows hasn't needed a cap.
         run: cmake --build build --config Release --parallel ${{ (runner.os == 'macOS' && 3) || (runner.os == 'Linux' && 2) || '' }}
+
+      - name: Test
+        shell: bash
+        # The editor tests need a display server, which Linux runners don't have; xvfb provides one.
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            xvfb-run -a ctest --test-dir build -C Release --output-on-failure
+          else
+            ctest --test-dir build -C Release --output-on-failure
+          fi
 
       - name: Validate AU (auval)
         if: runner.os == 'macOS'
@@ -64,3 +75,11 @@ jobs:
             sleep 5
           done
           [ "$ok" = 1 ]
+
+      - name: Validate VST3 (pluginval)
+        if: runner.os == 'macOS'
+        run: |
+          curl -sSL -o pluginval.zip https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_macOS.zip
+          unzip -q pluginval.zip
+          pluginval.app/Contents/MacOS/pluginval --strictness-level 10 --validate-in-process \
+            --timeout-ms 300000 "build/PhaseAlign_artefacts/Release/VST3/Phase Align.vst3"

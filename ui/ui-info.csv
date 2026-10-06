@@ -20,15 +20,18 @@ meter button,meter-in-on,1737,723,249,249,When meter is on and button is pressed
 meter button,meter-out-off,1737,723,249,249,when meter is off
 meter button,meter-out-on,1737,723,249,249,when meter is on
 base image,plugin-base,,,1954,1224,base of the plugin UI
-delay switch,toggle-switch-centre,473,340,77,194,"text left aligned, to the right of the switch"
-delay switch,toggle-switch-down,473,340,77,194,"text left aligned, to the right of the switch"
-delay switch,toggle-switch-up,473,340,77,194,"text left aligned, to the right of the switch"
-phase switch,toggle-switch-centre,1487,340,77,194,"text right aligned, to the left of the switch"
-phase switch,toggle-switch-down,1487,340,77,194,"text right aligned, to the left of the switch"
-phase switch,toggle-switch-up,1487,340,77,194,"text right aligned, to the left of the switch"
+delay switch,toggle-switch-centre,473,280,77,194,"text left aligned, to the right of the switch"
+delay switch,toggle-switch-down,473,280,77,194,"text left aligned, to the right of the switch"
+delay switch,toggle-switch-up,473,280,77,194,"text left aligned, to the right of the switch"
+phase switch,toggle-switch-centre,1487,352,77,194,"text right aligned, to the left of the switch"
+phase switch,toggle-switch-down,1487,352,77,194,"text right aligned, to the left of the switch"
+phase switch,toggle-switch-up,1487,352,77,194,"text right aligned, to the left of the switch"
 delay display,,251,507,282,100,"on base image already, to hold delay value text"
 phase display,,1710,507,282,100,"on base image already, to hold phase value text"
 meter display,,827,859,1480,555,"on base image already, to hold metering and analysis options"
 full example,full example,,,,,example of full layout - illustrative purposes only
 delay knob,knobs,253,272,,,rotate on centre of image
 phase knob,knobs,1710,272,245,245,rotate on centre of image
+range button,button-in,1487,205,77,77,range 180
+range button,button-out,1487,205,77,77,range 90
+Upper range label,,1851,408,67.5,32,"Arial Hebrew - font size 30, changes to say 90 or 180 with degree symbol depending on range button"

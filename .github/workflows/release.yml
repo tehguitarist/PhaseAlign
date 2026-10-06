@@ -55,7 +55,7 @@ jobs:
         with: { submodules: recursive }
 
       - name: Configure
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DPA_BUILD_TESTS=OFF
 
       - name: Build AU + VST3
         run: cmake --build build --config Release --target PhaseAlign_AU --target PhaseAlign_VST3 --parallel
@@ -185,7 +185,7 @@ jobs:
         with: { submodules: recursive }
 
       - name: Configure
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64 -DPA_BUILD_TESTS=OFF
 
       - name: Build AU + VST3
         run: cmake --build build --config Release --target PhaseAlign_AU --target PhaseAlign_VST3 --parallel
@@ -312,7 +312,7 @@ jobs:
         with: { submodules: recursive }
 
       - name: Configure
-        run: cmake -B build
+        run: cmake -B build -DPA_BUILD_TESTS=OFF
 
       - name: Build VST3
         run: cmake --build build --config Release --target PhaseAlign_VST3 --parallel
@@ -380,7 +380,7 @@ jobs:
             libglu1-mesa-dev mesa-common-dev
 
       - name: Configure
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DPA_BUILD_TESTS=OFF
 
       - name: Build VST3
         run: cmake --build build --config Release --target PhaseAlign_VST3 --parallel

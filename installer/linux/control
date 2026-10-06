@@ -5,5 +5,6 @@ Priority: optional
 Architecture: amd64
 Maintainer: Leigh Pierce <leighpierce@me.com>
 Description: Phase Align plugin (VST3)
- IBP-inspired phase alignment utility: variable all-pass phase, sample-accurate delay and a
- correlation meter, built with JUCE.
+ Phase alignment utility: variable all-pass or constant phase rotation, a
+ -4 to +4 ms delay in 0.1-sample steps, polarity and a correlation meter,
+ built with JUCE.

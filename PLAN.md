@@ -1,6 +1,6 @@
-# IBP-Inspired Phase Alignment Plugin: Project Plan
+# Phase Align: Project Plan
 
-**Status:** planning complete, prototyping not started **Milestones:** v0.7 is the core feature set (sections 3.1 to 3.4). Record and compare (section 3.5) is planned as the next milestone, and v0.7 is structured to support it (section 4.9). **Framework:** JUCE (C++), AU and VST3, macOS first **Goal:** a low-CPU, zero-reported-latency phase utility inspired by the Little Labs IBP and its UAD plugin. This is a utility, not an analogue emulation.
+**Status:** planning complete, prototyping not started **Milestones:** v0.7 is the core feature set (sections 3.1 to 3.4). Record and compare (section 3.5) is planned as the next milestone, and v0.7 is structured to support it (section 4.9). **Framework:** JUCE (C++), AU and VST3, macOS first **Goal:** a low-CPU phase alignment utility. Inspired by phase alignment tools like the Little Labs IBP. This is a utility, not an analogue emulation.
 
 ---
 
@@ -8,7 +8,7 @@
 
 **Goals**
 
-- Provide the IBP's practical function: continuously variable phase adjustment to fix partial phase cancellation between two combined sources.
+- Continuously variable phase adjustment to fix partial phase cancellation between two combined sources.
 - Add a sample-accurate delay with convenient units.
 - Add a correlation meter that compares the processed signal with a sidechain signal, so the user can see whether alignment is improving.
 - Keep CPU and latency as low as possible. Bypassed stages should cost almost nothing.
@@ -21,15 +21,15 @@
 
 ---
 
-## 2. Reference: how the IBP works
+## 2. Background: all-pass phase adjustment
 
-Sources: Little Labs and GroupDIY descriptions, Sound on Sound review, UAD manual.
-
-- The phase section is a pair of symmetrical all-pass filters. All-pass filters change phase but not magnitude, and the hardware is flat to above 96 kHz at every setting.
-- The 90°/180° switch selects one or two all-pass filters in series.
-- Phase Centre Hi/Lo changes where the filters sit. Per the GroupDIY description, Hi uses one filter for lows and one for highs (wider bandwidth). Lo puts both on the low frequencies (narrower).
-- The hardware angle is frequency dependent. A single first-order all-pass runs from 0° at DC to 180° at Nyquist and reaches its stated angle only at its corner frequency.
-- The UAD "Workstation" version adds a continuous Delay Adjust, which is purely digital and shifts all frequencies equally. It also has separate bypass switches for phase and delay, a polarity invert, and a power switch.
+- An all-pass filter changes phase but not magnitude, so it can turn one source's phase against another's without
+  changing its tone on its own.
+- A first-order all-pass runs from 0° at DC to 180° at Nyquist (digital) and reaches 90° at its corner frequency, so
+  its angle is frequency dependent. Two in series reach up to 360°.
+- Where the sections' corners sit sets which part of the spectrum turns most: the Hi and Lo modes (4.3).
+- A pure delay shifts every frequency by the same time, which is what aligns two mics at different distances; a phase
+  rotation fixes what a delay can't (a DI against an amp, a mic's own phase response).
 - Phase processing only matters when two signals are combined.
 
 ---
@@ -121,12 +121,12 @@ Polarity flip, phase section and delay are all linear and time-invariant, so the
 - A step change in a whole-sample delay can click, so crossfade between the old and new delay taps over a few milliseconds when the value changes (proposed approach; to confirm in prototyping).
 - Not reported to the host as latency.
 
-### 4.3 Phase section: Hi and Lo modes (IBP-style)
+### 4.3 Phase section: Hi and Lo modes
 
 - One or two first-order all-pass sections with a variable corner frequency (TPT or equivalent, chosen for stability under modulation).
 - Knob 0 to 90°: first section only. Knob 90 to 180°: second section engages.
 - The handover at 90° must be seamless. The second section must start at its "no effect" corner setting.
-- Hi and Lo differ in where the sections sit. Exact corner-frequency ranges and the knob-to-angle mapping come from the UAD measurements (section 8).
+- Hi and Lo differ in where the sections sit: the corner frequencies and the knob-to-angle mapping are in IMPLEMENTATION_PLAN 2.3.
 - Corner-frequency changes are smoothed.
 - Prewarp the coefficients to reduce cramping near Nyquist (section 4.5).
 
@@ -143,7 +143,7 @@ Polarity flip, phase section and delay are all linear and time-invariant, so the
 - Magnitude is flat by construction (all-pass).
 - The real target is phase accuracy. A digital all-pass reaches 180° at Nyquist, where the analogue prototype only approaches it.
 - Prewarping pins the match at one frequency, so some deviation remains near Nyquist at 44.1 and 48 kHz. At 88.2 kHz and above this largely disappears.
-- Define a tolerance after measuring (provisional idea: within a few degrees up to roughly 18 to 20 kHz at 44.1 kHz). Check against the UAD captures, which will also show how much the reference deviates near the top.
+- Define a tolerance after measuring (provisional idea: within a few degrees up to roughly 18 to 20 kHz at 44.1 kHz). Measured 2026-10-06 against analog sections: `prototype/out/hf/report.md`, IMPLEMENTATION_PLAN 2.3.
 
 ### 4.6 Bypass behaviour
 
@@ -223,18 +223,16 @@ Structure the processing chain (flip, phase, delay) as code that can run on a pl
 - The screen needs a second marker per bar (for example an outline or tick) for the unprocessed signal, and a processed/unprocessed pair on the overall bar.
 - Bar centres must match the axis labels; the concept's labels skip from 3.2k to 8k.
 - Build in JUCE by drawing meters, LED rings, readouts and text in code, with raster images only for panel texture, knob caps, toggles and button faces, so the UI scales cleanly. Redraw only the meter area, at about 30 fps.
-- Choose an original name and tagline if released; the concept's tagline echoes the UAD product, and "IBP" is likely trademarked.
+- Choose an original name and tagline if released, and check them against existing products and trademarks.
 
 ---
 
 ## 8. Prototyping and measurement plan
 
 1. **Python prototype first.** Implement all three phase modes and the delay offline before any C++.
-2. **UAD captures** (sweep generated in Python): phase versus frequency for each knob position, Hi and Lo, and both 90° and 180° settings. Measure magnitude too, to confirm flatness.
-3. **Extract from captures:**
-   - Corner-frequency ranges for Hi and Lo.
-   - The knob-to-angle mapping, including whether the 90° and 180° ranges differ in more than sweep range.
-   - Behaviour near Nyquist at the capture sample rate.
+2. **Hi/Lo design:** corner-frequency ranges for Hi and Lo, the knob-to-angle mapping, and behaviour near Nyquist
+   (IMPLEMENTATION_PLAN 2.3).
+3. **Measure magnitude** too, to confirm flatness.
 4. **Validate the 90° handover** between one and two all-pass sections for continuity.
 5. **Design Constant-mode coefficients** for 44.1, 48, 88.2, 96 and 192 kHz and plot the achieved 90° accuracy.
 6. Prototype the auto-suggest search in Python: GCC-PHAT delay estimate, then grid search over angle and flip in each mode, using recorded or synthetic signal pairs.
@@ -244,8 +242,13 @@ Structure the processing chain (flip, phase, delay) as code that can run on a pl
 
 ## 9. Open questions
 
-1. **90° switch.** If measurements show it changes more than the sweep range, reconsider removing it.
-2. **Decoupling angle and width (unverified idea).** Two cascaded first-order all-passes might allow independent angle and width. Worth testing in Python.
+1. **90° switch.** *Resolved (provisionally, 2026-10-05):* there is no separate 90/180 switch in the DSP; it is folded
+   into the single 0–180° knob, the 180 range adding a second section (one-then-two-section design, IMPLEMENTATION_PLAN
+   2.3). The RANGE button is on the panel (knob 0–90° or 0–180°, the knob keeps its position, default 90); what each
+   range does in the DSP is still open, along with extending Hi/Lo below their lowest corners. Decided after listening
+   to the stems.
+2. **Decoupling angle and width (unverified idea).** Two cascaded first-order all-passes might allow independent angle
+   and width. Parked; not needed for v0.7 (Hi and Lo are two fixed spreads: sections coincident vs 20× apart).
 3. **Meter visual style.** Bars, history, phase curve, or a combination.
 4. **Auto-suggest delay search.** Currently assumed to be always included. Confirm, or make it optional.
 5. **Auto-suggest milestone.** Proposed as the step after v0.7; confirm.
