@@ -34,6 +34,14 @@ inline F4 add(F4 a, F4 b)
 {
     return vaddq_f32(a, b);
 }
+inline F4 sub(F4 a, F4 b)
+{
+    return vsubq_f32(a, b);
+}
+inline F4 mul(F4 a, F4 b)
+{
+    return vmulq_f32(a, b);
+}
 inline F4 madd(F4 acc, F4 a, F4 b)
 {
     return vfmaq_f32(acc, a, b);
@@ -97,6 +105,14 @@ inline F4 zero()
 inline F4 add(F4 a, F4 b)
 {
     return _mm_add_ps(a, b);
+}
+inline F4 sub(F4 a, F4 b)
+{
+    return _mm_sub_ps(a, b);
+}
+inline F4 mul(F4 a, F4 b)
+{
+    return _mm_mul_ps(a, b);
 }
 inline F4 madd(F4 acc, F4 a, F4 b)
 {
@@ -165,6 +181,14 @@ inline F4 zero()
 inline F4 add(F4 a, F4 b)
 {
     return {{a.v[0] + b.v[0], a.v[1] + b.v[1], a.v[2] + b.v[2], a.v[3] + b.v[3]}};
+}
+inline F4 sub(F4 a, F4 b)
+{
+    return {{a.v[0] - b.v[0], a.v[1] - b.v[1], a.v[2] - b.v[2], a.v[3] - b.v[3]}};
+}
+inline F4 mul(F4 a, F4 b)
+{
+    return {{a.v[0] * b.v[0], a.v[1] * b.v[1], a.v[2] * b.v[2], a.v[3] * b.v[3]}};
 }
 inline F4 madd(F4 acc, F4 a, F4 b)
 {

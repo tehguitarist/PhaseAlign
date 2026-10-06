@@ -2,6 +2,7 @@
 
 #include "dsp/DelayLine.h"
 #include "dsp/RealFft.h"
+#include "dsp/Simd.h"
 
 #include <algorithm>
 #include <functional>
@@ -27,6 +28,15 @@
 //   cost to correctness.
 //
 // Not real-time: prepare() allocates. process() doesn't allocate, lock or log.
+//
+// The two hot loops (the head taps and the per-bin multiply-adds) are plain register-blocked loops that GCC and clang
+// vectorise. MSVC doesn't, and Windows ran the convolver at 3 to 4 times Linux's cost (CI run 37420074764, plan 2.6 L),
+// so under MSVC they use dsp/Simd.h. Nowhere else changes. PA_CONVOLVER_SIMD forces the Simd.h loops on any platform,
+// to test them where there is no MSVC (the arithmetic is the same, so results agree to rounding).
+#if defined(_MSC_VER) || defined(PA_CONVOLVER_SIMD)
+#define PA_CONVOLVER_USE_SIMD 1
+#endif
+
 namespace pa::dsp
 {
 class PartitionedConvolver
@@ -120,6 +130,26 @@ class PartitionedConvolver
     {
         constexpr int chunk = 16;
         int i0 = 0;
+#if PA_CONVOLVER_USE_SIMD
+        for (; i0 + chunk <= m; i0 += chunk)
+        {
+            auto a0 = simd::load(acc + i0), a1 = simd::load(acc + i0 + 4), a2 = simd::load(acc + i0 + 8),
+                 a3 = simd::load(acc + i0 + 12);
+            for (const auto& t : head)
+            {
+                const auto w = simd::splat(t.weight);
+                const auto* xs = x + i0 - t.offset;
+                a0 = simd::madd(a0, w, simd::load(xs));
+                a1 = simd::madd(a1, w, simd::load(xs + 4));
+                a2 = simd::madd(a2, w, simd::load(xs + 8));
+                a3 = simd::madd(a3, w, simd::load(xs + 12));
+            }
+            simd::store(acc + i0, a0);
+            simd::store(acc + i0 + 4, a1);
+            simd::store(acc + i0 + 8, a2);
+            simd::store(acc + i0 + 12, a3);
+        }
+#else
         for (; i0 + chunk <= m; i0 += chunk)
         {
             float a[chunk];
@@ -132,6 +162,7 @@ class PartitionedConvolver
             }
             std::copy(a, a + chunk, acc + i0);
         }
+#endif
         for (const auto& t : head)
             for (int i = i0; i < m; ++i)
                 acc[i] += t.weight * x[i - t.offset];
@@ -295,6 +326,41 @@ class PartitionedConvolver
             for (int c = 0; c < C; ++c)
                 cs[c] = &channels[(size_t)(first + c)];
             int k0 = 0;
+#if PA_CONVOLVER_USE_SIMD
+            // Four bins to a vector, two vectors per chunk; the same sums in the same order as the plain loop below.
+            for (; k0 + chunk <= bins; k0 += chunk)
+            {
+                simd::F4 ar[C][2], ai[C][2];
+                for (int c = 0; c < C; ++c)
+                    ar[c][0] = ar[c][1] = ai[c][0] = ai[c][1] = simd::zero();
+                for (int q = 1; q <= parts; ++q)
+                {
+                    const auto* hr = hRe.data() + (q - 1) * bins + k0;
+                    const auto* hi = hIm.data() + (q - 1) * bins + k0;
+                    const auto slot = slots[(size_t)(q - 1)] + k0;
+                    const auto hr0 = simd::load(hr), hr1 = simd::load(hr + 4);
+                    const auto hi0 = simd::load(hi), hi1 = simd::load(hi + 4);
+                    for (int c = 0; c < C; ++c)
+                    {
+                        const auto* xr = cs[c]->xRe.data() + slot;
+                        const auto* xi = cs[c]->xIm.data() + slot;
+                        const auto xr0 = simd::load(xr), xr1 = simd::load(xr + 4);
+                        const auto xi0 = simd::load(xi), xi1 = simd::load(xi + 4);
+                        ar[c][0] = simd::add(ar[c][0], simd::sub(simd::mul(hr0, xr0), simd::mul(hi0, xi0)));
+                        ar[c][1] = simd::add(ar[c][1], simd::sub(simd::mul(hr1, xr1), simd::mul(hi1, xi1)));
+                        ai[c][0] = simd::add(ai[c][0], simd::add(simd::mul(hr0, xi0), simd::mul(hi0, xr0)));
+                        ai[c][1] = simd::add(ai[c][1], simd::add(simd::mul(hr1, xi1), simd::mul(hi1, xr1)));
+                    }
+                }
+                for (int c = 0; c < C; ++c)
+                {
+                    simd::store(yRe.data() + (first + c) * bins + k0, ar[c][0]);
+                    simd::store(yRe.data() + (first + c) * bins + k0 + 4, ar[c][1]);
+                    simd::store(yIm.data() + (first + c) * bins + k0, ai[c][0]);
+                    simd::store(yIm.data() + (first + c) * bins + k0 + 4, ai[c][1]);
+                }
+            }
+#else
             for (; k0 + chunk <= bins; k0 += chunk)
             {
                 float ar[C][chunk] = {}, ai[C][chunk] = {};
@@ -320,6 +386,7 @@ class PartitionedConvolver
                     std::copy(ai[c], ai[c] + chunk, yIm.data() + (first + c) * bins + k0);
                 }
             }
+#endif
             for (int c = 0; c < C; ++c) // the bins left over (none unless b < chunk)
                 for (int k = k0; k < bins; ++k)
                 {
