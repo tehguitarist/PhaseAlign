@@ -27,6 +27,7 @@ Items marked **[verify]** are things I believe are right but have not confirmed.
 | R9 | Assets ship at 2.5× the default size and are **cached pre-scaled to physical pixels** on resize | Sharpness comes from the cache, not only from the asset resolution (section 4.2) | Agrees |
 | R10 | **Delay −4 to +4 ms** (user, 2026-10-06; built 2026-10-06, branch `dsp-negative-delay`): delay on reports 4 ms of latency so the delay can be negative; delay off reports none (2.1a) | Align either track without moving clips | Yes (3.1, 3.4 "zero latency") |
 | R12 | **Delay in steps of 0.1 sample** (user, 2026-10-06; built on `dsp-negative-delay`), replacing whole samples (PLAN decision 12) | Whole samples leave up to 2.4 dB of dip at 20 kHz on a coherent pair at 44.1 kHz; 0.1 sample leaves 0.02 dB (2.1a) | Yes (2.1, decision 12, open question 7) |
+| R13 | **Hi/Lo runs oversampled** (4× below 85 kHz, 2× below 170 kHz) between linear-phase halfbands, and **reports a small latency whenever Constant isn't selected**: 32 samples at 44.1 kHz (0.73 ms), 18 at 48 kHz (0.38 ms), 5 at 88.2/96 kHz, none from 176.4 kHz (user, 2026-10-06; built on `decramp-hilo`, pending the user's listening) | De-cramping: within 2.5° of analog sections to 20 kHz at every rate (was up to 80° at 44.1 kHz), so a setting sounds the same at every rate. Impossible at zero latency (Foster's reactance theorem, 2.3) | Yes (3.4 and 4.8 "zero latency", decision 4 "oversampling dropped") |
 | R11 | **Dim a switched-off section** (user, 2026-10-06; not built yet): its knob, switch, readout values and buttons go semi-transparent but stay usable; the on/off toggles stay at full opacity (4.5) | Shows at a glance what's in the signal path | New |
 
 ---
@@ -223,7 +224,7 @@ interpolation kernel. The rest of this section is unchanged.)
 A gain ramp from +1 to −1 over 50 ms (the same `dsp::crossfadeMs`), which dips through zero. Once
 settled it becomes a multiply by ±1 (nothing at +1). Toggling mid-ramp reverses from where it is.
 
-### 2.3 Hi / Lo modes (zero latency)
+### 2.3 Hi / Lo modes (oversampled since 2026-10-06, R13: latency under 1 ms)
 
 **Filter:** two first-order all-pass sections in series, with double state (designed as TPT one-poles; run in direct
 form I since 2026-10-06, see "As built"). Parametrise each section by
@@ -263,15 +264,42 @@ The knob angle θ is split into θ₁ (section 1's lag at f₁) and θ₂ (secti
     90° + section 2's lag at 1502 Hz, because Lo's true lag at 75 Hz only reaches 95.7° at 180°.
   - The top octave moves fast just past 0° and just past 90°, where a corner sweeps down from far above 20 kHz. That
     is inherent in starting at identity, and the smoothing covers it.
-- **Against analog sections (cramping; measured 2026-10-06, `prototype/hf_check.py` → `prototype/out/hf/report.md`):**
-  the level is flat at every setting to Nyquist (an exact all-pass, within 5e-13 dB). The phase matches analog
-  first-order sections with the same lag at each reference frequency within 2.6° below 5 kHz at every rate. Towards
-  Nyquist a digital section always reaches 180°, so it bends away: worst over the knob's travel (just past 0° and 90°,
-  where a corner sits highest), 11° at 5–10 kHz and 80° at 16–20 kHz at 44.1 kHz (58° at 48 kHz, 9° at 96 kHz, 2° at
-  192 kHz); at a typical setting (the median over the travel), 2° (Hi) and 8° (Lo) at 16–20 kHz at 44.1 kHz. So the
-  same knob setting's top octave differs between a 44.1 kHz and a 192 kHz session by up to 78°. **Next (user,
-  2026-10-06: go ahead with the plan):** de-cramped sections, so a setting sounds the same at every rate;
-  `HANDOVER.md` item 1. It changes the sound in the top octave, so the user listens before it merges.
+- **Against analog sections (cramping; measured 2026-10-06, `prototype/hf_check.py` → `prototype/out/hf/report.md`
+  part 2).** At the session rate each section is a bilinear first-order all-pass, exact at its reference frequency and
+  squeezed towards 180° at Nyquist: against analog sections with the same lag at each reference frequency, worst over
+  the knob's travel (just past 0° and 90°, where a corner sits highest), 11° at 5–10 kHz and 80° at 16–20 kHz at
+  44.1 kHz (58° at 48 kHz, 9° at 96 kHz, 2° at 192 kHz), so the same setting's top octave differed between a 44.1 and
+  a 192 kHz session by up to 78°.
+- **Why it can't be fixed at zero latency (2026-10-06).** For any stable all-pass, X = tan(lag / 2) is a reactance
+  function of the warped frequency Ω = tan(π f / fs), and Foster's reactance theorem (dX/dΩ ≥ |X| / Ω) says X / Ω
+  never decreases. The first-order section holds it constant, so no all-pass of any order with the same lag at the
+  reference frequency has less lag above it. Checked numerically: none of 19,981 random stable all-passes of orders 1–4
+  went below the bound, and the planned two-anchor second-order fit put a pole outside the unit circle at every angle.
+  Matching every rate to the 44.1 kHz curve was possible at zero latency (second-order sections above 44.1 kHz, within
+  about 3°), but keeps the cramping. **The user chose to spend a little latency (R13).**
+- **As built: oversampled (R13; `src/dsp/HiLoStage.h`, `Oversampler.h`, `HalfbandTables.h` generated by
+  `prototype/oversampling.py`; reference `HiLoOversampled` in `prototype/hilo.py`, golden-tested at 44.1, 48, 96 and
+  192 kHz).**
+  - The same sections, mapping, smoothing and glides, at M times the rate (4× below 85 kHz, 2× below 170 kHz, 1×
+    from there up), between linear-phase halfband FIRs: 59 then 11 taps at 44.1 kHz, 31 then 11 at 48 kHz, 11 at 88.2
+    and 96 kHz (equiripple, ±0.03 dB per stage; the 59-tap one is the shortest that meets that at 44.1 kHz).
+  - The halfbands add only a pure delay, a whole number of session samples (the outer stage of 4× takes one extra
+    sample at 2× on the way down to make it so): **32 at 44.1 kHz (0.73 ms), 18 at 48 kHz (0.38 ms), 5 at 88.2 and
+    96 kHz, 0 at 176.4 and 192 kHz.** It is reported whenever Constant isn't selected, phase on or off, so phase on/off
+    stays a crossfade (the dry path is delayed to match) and only entering or leaving Constant changes the latency.
+  - Against analog sections: within 1.6° to 16 kHz and 2.5° to 20 kHz at every rate (target 3° / 10°); the same
+    setting within 0.4° between 44.1 and 192 kHz (was 78°). Typical settings (the median over the travel) are within
+    0.4° at 16–20 kHz.
+  - Kept: the readout (exact at the reference frequencies, now computed at M·fs), lag never decreasing as θ rises,
+    the continuous 90° handover, 0° = the delayed input (at k_min, as before), no bursts on coefficient moves.
+  - Level: within ±0.07 dB (44.1 kHz) and ±0.09 dB (48 kHz) from 20 Hz to 20 kHz, ±0.03 dB at 88.2/96, exact at
+    176.4/192. Above 20 kHz at 44.1/48 kHz it rolls off through the halfbands' transition band, as the delay's
+    kernels already do (accepted, 2.6).
+  - The coefficient grid stays 32 session samples long (32·M at the oversampled rate), so no more tan() runs than
+    before and the angle and glides move exactly as they did.
+  - Kept warm while unheard (in Constant, or settled off: R2), where the outer down-filter keeps only its history.
+  - A/B for listening: `prototype/decramp_ab.py` → `prototype/out/decramp/` (the same settings at 44.1 and 96 kHz,
+    old and new, summed with the dry track as against a second mic). Cost: 2.6 (J).
 - **Knob feel:** `phase` is linear in degrees (an optional skew is a later detail).
 
 **Smoothing:** smooth the knob angle linearly over about 30 ms, then map it to k per 32-sample sub-block, but only
@@ -285,7 +313,9 @@ near Nyquist (just past 0° and 90°) stepped by up to 0.018 at 192 kHz in the c
 Switching back to the previous mode mid-glide reverses the glide from where it is (the prototype jumped; both changed).
 The cascade runs warm while the stage is off (R2) and, since 2026-10-06, in Constant too, so leaving Constant never
 restarts it. Denormals are flushed on the grid for offline use. Cost: about 17–25 ns per stereo frame for the whole
-chain (Release, M-series); 4.0 ns since the 2.6 pass (both channels interleaved, direct form I).
+chain (Release, M-series); 4.0 ns since the 2.6 pass (both channels interleaved, direct form I); oversampled (R13),
+18 / 23 ns at 48 / 44.1 kHz (2.6, J). Static cells run two samples per step (y[n + 1] from y[n − 1]) with both channels
+in one register: the same filter, rounded differently in the last bits.
 
 **Burst fixed (2026-10-06; found by the P3 renders, fix approved by the user):** at the identity clamp (k_min) a
 section's pole sits just inside z = −1. Run as a TPT structure, its state was a near-lossless resonator at Nyquist (gain
@@ -296,14 +326,15 @@ Fix: each section now runs in **direct form I**, y = −p x + x₁ + p y₁ with
 input and output, so nothing can hide there; the transfer function is the same, so static settings are unchanged
 (within double rounding). And the cascade runs warm in Constant. `prototype/hilo.py` changed identically; the Hi/Lo
 goldens were regenerated (rotated noise now peaks at 0.89, as rotated noise should). Test: PhaseTests "leaving 0 or 90
-degrees on broadband input releases no burst" (fails on the old code: 11 of 20 cases, peaks up to 3.2). The P3 renders
+degrees on broadband input releases no burst" (fails on the old code: 11 of 20 cases, peaks up to 3.2; since R13 the
+peak limit is 1.25, as band-limited rotated noise is nearly Gaussian and peaks near 4σ, and each 1024-sample window's
+energy must stay within 1.5 dB of the input's). The P3 renders
 are now within 16% of the sine's own step everywhere.
 
 **Hi↔Lo switch (R3):** glide `k₁` and `k₂` to the new mode's mapping over about 30 ms. The signal is all-pass
 throughout.
 
-**Cramping:** each section is exactly prewarped at its reference frequency; the top-octave deviation is measured
-above (an open decision).
+**Cramping:** removed by oversampling (R13, above).
 
 ### 2.4 Constant mode: linear-phase FIR Hilbert (R1)
 
@@ -459,6 +490,30 @@ Hi/Lo is within budget everywhere. **Constant is over budget on Linux at 192 kHz
 one Windows callback at 192 kHz took three times its length. The convolver-only layouts also rank differently there
 (Windows 96 kHz: 525 ns uniform 128, 279 ns with 128/1024/4096). **Recommended: PFFFT behind `RealFft` (fetching its
 source needs the user's OK), then re-tune the generic layouts from CI's convolver benchmark** (`HANDOVER.md` item 2).
+
+**J. Hi/Lo oversampled (R13, 2026-10-06, branch `decramp-hilo`).** Same machine and method; master (dad5331) and the
+branch built and run back to back (ns per stereo frame):
+
+| Case | master | branch |
+|---|---|---|
+| idle: delay off, Hi, phase off, 48 kHz | 4.2 | 17.8 |
+| Hi at 60°, delay off, 44.1 / 48 / 96 / 192 kHz | 4.1 (48) | 22.9 / 18.1 / 9.4 / 4.9 |
+| Hi at 60°, fractional delay, 44.1 / 48 kHz | 9.2 / 6.2 | 28.0 / 20.3 |
+| delay only, fractional, 44.1 / 48 / 96 kHz (Hi/Lo warm) | 9.3 / 6.4 / 5.6 | 26.3 / 19.7 / 9.9 |
+| Constant at 60°, fractional delay, 44.1 / 48 / 96 / 192 kHz | 33.4 / 31.1 / 34.0 / 39.6 | 50.8 / 44.1 / 38.4 / 39.8 |
+| Constant at 0° (spectra only), 48 kHz | 9.3 | 22.1 |
+| constant automation (all modes), 44.1 / 48 kHz | 31.8 / 26.4 | 51.9 / 42.7 |
+
+The Hi/Lo stage alone (`HiLoStage`, stereo, 32-sample blocks): 13.2 ns at 44.1 kHz (halfbands 9.2, sections at 4×
+4.0), 11.6 at 48 kHz, 4.8 at 96 kHz; unheard (warm), 11.1 / 10.2 / 4.4. How it got there from a first cut of 28.5 /
+18.3 / 7.3: the halfbands' taps are symmetric, so each pair of samples is added before its multiply, in blocks of 16
+outputs with the sums in registers through `src/dsp/Simd.h` (NEON / SSE2 / scalar; clang vectorised the plain loops
+along the taps instead, with lane reversals); a fused multiply-add on ARM; static cascade cells two samples per step
+with the stereo pair in one register; the outer down-filter skipped while unheard. Moving the filters' history less
+often measured no gain and was dropped. The rest of the chain adds about 6 ns more than before around the stage (the
+delayed dry path, and more); not chased further. Within budget on the M1. **On the x86 CI runners Hi at 44.1 kHz may
+go over 50 ns** (they ran 3–4 times the M1's figures before; the SSE2 path has no fused multiply-add): CI's numbers
+decide whether the budget or the code moves.
 
 **Candidates looked at and not built:**
 - Polyphase split of the Hilbert (every other tap is zero): in the frequency domain it is the same work as doubling the

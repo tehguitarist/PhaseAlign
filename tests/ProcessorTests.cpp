@@ -37,6 +37,12 @@ int delayLatency(double fs)
     return pa::dsp::Chain::delayLatencyFor(fs, maxDelayTenths(fs));
 }
 
+// Hi/Lo's latency (its oversampling, plan 2.3), there whenever Constant isn't selected, phase on or off.
+int hiLoLatency(double fs)
+{
+    return pa::dsp::HiLoStage::latencyFor(fs);
+}
+
 // Processes `buffer` in place in blocks from `sizes` (cycled), through processBlock or the bypassed path.
 void process(PhaseAlignProcessor& p, juce::AudioBuffer<float>& buffer, const std::vector<int>& sizes,
              bool bypassed = false)
@@ -70,7 +76,7 @@ TEST_CASE("the reported latency matches the measured impulse offset, with the de
                 proc.prepareToPlay(fs, 512);
 
                 const auto latency = proc.getLatencySamples();
-                CHECK(latency == (on ? delayLatency(fs) : 0));
+                CHECK(latency == (on ? delayLatency(fs) : 0) + hiLoLatency(fs));
 
                 juce::AudioBuffer<float> buffer(4, 2048);
                 buffer.clear();
@@ -113,7 +119,7 @@ TEST_CASE("in Constant mode the reported latency matches the measured offset, an
 
             // Leaving and entering Constant reports the new latency at once (from the message thread).
             setParam(proc, id::phaseMode, 1.0f);
-            CHECK(proc.getLatencySamples() == (on ? delayLatency(fs) : 0));
+            CHECK(proc.getLatencySamples() == (on ? delayLatency(fs) : 0) + hiLoLatency(fs));
             setParam(proc, id::phaseMode, 2.0f);
             CHECK(proc.getLatencySamples() == latency);
         }
@@ -128,6 +134,7 @@ TEST_CASE("net of the reported latency, a fractional setting shifts by the knob'
             PhaseAlignProcessor proc;
             setParam(proc, id::delayMs, ms);
             setParam(proc, id::delayOn, 1.0f);
+            setParam(proc, id::phaseOn, 0.0f); // the delay alone (Hi/Lo's halfbands have their own small ripple)
             proc.prepareToPlay(fs, 512);
             const auto shift = proc.getLatencySamples() + delayInSamples(ms, fs); // samples, one decimal
 
@@ -148,13 +155,13 @@ TEST_CASE("switching the delay on and off is click-free and updates the reported
     {
         INFO("fs " << fs);
         const auto block = 256;
-        const auto lmax = delayLatency(fs);
+        const auto lmax = delayLatency(fs), h = hiLoLatency(fs);
         const auto d = -44; // whole samples, so the end can be checked exactly
         PhaseAlignProcessor proc;
         setParam(proc, id::delayMs, (float)(d * 1000.0 / fs));
         setParam(proc, id::phaseOn, 0.0f); // so the end can be checked exactly
         proc.prepareToPlay(fs, block);
-        CHECK(proc.getLatencySamples() == 0);
+        CHECK(proc.getLatencySamples() == h);
 
         // A low sine: its own sample-to-sample step is small, so any hard switch would stand out.
         const auto freq = 100.0, amplitude = 0.5;
@@ -180,7 +187,7 @@ TEST_CASE("switching the delay on and off is click-free and updates the reported
             while (next < toggles.size() && toggles[next].first <= pos)
             {
                 setParam(proc, id::delayOn, toggles[next].second ? 1.0f : 0.0f);
-                CHECK(proc.getLatencySamples() == (toggles[next].second ? lmax : 0));
+                CHECK(proc.getLatencySamples() == (toggles[next].second ? lmax : 0) + h);
                 ++next;
             }
             juce::AudioBuffer<float> b(out.getArrayOfWritePointers(), 4, pos, block);
@@ -195,9 +202,9 @@ TEST_CASE("switching the delay on and off is click-free and updates the reported
                 worst = std::max(worst, (double)std::abs(out.getSample(ch, i) - out.getSample(ch, i - 1)));
         CHECK(worst <= limit);
 
-        // Ends on: the input delayed by Lmax + d, exactly.
+        // Ends on: the input delayed by Lmax + d (and Hi/Lo's latency), exactly.
         for (int i = length - block; i < length; ++i)
-            REQUIRE(out.getSample(0, i) == input.getSample(0, i - lmax - d));
+            REQUIRE(out.getSample(0, i) == input.getSample(0, i - lmax - d - h));
     }
 }
 
@@ -215,7 +222,7 @@ TEST_CASE("host bypass fades out to a bit-exact pass-through, delayed by the lat
         setParam(proc, id::phaseOn, 0.0f); // so the DC check is exact
         proc.prepareToPlay(fs, 256);
         const auto latency = proc.getLatencySamples();
-        CHECK(latency == (on ? delayLatency(fs) : 0));
+        CHECK(latency == (on ? delayLatency(fs) : 0) + hiLoLatency(fs));
 
         auto active = noiseBuffer(4800, 1);
         process(proc, active, {256});
@@ -233,7 +240,7 @@ TEST_CASE("host bypass fades out to a bit-exact pass-through, delayed by the lat
         // Leaving bypass ramps the polarity back in rather than flipping: DC passes through 0 on its way to -1 (the
         // delay fades in at the same time, so the zero crossing isn't exactly half way). With the delay on, the first
         // samples out are still the bypassed noise, until the taps have passed it.
-        const auto first = on ? latency + (int)delayInSamples(1.0, fs) : 0;
+        const auto first = latency + (on ? (int)delayInSamples(1.0, fs) : 0); // and Hi/Lo's latency has passed
         juce::AudioBuffer<float> dc(4, 2 * fadeSamples);
         for (int ch = 0; ch < 4; ++ch)
             juce::FloatVectorOperations::fill(dc.getWritePointer(ch), 1.0f, dc.getNumSamples());

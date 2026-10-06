@@ -6,8 +6,8 @@
 #include <vector>
 
 // The C++ port against the Python prototypes (IMPLEMENTATION_PLAN M2): prototype/golden.py renders fixed scripts
-// through prototype/hilo.py (HiLo) and prototype/p2_constant.py (ConstantRotator) into tests/golden/, and the chain
-// must match them sample by sample. Keep the scripts in step with golden.py.
+// through prototype/hilo.py (HiLoOversampled) and prototype/p2_constant.py (ConstantRotator) into tests/golden/, and
+// the chain must match them sample by sample. Keep the scripts in step with golden.py.
 using namespace pa::dsp;
 
 namespace
@@ -84,7 +84,7 @@ TEST_CASE("golden: Hi/Lo matches prototype/hilo.py sample by sample", "[dsp][gol
     // golden.py HILO_SCRIPT
     const std::vector<Event> events = {{1024, 150.0, -1}, {4096, -1.0, lo}, {4096 + 320, -1.0, hi},
                                        {6144, 30.0, -1},  {6400, -1.0, lo}, {7168, 180.0, -1}};
-    for (const auto fs : {44100.0, 48000.0, 96000.0})
+    for (const auto fs : {44100.0, 48000.0, 96000.0, 192000.0}) // oversampled 4x (both outer halfbands), 2x, not
         for (const auto block : {512, 37})
         {
             INFO("fs " << fs << ", block " << block);

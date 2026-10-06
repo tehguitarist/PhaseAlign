@@ -3,7 +3,8 @@ tests/dsp/GoldenTests.cpp must match them sample by sample.
 
     .venv/bin/python prototype/golden.py      # → tests/golden/*.f32 (committed)
 
-Each case is two files of little-endian float32, channel-major (all of channel 0, then channel 1): <case>_in.f32 (seeded
+Hi/Lo renders through HiLoOversampled (the sections oversampled between halfbands, since 2026-10-06). Each case is two
+files of little-endian float32, channel-major (all of channel 0, then channel 1): <case>_in.f32 (seeded
 noise) and <case>_out.f32 (the prototype's output). The scripts change settings only on the 32-sample coefficient grid,
 which is where both implementations act on them. Keep the case list in step with GoldenTests.cpp.
 """
@@ -12,7 +13,7 @@ from pathlib import Path
 
 import numpy as np
 
-from hilo import HiLo
+from hilo import HiLoOversampled
 from p2_constant import ConstantRotator
 
 OUT = Path(__file__).resolve().parent.parent / "tests" / "golden"
@@ -37,7 +38,7 @@ def save(name, x, y):
 
 def hilo_case(fs, n=8192):
     x = noise(n, 1)
-    p = HiLo(fs, "hi", 0.0)
+    p = HiLoOversampled(fs, "hi", 0.0)
     y = np.zeros((2, n))
     events = HILO_SCRIPT[1:] + [(n, None, None)]
     pos = 0
@@ -55,7 +56,7 @@ def constant_case(fs, n=16384):
 
 
 def main():
-    for fs in (44100, 48000, 96000):
+    for fs in (44100, 48000, 96000, 192000):  # 4x (both outer halfbands), 2x, none
         hilo_case(fs)
     for fs in (48000, 96000):
         constant_case(fs)

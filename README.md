@@ -30,14 +30,15 @@ it on one of the pair and feed the other into its **sidechain**; the meter then 
    0 ms. The delay reaches −4 to +4 ms, so it can move this track either way. Beyond that the screen says **TRANSIENTS
    OUT OF DELAY RANGE**: move a clip in the DAW first.
 3. **Then phase.** Switch to the **FREQUENCY** view and turn **PHASE** on. The bright curve (processed) should sit at
-   +1 across the band. **HIGH** and **LOW** rotate like an all-pass (no latency), centred higher or an octave lower;
+   +1 across the band. **HIGH** and **LOW** rotate like an all-pass (under 1 ms of latency), centred higher or an octave lower;
    **CONSTANT** turns every frequency by the same angle. **RANGE** sets the knob's travel to 90° or 180°.
 4. **Polarity (Ø)** inverts the track if the curve sits near −1 everywhere.
 5. Check by ear: solo the pair and listen for the low end filling in.
 
-**Latency.** The delay adds about 4.5 ms of latency while it is on, so it can go negative; Constant adds about 43 ms.
-Both are reported to the host, which compensates. Switching either fades the audio out and back in over about 20 ms;
-some hosts only re-align at the next transport start.
+**Latency.** HIGH and LOW add 0.7 ms at 44.1 kHz (0.4 ms at 48 kHz, almost none at 96 kHz and up), so their sections
+behave the same at every sample rate; Constant adds about 43 ms instead. The delay adds about 4.5 ms while it is on, so
+it can go negative. All of it is reported to the host, which compensates. Switching the delay or entering or leaving
+Constant fades the audio out and back in over about 20 ms; some hosts only re-align at the next transport start.
 
 ## Build
 

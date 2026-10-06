@@ -33,7 +33,8 @@ job, better.
    below their lowest corners. The knob's whole travel is usable (no dead zones; checked 2026-10-06).
 2. **Prototypes** (`prototype/`, all through the venv): `hilo.py` (P1), `p2_constant.py` (P2), `p4_meter.py` (P4),
    `subsample.py` (fractional delay), `hf_check.py` (high frequencies, knob travel), `p3_report.py` (P3), `golden.py`
-   (the C++ goldens), `fractional_tables.py` (the low-delay kernel tables).
+   (the C++ goldens), `fractional_tables.py` (the low-delay kernel tables), `oversampling.py` (Hi/Lo's halfbands →
+   `src/dsp/HalfbandTables.h`), `decramp_ab.py` (the de-cramping A/B renders).
 3. **UI build: M0 + M3 DONE (2026-10-05, branch `ui-build`).** Details and choices to confirm in IMPLEMENTATION_PLAN
    M0/M3. Workflow:
    - Art or `ui/ui-info.csv` changed: `tools/build_assets.sh` (regenerates `src/ui/Layout.h` and `assets/images/`),
@@ -86,8 +87,13 @@ job, better.
       - CI: the DSP benchmark on every OS, pluginval logs, `workflow_dispatch`, `_USE_MATH_DEFINES` for MSVC.
       - pluginval at strictness 10 passes locally on the VST3.
 
-      Next: **`HANDOVER.md`** (de-cramping Hi/Lo's top octave first; the 44.1 kHz delay's roll-off above 20 kHz is
-      accepted, user 2026-10-06). Benchmarks: `PhaseAlignDspTests "chain cost per
+      Next: **`HANDOVER.md`** (the 44.1 kHz delay's roll-off above 20 kHz is accepted, user 2026-10-06).
+   6. **Hi/Lo de-cramping: built on branch `decramp-hilo` (2026-10-06), waiting for the user's listening before it
+      merges.** De-cramping at zero latency is impossible (Foster's reactance theorem, plan 2.3), so (user's choice)
+      Hi/Lo runs oversampled between linear-phase halfbands and reports 32 samples at 44.1 kHz, 18 at 48, 5 at 96, 0 at
+      192 whenever Constant isn't selected (R13). Within 2.5° of analog to 20 kHz at every rate. A/B renders:
+      `prototype/decramp_ab.py` → `prototype/out/decramp/`. Cost: plan 2.6 (J); the user wants CPU and latency kept as
+      low as possible, but working first. Benchmarks: `PhaseAlignDspTests "chain cost per
       stereo frame"` (Release); `[dump]` writes renders for comparing two builds bit for bit.
    - The stem analysis and auto-suggest (ANALYSE) work is dead last. Real multi-mic stem pairs are still wanted for the
      P2/P3 listening.

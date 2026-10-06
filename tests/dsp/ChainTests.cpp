@@ -37,6 +37,12 @@ int latencyAt(double fs)
     return Chain::delayLatencyFor(fs, reachTenths(fs));
 }
 
+// Hi/Lo's latency (its oversampling, plan 2.3), which the chain has whenever Constant isn't active, phase on or off.
+int hiLoAt(double fs)
+{
+    return HiLoStage::latencyFor(fs);
+}
+
 using Signal = std::vector<std::vector<float>>; // [channel][sample]
 
 Signal makeSignal(int numChannels, int length, float value = 0.0f)
@@ -108,7 +114,8 @@ Signal run(double fs, const Signal& input, const ChainSettings& initial, const s
 }
 
 // The delay on at `samples` (the knob, whole samples): the chain delays by its latency + samples. The phase stage is
-// off: Hi/Lo at 0 degrees is not an identity (its k floor), and these tests are about the delay.
+// off: Hi/Lo at 0 degrees is not an identity (its k floor), and these tests are about the delay. With the stage off the
+// output is still delayed by Hi/Lo's latency (hiLoAt).
 ChainSettings withDelay(int samples)
 {
     auto s = ChainSettings::neutral();
@@ -219,7 +226,7 @@ TEST_CASE("an impulse is delayed by exactly the latency plus the set number of s
 {
     for (const auto fs : rates)
     {
-        const auto lmax = maxDelayAt(fs), latency = latencyAt(fs);
+        const auto lmax = maxDelayAt(fs), latency = latencyAt(fs) + hiLoAt(fs);
         for (const auto d : {-lmax, -37, -2, -1, 0, 1, 2, 37, lmax / 2, lmax})
         {
             INFO("fs " << fs << ", delay " << d);
@@ -234,15 +241,16 @@ TEST_CASE("an impulse is delayed by exactly the latency plus the set number of s
             CHECK(bitEqual(out, expected));
         }
 
-        // Off: no delay and no latency, whatever the knob says.
+        // Off: no delay and only Hi/Lo's latency, whatever the knob says.
         auto off = withDelay(-37);
         off.delayOn = false;
         const auto input = noise(2, 2000, 41);
-        CHECK(bitEqual(run(fs, input, off), input));
+        CHECK(bitEqual(run(fs, input, off), shifted(input, hiLoAt(fs))));
     }
 }
 
-TEST_CASE("the chain's latency is the reach plus the kernels' lookahead while on, and 0 while off", "[dsp]")
+TEST_CASE("the delay adds the reach plus the kernels' lookahead to the latency while on, and nothing while off",
+          "[dsp]")
 {
     // Reach rounded up to whole samples, plus the lookahead of the rate's interpolation kernels (FractionalDelay.h).
     const auto kaiser = FractionalKernels::design == FractionalKernels::Design::kaiser;
@@ -254,17 +262,17 @@ TEST_CASE("the chain's latency is the reach plus the kernels' lookahead while on
     for (const auto fs : rates)
     {
         INFO("fs " << fs);
-        const auto reach = reachTenths(fs), latency = latencyAt(fs);
-        CHECK(Chain::latencyFor(withDelay(-3), fs, reach) == latency);
-        CHECK(Chain::latencyFor(ChainSettings::neutral(), fs, reach) == 0);
-        CHECK(Chain::latencyFor(withDelay(0).bypassed(), fs, reach) == latency); // host bypass keeps the latency
-        CHECK(1000.0 * (latency - maxDelayAt(fs)) / fs < 0.6);                   // the interpolation adds under 0.6 ms
+        const auto reach = reachTenths(fs), latency = latencyAt(fs), hiLo = hiLoAt(fs);
+        CHECK(Chain::latencyFor(withDelay(-3), fs, reach) == latency + hiLo);
+        CHECK(Chain::latencyFor(ChainSettings::neutral(), fs, reach) == hiLo);
+        CHECK(Chain::latencyFor(withDelay(0).bypassed(), fs, reach) == latency + hiLo); // bypass keeps the latency
+        CHECK(1000.0 * (latency - maxDelayAt(fs)) / fs < 0.6); // the interpolation adds under 0.6 ms
 
         Chain chain;
         chain.prepare(fs, 2, reach);
-        CHECK(chain.latency() == 0);
+        CHECK(chain.latency() == hiLo);
         chain.reset(withDelay(5));
-        CHECK(chain.latency() == latency);
+        CHECK(chain.latency() == latency + hiLo);
     }
 }
 
@@ -273,7 +281,7 @@ TEST_CASE("fractional delays are within 0.02 dB and 0.01 samples of exact up to 
     for (const auto fs : rates)
         for (const auto tenths : {-reachTenths(fs), -1234, -5, 1, 3, 5, 7, 9, 487, reachTenths(fs)})
         {
-            const auto latency = latencyAt(fs);
+            const auto latency = latencyAt(fs) + hiLoAt(fs);
             const auto expectedDelay = latency + tenths / 10.0; // samples
             for (const auto freq : {50.0, 1000.0, 10000.0, std::min(20000.0, 0.45 * fs)})
             {
@@ -305,33 +313,38 @@ TEST_CASE("fractional delays are within 0.02 dB and 0.01 samples of exact up to 
         }
 }
 
-TEST_CASE("settled stages are bit-exact: off is the input, polarity is an exact negation", "[dsp]")
+TEST_CASE("settled stages are bit-exact: off is the delayed input, polarity is an exact negation", "[dsp]")
 {
-    const auto fs = 48000.0;
-    const auto input = noise(2, 20000, 1);
+    for (const auto fs : {44100.0, 48000.0, 96000.0, 192000.0})
+    {
+        INFO("fs " << fs);
+        const auto input = noise(2, 20000, 1);
+        const auto hiLo = hiLoAt(fs);
 
-    CHECK(bitEqual(run(fs, input, ChainSettings::neutral()), input));
-    // The delay on at 0 is the input delayed by the latency, exactly; so is host bypass with the delay on.
-    CHECK(bitEqual(run(fs, input, withDelay(0)), shifted(input, latencyAt(fs))));
-    CHECK(bitEqual(run(fs, input, withDelay(0).bypassed()), shifted(input, latencyAt(fs))));
+        // Every stage off: the input delayed by Hi/Lo's latency, exactly.
+        CHECK(bitEqual(run(fs, input, ChainSettings::neutral()), shifted(input, hiLo)));
+        // The delay on at 0 is the input delayed by the latency, exactly; so is host bypass with the delay on.
+        CHECK(bitEqual(run(fs, input, withDelay(0)), shifted(input, latencyAt(fs) + hiLo)));
+        CHECK(bitEqual(run(fs, input, withDelay(0).bypassed()), shifted(input, latencyAt(fs) + hiLo)));
 
-    auto inverted = ChainSettings::neutral();
-    inverted.polarityInverted = true;
-    auto negated = input;
-    for (auto& ch : negated)
-        for (auto& x : ch)
-            x = -x;
-    CHECK(bitEqual(run(fs, input, inverted), negated));
+        auto inverted = ChainSettings::neutral();
+        inverted.polarityInverted = true;
+        auto negated = shifted(input, hiLo);
+        for (auto& ch : negated)
+            for (auto& x : ch)
+                x = -x;
+        CHECK(bitEqual(run(fs, input, inverted), negated));
 
-    // After fading every stage out (the delay off is a latency change, faster than the other fades), the output is
-    // the input again, bit-exact.
-    const auto fade = crossfadeSamples(fs);
-    auto active = withDelay(100);
-    active.polarityInverted = true;
-    const auto out = run(fs, input, active, {{1000, ChainSettings::neutral()}});
-    for (size_t ch = 0; ch < 2; ++ch)
-        for (int i = 1000 + fade; i < 20000; ++i)
-            REQUIRE(out[ch][(size_t)i] == input[ch][(size_t)i]);
+        // After fading every stage out (the delay off is a latency change, faster than the other fades), the output is
+        // the delayed input again, bit-exact.
+        const auto fade = crossfadeSamples(fs);
+        auto active = withDelay(100);
+        active.polarityInverted = true;
+        const auto out = run(fs, input, active, {{1000, ChainSettings::neutral()}});
+        for (size_t ch = 0; ch < 2; ++ch)
+            for (int i = 1000 + fade + hiLo; i < 20000; ++i) // the polarity fade reaches the output hiLo later
+                REQUIRE(out[ch][(size_t)i] == input[ch][(size_t)(i - hiLo)]);
+    }
 }
 
 TEST_CASE("a delay change crossfades between the two taps; the latest target wins", "[dsp]")
@@ -348,7 +361,7 @@ TEST_CASE("a delay change crossfades between the two taps; the latest target win
                          {{500, withDelay(20)}, {500 + fade / 2, withDelay(40)}, {500 + fade / 2 + 1, withDelay(30)}});
 
     // The effective delay, less the latency: what the knob says.
-    const auto latency = latencyAt(fs);
+    const auto latency = latencyAt(fs) + hiLoAt(fs);
     const auto tapAt = [&](int i) { return (double)i - (double)out[0][(size_t)i] - latency; };
     CHECK(tapAt(499) == Approx(10.0));
     CHECK(tapAt(500 + fade / 2) == Approx(15.0).margin(0.01));        // half way from 10 to 20
@@ -371,10 +384,11 @@ TEST_CASE("polarity ramps linearly through zero over the crossfade length", "[ds
     auto inverted = ChainSettings::neutral();
     inverted.polarityInverted = true;
     const auto out = run(fs, makeSignal(1, 3 * fade, 1.0f), ChainSettings::neutral(), {{100, inverted}});
+    const auto h = (size_t)hiLoAt(fs); // the output is delayed by Hi/Lo's latency
 
-    CHECK(out[0][99] == 1.0f);
-    CHECK(out[0][(size_t)(100 + fade / 2)] == Approx(0.0f).margin(2.0f / (float)fade));
-    CHECK(out[0][(size_t)(100 + fade - 1)] == -1.0f);
+    CHECK(out[0][99 + h] == 1.0f);
+    CHECK(out[0][(size_t)(100 + fade / 2) + h] == Approx(0.0f).margin(2.0f / (float)fade));
+    CHECK(out[0][(size_t)(100 + fade - 1) + h] == -1.0f);
     CHECK(out[0][(size_t)(3 * fade - 1)] == -1.0f);
 }
 
@@ -384,7 +398,8 @@ TEST_CASE("switching the delay on or off fades out, changes the latency in silen
         for (const auto blockSize : {1, 7, 32, 512})
         {
             INFO("fs " << fs << ", block " << blockSize);
-            const auto lmax = latencyAt(fs); // the latency while on
+            const auto h = hiLoAt(fs);       // the latency while off: Hi/Lo's
+            const auto lmax = latencyAt(fs); // the delay's, added while on
             const auto f = latencyFadeSamples(fs);
             const auto d = -10;
 
@@ -425,38 +440,38 @@ TEST_CASE("switching the delay on or off fades out, changes the latency in silen
             const auto in = [&](int i) { return (double)x[0][(size_t)i]; };
             const auto at = [&](int i) { return (double)out[0][(size_t)i]; };
 
-            // Before: the input, latency 0. (latencyOut is per sample only with 1-sample blocks.)
-            CHECK(at(on - 1) == in(on - 1));
-            CHECK(latencyOut[(size_t)(on - 1)] == 0);
+            // Before: the input delayed by Hi/Lo's latency. (latencyOut is per sample only with 1-sample blocks.)
+            CHECK(at(on - 1) == in(on - 1 - h));
+            CHECK(latencyOut[(size_t)(on - 1)] == h);
             const auto perSample = blockSize == 1;
 
-            // Fade-out: a linear gain down to silence over f samples, still undelayed.
+            // Fade-out: a linear gain down to silence over f samples, still without the delay.
             for (int k = 0; k < f; ++k)
-                REQUIRE(at(on + k) == Approx(in(on + k) * (1.0 - (k + 1.0) / f)).epsilon(1e-5).margin(1e-3));
+                REQUIRE(at(on + k) == Approx(in(on + k - h) * (1.0 - (k + 1.0) / f)).epsilon(1e-5).margin(1e-3));
             CHECK(at(on + f - 1) == 0.0);
 
-            // Switched on the next sample; fade-in of the input delayed by Lmax + d, then exact.
+            // Switched on the next sample; fade-in of the input delayed by Lmax + d (and h), then exact.
             if (perSample)
             {
-                CHECK(latencyOut[(size_t)(on + f - 1)] == 0);
-                CHECK(latencyOut[(size_t)(on + f)] == lmax);
+                CHECK(latencyOut[(size_t)(on + f - 1)] == h);
+                CHECK(latencyOut[(size_t)(on + f)] == lmax + h);
             }
             for (int k = 0; k < f; ++k)
             {
                 const auto i = on + f + k;
-                REQUIRE(at(i) == Approx(in(i - lmax - d) * (k + 1.0) / f).epsilon(1e-5).margin(1e-3));
+                REQUIRE(at(i) == Approx(in(i - lmax - d - h) * (k + 1.0) / f).epsilon(1e-5).margin(1e-3));
             }
             for (int i = on + 2 * f; i < backOff; ++i)
-                REQUIRE(at(i) == in(i - lmax - d));
+                REQUIRE(at(i) == in(i - lmax - d - h));
 
             // Switching off, then back on half way through the fade-out: the gain turns round from where it is, the
             // latency never changes, and it ends where it started.
             const auto half = f / 2;
-            CHECK(at(reverse - 1) == Approx(in(reverse - 1 - lmax - d) * (1.0 - (double)half / f)).epsilon(1e-5));
+            CHECK(at(reverse - 1) == Approx(in(reverse - 1 - lmax - d - h) * (1.0 - (double)half / f)).epsilon(1e-5));
             for (int i = backOff; i < length; ++i)
-                REQUIRE(latencyOut[(size_t)i] == lmax);
+                REQUIRE(latencyOut[(size_t)i] == lmax + h);
             for (int i = reverse + half + 1; i < length; ++i)
-                REQUIRE(at(i) == in(i - lmax - d));
+                REQUIRE(at(i) == in(i - lmax - d - h));
         }
 }
 
@@ -594,6 +609,9 @@ TEST_CASE("chain cost per stereo frame", "[.][bench]")
           Case{"delay only, fractional, 44.1 kHz (48 taps)", 44100.0, 773, false, PhaseMode::high, false},
           Case{"delay only, fractional, 96 kHz (8 taps)", 96000.0, 773, false, PhaseMode::high, false},
           Case{"Hi at 60, delay off, 48 kHz", 48000.0, 0, false, PhaseMode::high, true, false},
+          Case{"Hi at 60, delay off, 44.1 kHz", 44100.0, 0, false, PhaseMode::high, true, false},
+          Case{"Hi at 60, delay off, 96 kHz", 96000.0, 0, false, PhaseMode::high, true, false},
+          Case{"Hi at 60, delay off, 192 kHz", 192000.0, 0, false, PhaseMode::high, true, false},
           Case{"Hi at 60, fractional delay, 44.1 kHz", 44100.0, 773, false, PhaseMode::high, true},
           Case{"Hi at 60, fractional delay, 48 kHz", 48000.0, 773, false, PhaseMode::high, true},
           Case{"Constant at 60, delay off, 48 kHz", 48000.0, 0, false, PhaseMode::constant, true, false},

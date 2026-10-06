@@ -27,6 +27,13 @@ in, if at all.
 
 ## 1. De-cramp Hi/Lo, so a setting sounds the same at every rate
 
+**Status (2026-10-06): built on branch `decramp-hilo`, not merged; waiting for the user's listening.** The approach below
+turned out to be impossible: at zero latency no all-pass can have less top-end lag than the first-order section with
+the same lag at the reference frequency (Foster's reactance theorem; plan 2.3). The user chose oversampling with a small
+latency (R13): 32 samples at 44.1 kHz, 18 at 48, 5 at 96, 0 at 192. Every rate is within 2.5° of analog to 20 kHz; the
+must-keeps hold; goldens regenerated (`HiLoOversampled`). A/B: `prototype/out/decramp/` (`prototype/decramp_ab.py`).
+What follows is the original brief, kept for the record.
+
 **Problem** (`prototype/hf_check.py` → `prototype/out/hf/report.md`, plan 2.3):
 - Each section is a bilinear first-order all-pass, exact at its reference frequency, so it is squeezed towards 180° at
   Nyquist.

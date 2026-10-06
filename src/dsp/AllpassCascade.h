@@ -1,6 +1,7 @@
 #pragma once
 
 #include "dsp/PhaseMapping.h"
+#include "dsp/Simd.h"
 
 #include <algorithm>
 #include <array>
@@ -12,7 +13,7 @@
 // log k from the old mode's mapping to the new one's over glideMs, so the signal stays all-pass throughout (R3);
 // switching back during a glide reverses it from where it is. Reference: prototype/hilo.py (HiLo), golden-tested.
 //
-// Coefficients are computed on a fixed grid of updateInterval samples counted from reset(), so the output doesn't
+// Coefficients are computed on a fixed grid of `cell` samples counted from reset(), so the output doesn't
 // depend on the host's block sizes: at the start of each cell the angle and glide move on by one cell, and each
 // section's G is interpolated linearly per sample from its value at the old angle to its value at the new one (every G
 // in (0, 1] is an all-pass, so the path stays all-pass). Without the interpolation, a section whose corner sweeps down
@@ -32,7 +33,7 @@ class AllpassCascade
 {
   public:
     static constexpr int maxChannels = 8;
-    static constexpr int updateInterval = 32;
+    static constexpr int defaultCell = 32;
     static constexpr double smoothMs = 30.0, glideMs = 30.0;
 
     enum class Mode
@@ -41,9 +42,12 @@ class AllpassCascade
         lo
     };
 
-    void prepare(double sampleRateIn)
+    // cellLength: the coefficient grid in samples (32; 32 M when run at M times a session rate, so the grid keeps its
+    // length in time).
+    void prepare(double sampleRateIn, int cellLength = defaultCell)
     {
         sampleRate = sampleRateIn;
+        cell = std::max(1, cellLength);
         smoothSamples = std::max(1.0, std::round(smoothMs * 1.0e-3 * sampleRate));
         glideSamples = std::max(1.0, std::round(glideMs * 1.0e-3 * sampleRate));
         reset(Mode::hi, 0.0);
@@ -109,7 +113,7 @@ class AllpassCascade
             if (untilUpdate == 0)
                 startCell();
             const auto m = std::min(n - start, untilUpdate);
-            const auto done = updateInterval - untilUpdate;
+            const auto done = cell - untilUpdate;
             // Channels in pairs: their recursions are independent, so running two at once hides each one's latency.
             int ch = 0;
             for (; ch + 2 <= numChannels; ch += 2)
@@ -136,12 +140,15 @@ class AllpassCascade
             y2[c] = s[c][2];
             x[c] = io[c] + start;
         }
-        for (int i = 0; i < m; ++i)
+        int i = 0;
+        if (! interpolating) // two samples per step: see staticPairs()
+            i = staticPairs<C>(x, x1, y1, y2, m);
+        for (; i < m; ++i)
         {
             auto ga = g1[0], gb = g1[1];
             if (interpolating)
             {
-                const auto t = (double)(done + i + 1) / updateInterval;
+                const auto t = (double)(done + i + 1) / cell;
                 ga = g0[0] + (g1[0] - g0[0]) * t;
                 gb = g0[1] + (g1[1] - g0[1]) * t;
             }
@@ -159,6 +166,64 @@ class AllpassCascade
         }
         for (int c = 0; c < C; ++c)
             s[c] = {x1[c], y1[c], y2[c]};
+    }
+
+    // Static coefficients, whole pairs of samples; returns how many samples it did. y[n] = u[n] + p y[n - 1] with
+    // u[n] = x[n - 1] - p x[n], so y[n + 1] = (u[n + 1] + p u[n]) + p^2 y[n - 1]: each output of a pair waits on the
+    // previous pair's last output through one multiply-add, which halves the recursions' critical path; two channels
+    // run side by side in one register. The same filter, rounded differently in the last bits.
+    template <int C>
+    int staticPairs(float* const* x, double* x1, double* y1, double* y2, int m) const
+    {
+        using namespace simd;
+        const auto pa = 1.0 - 2.0 * g1[0], pb = 1.0 - 2.0 * g1[1];
+        int i = 0;
+        if constexpr (C == 2)
+        {
+            const auto vpa = splat2(pa), vpb = splat2(pb), vpa2 = splat2(pa * pa), vpb2 = splat2(pb * pb);
+            auto vx1 = pair(x1[0], x1[1]), vy1 = pair(y1[0], y1[1]), vy2 = pair(y2[0], y2[1]);
+            for (; i + 2 <= m; i += 2)
+            {
+                const auto in0 = pair(x[0][i], x[1][i]), in1 = pair(x[0][i + 1], x[1][i + 1]);
+                const auto ua0 = msub(vx1, vpa, in0), ua1 = msub(in0, vpa, in1);
+                const auto a0 = madd(ua0, vpa, vy1);
+                const auto a1 = madd(madd(ua1, vpa, ua0), vpa2, vy1);
+                const auto ub0 = msub(vy1, vpb, a0), ub1 = msub(a0, vpb, a1);
+                const auto b0 = madd(ub0, vpb, vy2);
+                const auto b1 = madd(madd(ub1, vpb, ub0), vpb2, vy2);
+                vx1 = in1;
+                vy1 = a1;
+                vy2 = b1;
+                x[0][i] = (float)lane0(b0);
+                x[1][i] = (float)lane1(b0);
+                x[0][i + 1] = (float)lane0(b1);
+                x[1][i + 1] = (float)lane1(b1);
+            }
+            x1[0] = lane0(vx1), x1[1] = lane1(vx1);
+            y1[0] = lane0(vy1), y1[1] = lane1(vy1);
+            y2[0] = lane0(vy2), y2[1] = lane1(vy2);
+        }
+        else
+        {
+            const auto pa2 = pa * pa, pb2 = pb * pb;
+            for (; i + 2 <= m; i += 2)
+                for (int c = 0; c < C; ++c)
+                {
+                    const double in0 = x[c][i], in1 = x[c][i + 1];
+                    const auto ua0 = x1[c] - pa * in0, ua1 = in0 - pa * in1;
+                    const auto a0 = ua0 + pa * y1[c];
+                    const auto a1 = (ua1 + pa * ua0) + pa2 * y1[c];
+                    const auto ub0 = y1[c] - pb * a0, ub1 = a0 - pb * a1;
+                    const auto b0 = ub0 + pb * y2[c];
+                    const auto b1 = (ub1 + pb * ub0) + pb2 * y2[c];
+                    x1[c] = in1;
+                    y1[c] = a1;
+                    y2[c] = b1;
+                    x[c][i] = (float)b0;
+                    x[c][i + 1] = (float)b1;
+                }
+        }
+        return i;
     }
 
     static const mapping::ModeShape& shape(Mode m) { return m == Mode::hi ? mapping::hi : mapping::lo; }
@@ -180,7 +245,7 @@ class AllpassCascade
         }
         interpolating = ! std::equal_to<double>()(g0[0], g1[0]) || ! std::equal_to<double>()(g0[1], g1[1]);
         flushDenormals();
-        untilUpdate = updateInterval;
+        untilUpdate = cell;
     }
 
     void computeG(double* g) const
@@ -211,18 +276,18 @@ class AllpassCascade
     {
         if (! std::equal_to<double>()(theta, target))
         {
-            theta += step * updateInterval;
+            theta += step * cell;
             if ((step > 0.0) == (theta >= target))
                 theta = target;
         }
         if (glide < 1.0)
-            glide = std::min(1.0, glide + updateInterval / glideSamples);
+            glide = std::min(1.0, glide + cell / glideSamples);
     }
 
     double sampleRate = 48000.0, smoothSamples = 1.0, glideSamples = 1.0;
     Mode mode = Mode::hi, previousMode = Mode::hi;
     double theta = 0.0, target = 0.0, step = 0.0, glide = 1.0;
-    int untilUpdate = 0;
+    int cell = defaultCell, untilUpdate = 0;
     bool stale = true, interpolating = false;
     double g0[2] = {1.0, 1.0}, g1[2] = {1.0, 1.0};
     std::array<std::array<double, 3>, maxChannels> state{}; // per channel: x1, section 1's y1, section 2's y1

@@ -20,6 +20,7 @@ from pathlib import Path
 import numpy as np
 
 from hilo import k_pair, split
+import oversampling
 import subsample
 
 OUT = Path(__file__).resolve().parent / "out" / "hf"
@@ -34,6 +35,11 @@ def digital_phase(mode, theta, fs, f):
     k1, k2 = k_pair(mode, theta, fs)
     t = np.tan(np.pi * f / fs)
     return np.degrees(2 * np.arctan(k1 * t) + 2 * np.arctan(k2 * t))
+
+
+def oversampled_phase(mode, theta, fs, f):
+    """Hi/Lo as built since the de-cramping: the sections at the oversampled rate (the halfbands add only delay)."""
+    return digital_phase(mode, theta, fs * oversampling.plan(fs)[0], f)
 
 
 def analog_phase(mode, theta, f):
@@ -67,41 +73,68 @@ def main():
     md += [f"- worst level error at any rate, mode and setting: {worst:.2e} dB (double rounding)", ""]
 
     # 2. Phase against the analog sections.
+    def band_table(phase):
+        rows = []
+        for fs in RATES:
+            for mode in ["hi", "lo"]:
+                cells = []
+                for lo_f, hi_f in BANDS:
+                    if lo_f >= fs / 2:
+                        cells.append("–")
+                        continue
+                    f = np.geomspace(lo_f, min(hi_f, 0.999 * fs / 2), 300)
+                    d = max(np.abs(phase(mode, th, fs, f) - analog_phase(mode, th, f)).max() for th in thetas)
+                    cells.append(f"{d:.1f}")
+                rows.append(f"| {fs / 1000:g} kHz | {mode} | " + " | ".join(cells) + " |")
+        return rows
+
+    header = ["| rate | mode | " + " | ".join(f"{a / 1000:g}–{b / 1000:g} kHz" for a, b in BANDS) + " |",
+              "|---|---|" + "---|" * len(BANDS)]
     md += ["## 2. Hi/Lo phase against analog sections (cramping)", "",
            "Worst |digital − analog| lag in degrees over the knob's travel (every 0.25°), per band. The knob angle is",
-           "exact at each section's reference frequency at every rate (the readout); the difference grows towards",
-           "Nyquist, where a digital section always reaches 180°. It is largest just past 0° and 90°, where a",
-           "section's corner sits highest.", "",
-           "| rate | mode | " + " | ".join(f"{a / 1000:g}–{b / 1000:g} kHz" for a, b in BANDS) + " |",
-           "|---|---|" + "---|" * len(BANDS)]
+           "exact at each section's reference frequency at every rate (the readout).", "",
+           "### Zero latency (first-order sections at the session rate, until 2026-10-06)", "",
+           "The difference grows towards Nyquist, where a digital section always reaches 180°. It is largest just past",
+           "0° and 90°, where a section's corner sits highest. It can't be fixed at zero latency: for any stable",
+           "all-pass, tan(lag / 2) is a reactance function of tan(π f / fs), so by Foster's reactance theorem",
+           "tan(lag / 2) / tan(π f / fs) never decreases, and the first-order section already has the least lag above",
+           "its reference frequency of any all-pass with the same lag there.", ""] + header + band_table(digital_phase)
+    md += ["", "### Oversampled (as built since 2026-10-06; `prototype/oversampling.py`)", "",
+           "| rate | factor | latency | level 20 Hz–20 kHz |", "|---|---|---|---|"]
     for fs in RATES:
-        for mode in ["hi", "lo"]:
-            cells = []
-            for lo_f, hi_f in BANDS:
-                if lo_f >= fs / 2:
-                    cells.append("–")
-                    continue
-                f = np.geomspace(lo_f, min(hi_f, 0.999 * fs / 2), 300)
-                d = max(np.abs(digital_phase(mode, th, fs, f) - analog_phase(mode, th, f)).max() for th in thetas)
-                cells.append(f"{d:.1f}")
-            md.append(f"| {fs / 1000:g} kHz | {mode} | " + " | ".join(cells) + " |")
+        M, _, L = oversampling.plan(fs)
+        lvl = 20 * np.log10(oversampling.response(fs, np.geomspace(20, 20000, 400)))
+        md.append(f"| {fs / 1000:g} kHz | {M}x | {L} samples ({L / fs * 1e3:.2f} ms) | "
+                  f"{lvl.min():+.3f} to {lvl.max():+.3f} dB |")
+    md += [""] + header + band_table(oversampled_phase)
     md.append("")
     # Typical settings rather than the worst: the median over the travel at 16-20 kHz.
     md += ["The same, as the median over the knob's travel (a typical setting rather than the worst), 16–20 kHz:", ""]
     for fs in [44100, 48000, 96000]:
         f = np.geomspace(16000, 20000, 50)
         for mode in ["hi", "lo"]:
-            d = [np.abs(digital_phase(mode, th, fs, f) - analog_phase(mode, th, f)).max() for th in thetas]
-            md.append(f"- {fs / 1000:g} kHz {mode}: median {np.median(d):.1f}°, 90th percentile {np.percentile(d, 90):.1f}°")
-    md += ["", "Between rates (the same knob setting at 44.1 and at 192 kHz, which is close to analog below 20 kHz):", ""]
+            cells = []
+            for name, phase in (("zero latency", digital_phase), ("oversampled", oversampled_phase)):
+                d = [np.abs(phase(mode, th, fs, f) - analog_phase(mode, th, f)).max() for th in thetas]
+                cells.append(f"{name} median {np.median(d):.1f}°, 90th percentile {np.percentile(d, 90):.1f}°")
+            md.append(f"- {fs / 1000:g} kHz {mode}: " + "; ".join(cells))
+    md += ["", "Between rates (the same knob setting at 44.1 and at 192 kHz), worst over the travel:", ""]
     for mode in ["hi", "lo"]:
-        rows = []
-        for lo_f, hi_f in BANDS[:4]:
-            f = np.geomspace(lo_f, hi_f, 300)
-            d = max(np.abs(digital_phase(mode, th, 44100, f) - digital_phase(mode, th, 192000, f)).max() for th in thetas)
-            rows.append(f"{lo_f / 1000:g}–{hi_f / 1000:g} kHz: {d:.1f}°")
-        md.append(f"- {mode}: " + ", ".join(rows))
-    md.append("")
+        for name, phase in (("zero latency", digital_phase), ("oversampled", oversampled_phase)):
+            rows = []
+            for lo_f, hi_f in BANDS[:4]:
+                f = np.geomspace(lo_f, hi_f, 300)
+                d = max(np.abs(phase(mode, th, 44100, f) - phase(mode, th, 192000, f)).max() for th in thetas)
+                rows.append(f"{lo_f / 1000:g}–{hi_f / 1000:g} kHz: {d:.1f}°")
+            md.append(f"- {mode}, {name}: " + ", ".join(rows))
+    md += ["", "Oversampled, also checked over every 0.05° of θ at each rate: the lag never decreases as θ rises (20 Hz",
+           "to 20 kHz), and the readout frequency's lag is the knob angle (see part 5).", ""]
+    for fs in RATES:
+        f = np.geomspace(20, 20000, 600)
+        for mode in ["hi", "lo"]:
+            L = np.array([oversampled_phase(mode, th, fs, f) for th in np.arange(0, 180.001, 0.05)])
+            step = np.diff(L, axis=0).min()
+            assert step > -1e-9, (fs, mode, step)
 
     # 3. Constant: the Hilbert's level near the ends.
     from p2_constant import hilbert_fir, taps_at
@@ -144,7 +177,7 @@ def main():
 
     # 5. Knob travel.
     md += ["## 5. Knob travel", "",
-           "The phase knob's angle is θ = knob × range. For each 0.25° step of θ (0.28% of the 90° travel), the largest",
+           "Oversampled Hi/Lo, as built. The phase knob's angle is θ = knob × range. For each 0.25° step of θ (0.28% of the 90° travel), the largest",
            "lag change anywhere from 20 Hz to 20 kHz; and the lag at the mode's reference frequency, which the readout",
            "shows. A dead zone would be steps that change nothing.", "",
            "| rate | mode | smallest change per 0.25° step (where) | largest | readout frequency's lag: worst error vs θ |",
@@ -152,15 +185,16 @@ def main():
     for fs in [44100, 48000, 96000, 192000]:
         f = np.geomspace(20, 20000, 600)
         for mode in ["hi", "lo"]:
-            lags = np.array([digital_phase(mode, th, fs, f) for th in thetas])
+            lags = np.array([oversampled_phase(mode, th, fs, f) for th in thetas])
             step = np.abs(np.diff(lags, axis=0)).max(axis=1)
             i = int(step.argmin())
             # The readout: Hi = lag at f1; Lo up to 90 = lag at f1, past 90 = 90 + section 2's lag at f2.
             err = 0.0
+            fo = fs * oversampling.plan(fs)[0]
             for th in thetas:
-                k1, k2 = k_pair(mode, th, fs)
-                t1 = math.degrees(2 * math.atan(k1 * math.tan(math.pi * F1[mode] / fs)))
-                t2 = math.degrees(2 * math.atan(k2 * math.tan(math.pi * F2[mode] / fs)))
+                k1, k2 = k_pair(mode, th, fo)
+                t1 = math.degrees(2 * math.atan(k1 * math.tan(math.pi * F1[mode] / fo)))
+                t2 = math.degrees(2 * math.atan(k2 * math.tan(math.pi * F2[mode] / fo)))
                 shown = (t1 + t2 if mode == "hi" else (t1 if th <= 90 else 90 + t2))
                 err = max(err, abs(shown - th))
             md.append(f"| {fs / 1000:g} kHz | {mode} | {step[i]:.3f}° ({thetas[i]:.2f}–{thetas[i + 1]:.2f}°) | "

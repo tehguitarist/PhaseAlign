@@ -188,6 +188,35 @@ class HiLo:
         return y
 
 
+class HiLoOversampled:
+    """Hi/Lo as built since the de-cramping (2026-10-06): HiLo at M times the rate between the halfbands of
+    prototype/oversampling.py, so the sections are within 2.5 degrees of analog ones to 20 kHz at every rate, for a
+    latency of `latency` base samples. The coefficient grid stays 32 base samples long (32 M at the oversampled rate),
+    so the angle and glide move as they did before. The reference for src/dsp/HiLoStage.h (golden-tested)."""
+
+    def __init__(self, fs, mode="hi", theta=0.0):
+        from oversampling import Oversampler
+
+        self.os = Oversampler(fs)
+        self.factor, self.latency = self.os.factor, self.os.latency
+        self.core = HiLo(fs * self.factor, mode, theta, sub=32 * self.factor)
+
+    def set(self, theta=None, mode=None):
+        self.core.set(theta=theta, mode=mode)
+
+    def process(self, x):
+        x = np.atleast_2d(np.asarray(x, dtype=np.float64))
+        return self.os.down(self.core.process(self.os.up(x)))
+
+
+def lag_oversampled(mode, theta, f, fs):
+    """Lag in degrees of HiLoOversampled at f, without its latency: the sections' at the oversampled rate (the
+    halfbands are linear phase, so they add only the delay)."""
+    from oversampling import plan
+
+    return lag(mode, theta, f, fs * plan(fs)[0])
+
+
 # ----------------------------------------------------------------------------------------------------------------
 # P1 checks
 # ----------------------------------------------------------------------------------------------------------------

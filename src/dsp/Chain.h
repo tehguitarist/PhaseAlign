@@ -1,8 +1,9 @@
 #pragma once
 
-#include "dsp/AllpassCascade.h"
 #include "dsp/ConstantRotator.h"
+#include "dsp/DelayLine.h"
 #include "dsp/DelayStage.h"
+#include "dsp/HiLoStage.h"
 #include "dsp/Ramp.h"
 
 #include <algorithm>
@@ -30,7 +31,7 @@ struct ChainSettings
     double phaseDegrees = 0.0;
     PhaseMode phaseMode = PhaseMode::high;
 
-    // Every stage out of the signal path, latency 0.
+    // Every stage out of the signal path: the output is the input delayed by Hi/Lo's latency (0 from 176.4 kHz up).
     static ChainSettings neutral()
     {
         ChainSettings s;
@@ -85,12 +86,12 @@ class PolarityStage
     LinearRamp gain;
 };
 
-// Phase stage: Hi/Lo (AllpassCascade, no latency) or Constant (ConstantRotator, latency L). The on/off crossfade mixes
-// the wet path with the dry one: the input in Hi/Lo, the input delayed by L in Constant, so phase on/off never changes
-// the latency. The cascade always runs (warm, R2), even while the stage is off or Constant is active, and in Hi/Lo the
-// rotator keeps only its history, so either can start at once. Which of the two is active (Constant or not) changes
-// only through setConstant(), which the chain calls while its output is silent (a latency change). Settled off in
-// Hi/Lo, the output is the input, bit-exact.
+// Phase stage: Hi/Lo (HiLoStage, oversampled, latency Lh: 32 samples at 44.1 kHz, 18 at 48, 5 at 96, 0 from 176.4 kHz
+// up) or Constant (ConstantRotator, latency L). The on/off crossfade mixes the wet path with the dry one, the input
+// delayed by the active path's latency, so phase on/off never changes the latency. Hi/Lo always runs (warm, R2), even
+// while the stage is off or Constant is active, and in Hi/Lo the rotator keeps only its history, so either can start at
+// once. Which of the two is active (Constant or not) changes only through setConstant(), which the chain calls while
+// its output is silent (a latency change). Settled off in Hi/Lo, the output is the input delayed by Lh, bit-exact.
 class PhaseStage
 {
   public:
@@ -100,14 +101,16 @@ class PhaseStage
     {
         cascade.prepare(sampleRate);
         rotator.prepare(sampleRate, numChannels);
+        hiLoDry.prepare(numChannels, cascade.getLatency(), DelayStage::maxBlock);
         wetGain.prepare(crossfadeSamples(sampleRate));
     }
 
     void reset(const ChainSettings& s)
     {
         constant = s.phaseMode == PhaseMode::constant;
-        hiLoMode = s.phaseMode == PhaseMode::low ? AllpassCascade::Mode::lo : AllpassCascade::Mode::hi;
+        hiLoMode = s.phaseMode == PhaseMode::low ? HiLoStage::Mode::lo : HiLoStage::Mode::hi;
         cascade.reset(hiLoMode, s.phaseDegrees);
+        hiLoDry.clear();
         rotator.reset(s.phaseDegrees);
         wetGain.reset(s.phaseOn ? 1.0f : 0.0f);
     }
@@ -119,23 +122,22 @@ class PhaseStage
         rotator.setTarget(s.phaseDegrees);
         if (s.phaseMode != PhaseMode::constant)
         {
-            hiLoMode = s.phaseMode == PhaseMode::low ? AllpassCascade::Mode::lo : AllpassCascade::Mode::hi;
+            hiLoMode = s.phaseMode == PhaseMode::low ? HiLoStage::Mode::lo : HiLoStage::Mode::hi;
             cascade.setMode(hiLoMode); // glides (R3); unheard while Constant is active
         }
     }
 
-    // Only while the output is silent. Back to Hi/Lo, the cascade (which doesn't run in Constant) starts from a clear
-    // state at the current mode and angle.
     // Only while the output is silent. The cascade keeps running in Constant (warm, unheard), so going back to Hi/Lo
     // never restarts it from a clear state on a signal that is already playing (a restart left a burst near Nyquist
     // in its state; plan 2.3).
     void setConstant(bool on) { constant = on; }
 
     bool isConstant() const { return constant; }
-    int latency() const { return constant ? rotator.getLatency() : 0; }
+    int latency() const { return constant ? rotator.getLatency() : cascade.getLatency(); }
     static int latencyFor(const ChainSettings& s, double sampleRate)
     {
-        return s.phaseMode == PhaseMode::constant ? ConstantRotator::latencyFor(sampleRate) : 0;
+        return s.phaseMode == PhaseMode::constant ? ConstantRotator::latencyFor(sampleRate)
+                                                  : HiLoStage::latencyFor(sampleRate);
     }
 
     bool isSettled() const { return wetGain.isSettled() && (constant ? rotator.isSettled() : cascade.isSettled()); }
@@ -151,14 +153,10 @@ class PhaseStage
 
         if (constant)
         {
-            float warm[maxChannels][DelayStage::maxBlock];
-            float* warmPtr[maxChannels];
             for (int ch = 0; ch < numChannels; ++ch)
-            {
-                warmPtr[ch] = warm[ch];
-                std::copy(io[ch], io[ch] + n, warm[ch]);
-            }
-            cascade.process(warmPtr, numChannels, n); // warm and unheard, ready for Hi/Lo
+                hiLoDry.write(ch, io[ch], n);
+            hiLoDry.advance(n);
+            cascade.processUnheard(io, numChannels, n); // warm, ready for Hi/Lo
 
             if (settled) // the wet or the dry path alone, straight into io
             {
@@ -173,16 +171,29 @@ class PhaseStage
         else
         {
             rotator.process(io, nullptr, nullptr, numChannels, n, false); // history only
+            for (int ch = 0; ch < numChannels; ++ch)
+                hiLoDry.write(ch, io[ch], n);
             if (settled && on)
             {
+                hiLoDry.advance(n);
                 cascade.process(io, numChannels, n);
                 return;
             }
+            if (settled) // off: the output is the delayed input, and the stage keeps warm (R2)
+            {
+                cascade.processUnheard(io, numChannels, n);
+                for (int ch = 0; ch < numChannels; ++ch)
+                    hiLoDry.read(ch, n, cascade.getLatency(), io[ch]);
+                hiLoDry.advance(n);
+                return;
+            }
             for (int ch = 0; ch < numChannels; ++ch)
+            {
                 std::copy(io[ch], io[ch] + n, scratch[ch]);
-            cascade.process(scratchPtr, numChannels, n); // warm even while off (R2)
-            if (settled)
-                return; // off: the output is the input
+                hiLoDry.read(ch, n, cascade.getLatency(), io[ch]); // the dry path, delayed to match
+            }
+            hiLoDry.advance(n);
+            cascade.process(scratchPtr, numChannels, n);
         }
 
         float w[DelayStage::maxBlock];
@@ -192,9 +203,10 @@ class PhaseStage
     }
 
   private:
-    AllpassCascade cascade;
+    HiLoStage cascade;
     ConstantRotator rotator;
-    AllpassCascade::Mode hiLoMode = AllpassCascade::Mode::hi;
+    DelayLine hiLoDry; // Hi/Lo's dry path: the input, read Lh samples back
+    HiLoStage::Mode hiLoMode = HiLoStage::Mode::hi;
     bool constant = false;
     LinearRamp wetGain;
 };
@@ -302,7 +314,7 @@ class Chain
         return lmax + FractionalKernels::lookaheadFor(sampleRate);
     }
 
-    // The latency `s` needs, in samples: the delay's while it is on, plus Constant's.
+    // The latency `s` needs, in samples: the delay's while it is on, plus the phase path's (Constant's or Hi/Lo's).
     static int latencyFor(const ChainSettings& s, double sampleRate, int maxDelayTenths)
     {
         return (s.delayOn ? delayLatencyFor(sampleRate, maxDelayTenths) : 0) + PhaseStage::latencyFor(s, sampleRate);
@@ -311,7 +323,8 @@ class Chain
     // The largest latency at this rate (for sizing the meter's alignment).
     static int maxLatencyFor(double sampleRate, int maxDelayTenths)
     {
-        return delayLatencyFor(sampleRate, maxDelayTenths) + ConstantRotator::latencyFor(sampleRate);
+        return delayLatencyFor(sampleRate, maxDelayTenths) +
+               std::max(ConstantRotator::latencyFor(sampleRate), HiLoStage::latencyFor(sampleRate));
     }
 
     // The latency of what is coming out now. It changes when a latency switch happens, in the silence between the

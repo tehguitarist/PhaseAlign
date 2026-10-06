@@ -350,7 +350,7 @@ TEST_CASE("state recalled into a running instance switches to Constant cleanly a
     fresh.setStateInformation(state.getData(), (int)state.getSize());
     running.prepareToPlay(fs, 256);
     fresh.prepareToPlay(fs, 256);
-    CHECK(running.getLatencySamples() == 0);
+    CHECK(running.getLatencySamples() == pa::dsp::HiLoStage::latencyFor(fs)); // Hi/Lo's
 
     auto a = lowSine(4, ms(2000), fs);
     auto b = a;
