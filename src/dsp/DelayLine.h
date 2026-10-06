@@ -33,20 +33,28 @@ class DelayLine
     int getNumChannels() const { return (int)buffers.size(); }
 
     // Writes n samples at the current block position; advance() moves past them once they have been read.
+    // n <= size. As at most two contiguous runs, each stored twice.
     void write(int channel, const float* x, int n)
     {
         auto* b = buffers[(size_t)channel].data();
-        for (int i = 0; i < n; ++i)
-        {
-            const auto p = (writePos + i) & mask;
-            b[p] = b[p + size] = x[i];
-        }
+        const auto first = std::min(n, size - writePos);
+        std::copy(x, x + first, b + writePos);
+        std::copy(x, x + first, b + writePos + size);
+        std::copy(x + first, x + n, b);
+        std::copy(x + first, x + n, b + size);
     }
 
     // The sample written `delay` samples before sample i of the current block.
     float read(int channel, int i, int delay) const
     {
         return buffers[(size_t)channel][(size_t)((writePos + i - delay) & mask)];
+    }
+
+    // read(channel, i, delay) for i = 0 .. n - 1, into out.
+    void read(int channel, int n, int delay, float* out) const
+    {
+        const auto* x = span(channel, n - 1, delay, n);
+        std::copy(x, x + n, out);
     }
 
     // `length` consecutive samples, oldest first, the newest being the one read(channel, i, newestDelay) gives.

@@ -1,35 +1,63 @@
 #pragma once
 
+#include "dsp/FractionalKernelTables.h"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
 
 // Interpolation kernels for the delay's 0.1-sample steps (IMPLEMENTATION_PLAN 2.1a; user, 2026-10-06; study in
-// prototype/subsample.py). Each is a sinc centred at lookahead + f/10 samples under a Kaiser window of the same centre,
-// normalised to unity at DC. The tap count is the shortest that stays within 0.02 dB and 0.01 samples of a pure delay
-// from 20 Hz to 20 kHz at the rate (48 at 44.1 kHz, 24 at 48 kHz, 8 from 88.2 kHz up), so the added latency,
-// `lookahead` samples, is as small as it can be.
+// prototype/subsample.py). For a fraction f (1 to 9 tenths), a kernel of `taps` weights reads that many consecutive
+// samples, the newest `lookahead` samples ahead of the tap: the latency it adds. Each is within 0.02 dB and 0.01
+// samples (phase delay) of a pure delay from 20 Hz to 20 kHz at the rate. Two designs:
+//
+// - kaiser: a sinc centred at lookahead + f/10 under a Kaiser window of the same centre, normalised to unity at DC;
+//   linear phase. 48 taps at 44.1 kHz, 24 at 48 kHz, 8 from 88.2 kHz up; lookahead taps/2 - 1 (23 / 11 / 3 samples).
+// - lowDelay: minimax kernels designed off centre by linear programming (subsample.py part 4, tables generated into
+//   FractionalKernelTables.h); not linear phase, so the group delay ripples near 20 kHz (up to 1.2 samples at
+//   44.1 kHz, 0.5 at 48 kHz) though the phase delay meets the same spec. Lookahead 6 / 4 / 1 / 0 samples at
+//   44.1 / 48 / 88.2 / 176.4 kHz and up, with 28 / 16 / 6 / 4 taps.
 namespace pa::dsp
 {
 class FractionalKernels
 {
   public:
+    enum class Design
+    {
+        kaiser,
+        lowDelay
+    };
+    static constexpr Design design = Design::kaiser; // the user kept Kaiser (2026-10-06, plan 2.6)
+
     static constexpr int maxTaps = 48;
     static constexpr int steps = 10; // tenths of a sample
 
-    static int tapsFor(double sampleRate) { return sampleRate < 46000.0 ? 48 : sampleRate < 80000.0 ? 24 : 8; }
-
-    static double betaFor(double sampleRate)
+    static int tapsFor(double sampleRate)
     {
-        return sampleRate < 46000.0 ? 7.0 : sampleRate < 80000.0 ? 6.0 : sampleRate < 120000.0 ? 7.0 : 8.0;
+        if (design == Design::lowDelay)
+            return tableFor(sampleRate).taps;
+        return sampleRate < 46000.0 ? 48 : sampleRate < 80000.0 ? 24 : 8;
     }
 
     // Samples the kernels read ahead of the tap: the latency they add.
-    static int lookaheadFor(double sampleRate) { return tapsFor(sampleRate) / 2 - 1; }
+    static int lookaheadFor(double sampleRate)
+    {
+        if (design == Design::lowDelay)
+            return tableFor(sampleRate).lookahead;
+        return tapsFor(sampleRate) / 2 - 1;
+    }
 
     void prepare(double sampleRate)
     {
         taps = tapsFor(sampleRate);
+        if (design == Design::lowDelay)
+        {
+            const auto& table = tableFor(sampleRate);
+            for (int f = 1; f < steps; ++f)
+                std::copy(table.kernels + (f - 1) * taps, table.kernels + f * taps, kernels[(size_t)f].begin());
+            return;
+        }
+
         const auto beta = betaFor(sampleRate);
         const auto half = 0.5 * taps;
         for (int f = 1; f < steps; ++f)
@@ -57,6 +85,22 @@ class FractionalKernels
     const float* reversed(int f) const { return kernels[(size_t)f].data(); }
 
   private:
+    static double betaFor(double sampleRate)
+    {
+        return sampleRate < 46000.0 ? 7.0 : sampleRate < 80000.0 ? 6.0 : sampleRate < 120000.0 ? 7.0 : 8.0;
+    }
+
+    // The table designed for the highest rate at or below this one (the 44.1 kHz one below 44.1 kHz too, where no
+    // design meets the spec).
+    static const fractional_tables::Table& tableFor(double sampleRate)
+    {
+        const auto* best = &fractional_tables::tables[0];
+        for (const auto& t : fractional_tables::tables)
+            if (sampleRate >= t.minRate)
+                best = &t;
+        return *best;
+    }
+
     static double sinc(double x)
     {
         constexpr double pi = 3.14159265358979323846;

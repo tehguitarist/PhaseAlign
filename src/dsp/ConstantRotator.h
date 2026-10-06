@@ -28,8 +28,16 @@ class ConstantRotator
     static constexpr int updateInterval = 32;
     static constexpr double smoothMs = 20.0;
 
-    // The FFT block: also the length of the head applied directly. 128 / 256 measured fastest (plan 2.6).
-    static int blockSizeFor(double sampleRate) { return sampleRate >= 96000.0 ? 256 : 128; }
+    // The convolver's blocks: the head applied directly, then each FFT level's block (PartitionedConvolver.h). Measured
+    // fastest (plan 2.6): uniform 128 at 44.1/48 kHz. Where the kernel is twice as long or more, a second level of
+    // larger blocks for its tail costs less than more 128-sample partitions: 2048 from 88.2 kHz with vDSP; with the
+    // generic FFT (Windows, Linux), whose large transforms cost more, 1024 and only from 176.4 kHz.
+    static std::vector<int> blockSizesFor(double sampleRate)
+    {
+        if (RealFft::isNative)
+            return sampleRate >= 80000.0 ? std::vector<int>{128, 2048} : std::vector<int>{128};
+        return sampleRate >= 160000.0 ? std::vector<int>{128, 1024} : std::vector<int>{128};
+    }
 
     static int latencyFor(double sampleRate) { return (HilbertFir::tapsFor(sampleRate) - 1) / 2 - 1; }
 
@@ -40,7 +48,7 @@ class ConstantRotator
         latency = latencyFor(sampleRate);
         const auto h = HilbertFir::design(HilbertFir::tapsFor(sampleRate));
         std::vector<float> kernel(h.begin() + 1, h.end() - 1); // taps 0 and N - 1 are zero
-        convolver.prepare(kernel, blockSizeFor(sampleRate), numChannels);
+        convolver.prepare(kernel, blockSizesFor(sampleRate), numChannels);
         dry.prepare(numChannels, latency, updateInterval);
         smoothSamples = std::max(1.0, std::round(smoothMs * 1.0e-3 * sampleRate));
         reset(0.0);
@@ -53,6 +61,7 @@ class ConstantRotator
         theta = target = thetaDegrees;
         step = 0.0;
         untilUpdate = 0;
+        trig(theta, c1, s1);
     }
 
     void setTarget(double thetaDegrees)
@@ -70,7 +79,7 @@ class ConstantRotator
 
     // n samples of `in`: the delayed input x[n - L] into dryOut and, if wetNeeded, the rotation into wetOut (otherwise
     // wetOut is left alone). With dryOut null as well, only the history is kept (another mode is active): cheap writes.
-    // Outputs must not alias the input.
+    // Either output may be the input (each cell's input is taken in before any output is written), not both.
     void process(const float* const* in, float* const* wetOut, float* const* dryOut, int numChannelsIn, int n,
                  bool wetNeeded)
     {
@@ -82,10 +91,14 @@ class ConstantRotator
         {
             if (untilUpdate == 0)
             {
-                // This cell runs from the angle now to the angle after it, linearly per sample.
-                trig(theta, c0, s0);
-                advanceTheta();
-                trig(theta, c1, s1);
+                // This cell runs from the angle now (where the last one ended) to the angle after it, linearly per
+                // sample. No trig while the angle is still.
+                c0 = c1, s0 = s1;
+                if (! isSettled())
+                {
+                    advanceTheta();
+                    trig(theta, c1, s1);
+                }
                 untilUpdate = updateInterval;
             }
             const auto m = std::min(n - start, untilUpdate);
@@ -109,8 +122,7 @@ class ConstantRotator
             for (int ch = 0; ch < nch && dryOut != nullptr; ++ch)
             {
                 auto* d = dryOut[ch] + start;
-                for (int i = 0; i < m; ++i)
-                    d[i] = dry.read(ch, i, latency);
+                dry.read(ch, m, latency, d);
                 if (! wetNeeded)
                     continue;
                 auto* w = wetOut[ch] + start;

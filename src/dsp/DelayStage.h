@@ -126,21 +126,35 @@ class DelayStage
         const auto n = end - start;
         if (fraction == 0)
         {
-            for (int i = 0; i < n; ++i)
-                out[i] = line.read(ch, start + i, whole);
+            const auto* x = line.span(ch, start + n - 1, whole, n);
+            std::copy(x, x + n, out);
             return;
         }
 
-        // y[i] = sum over k of kernel[k] * x[oldest + i + k]: the outer loop over taps keeps each sum in a fixed order,
-        // and the inner loop over outputs vectorises.
+        // y[i] = sum over k of kernel[k] * x[oldest + i + k], each sum in tap order. Outputs in register-sized chunks
+        // with the taps inside, so the sums stay in registers; the loop over a chunk's outputs vectorises.
         const auto taps = kernels.getTaps();
         const auto* kernel = kernels.reversed(fraction);
         const auto* x = line.span(ch, start + n - 1, whole - lookahead, taps + n - 1);
-        std::fill(out, out + n, 0.0f);
+        constexpr int chunk = 16;
+        int i0 = 0;
+        for (; i0 + chunk <= n; i0 += chunk)
+        {
+            float acc[chunk] = {};
+            for (int k = 0; k < taps; ++k)
+            {
+                const auto w = kernel[k];
+                const auto* xs = x + i0 + k;
+                for (int i = 0; i < chunk; ++i)
+                    acc[i] += w * xs[i];
+            }
+            std::copy(acc, acc + chunk, out + i0);
+        }
+        std::fill(out + i0, out + n, 0.0f);
         for (int k = 0; k < taps; ++k)
         {
             const auto w = kernel[k];
-            for (int i = 0; i < n; ++i)
+            for (int i = i0; i < n; ++i)
                 out[i] += w * x[i + k];
         }
     }

@@ -9,6 +9,7 @@ set(CMAKE_OSX_DEPLOYMENT_TARGET "10.13" CACHE STRING "Minimum macOS deployment v
 
 option(PA_BUILD_TESTS "Build the unit tests (tests/, Catch2 v3)" ON)
 option(PA_STANDALONE "Also build a Standalone app, for checking the UI without a host" OFF)
+option(PA_GENERIC_FFT_TESTS "Build PhaseAlignDspTests with the generic FFT on macOS too (no vDSP), to benchmark it" OFF)
 
 # -Wextra is a GCC/Clang flag; MSVC's cl.exe misparses it as the /W switch (error D8021).
 if (MSVC)
@@ -106,9 +107,11 @@ if (PA_BUILD_TESTS)
         tests/InteractionTests.cpp
         tests/ProcessorTests.cpp
         tests/DimmingTests.cpp
+        tests/RobustnessTests.cpp
     )
     target_include_directories(PhaseAlignTests PRIVATE src tests)
     target_compile_definitions(PhaseAlignTests PRIVATE
+        _USE_MATH_DEFINES                     # M_PI in the tests, on MSVC
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0
         JUCE_STANDALONE_APPLICATION=1
@@ -131,9 +134,11 @@ if (PA_BUILD_TESTS)
         tests/dsp/PhaseTests.cpp
         tests/dsp/GoldenTests.cpp
         tests/dsp/MeterTests.cpp
+        tests/dsp/P3Renders.cpp
     )
     set_source_files_properties(tests/ParameterTests.cpp tests/StateTests.cpp tests/EditorTests.cpp
-        tests/InteractionTests.cpp tests/ProcessorTests.cpp tests/DimmingTests.cpp ${PA_DSP_TEST_SOURCES}
+        tests/InteractionTests.cpp tests/ProcessorTests.cpp tests/DimmingTests.cpp tests/RobustnessTests.cpp
+        ${PA_DSP_TEST_SOURCES}
         PROPERTIES COMPILE_OPTIONS "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wno-float-equal>")
 
     add_test(NAME PhaseAlignTests COMMAND PhaseAlignTests)
@@ -145,6 +150,7 @@ if (PA_BUILD_TESTS)
     target_include_directories(PhaseAlignDspTests PRIVATE src tests/dsp)
     target_compile_definitions(PhaseAlignDspTests PRIVATE
         PA_GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/golden" # prototype/golden.py writes these
+        _USE_MATH_DEFINES                                        # M_PI in the tests, on MSVC
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0
         JUCE_STANDALONE_APPLICATION=1
@@ -157,4 +163,12 @@ if (PA_BUILD_TESTS)
     )
     target_compile_options(PhaseAlignDspTests PRIVATE ${PA_WARNING_FLAGS})
     add_test(NAME PhaseAlignDspTests COMMAND PhaseAlignDspTests)
+
+    # The DSP runner without vDSP on macOS: the FFT engine Windows and Linux use, to benchmark it on this machine. Only
+    # juce_dsp loses vDSP (juce_audio_basics needs it on macOS), so this build directory is for benchmarks only.
+    if (PA_GENERIC_FFT_TESTS)
+        target_compile_definitions(PhaseAlignDspTests PRIVATE PA_REAL_FFT_NO_VDSP=1)
+        set_source_files_properties(libs/JUCE/modules/juce_dsp/juce_dsp.mm libs/JUCE/modules/juce_dsp/juce_dsp.cpp
+            PROPERTIES COMPILE_DEFINITIONS JUCE_USE_VDSP_FRAMEWORK=0)
+    endif()
 endif()

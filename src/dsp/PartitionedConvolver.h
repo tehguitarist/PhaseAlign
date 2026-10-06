@@ -1,26 +1,30 @@
 #pragma once
 
 #include "dsp/DelayLine.h"
-
-#include <juce_dsp/juce_dsp.h>
+#include "dsp/RealFft.h"
 
 #include <algorithm>
+#include <functional>
 #include <memory>
 #include <vector>
 
-// Zero-latency partitioned convolution (IMPLEMENTATION_PLAN 2.4, 2.6). Our own rather than juce::dsp::Convolution for
-// exact control of latency and of when it computes:
+// Zero-latency non-uniform partitioned convolution (IMPLEMENTATION_PLAN 2.4, 2.6). Our own rather than
+// juce::dsp::Convolution for exact control of latency and of when it computes:
 //
-// - The kernel's first B taps (the head) are applied directly, sample by sample (only its nonzero taps).
-// - The rest is uniform partitioned FFT convolution (overlap-save), block B: each block of B inputs is transformed
-//   with the previous block (FFT size 2B) into a frequency-domain delay line (FDL), and the tail's contribution to the
-//   next output block is sum over partitions p >= 1 of H_p X_{j+1-p}, inverse-transformed. Since every tail partition
-//   is at least B samples late, that is ready before it is needed, so output sample n is the convolution at n.
-// - process() takes how much work to do (Work). `full`: the output. `spectra`: the FDL is kept current (one forward FFT
-//   per block) but no output is computed, so full output can resume at any sample for the cost of one output block.
-//   `history`: only the time-domain input history (P + 1 blocks) is kept, no FFTs; going back to the others rebuilds
-//   the FDL from that history at once (P forward FFTs, a one-off spike). So a caller can stop the output whenever it is
-//   multiplied by 0, at no cost to correctness.
+// - The kernel's first b0 taps (the head) are applied directly, sample by sample (only its nonzero taps).
+// - The rest is split into levels of uniform partitioned FFT convolution (overlap-save), each with its own block size
+//   b_k, ascending, each a multiple of the one before: level k covers taps [b_k, b_k+1) (the last level, to the end of
+//   the kernel) in partitions of b_k taps. Each block of b_k inputs is transformed with the previous block (FFT size
+//   2 b_k) into the level's frequency-domain delay line (FDL), and the level's contribution to its next output block is
+//   the sum over its partitions of H_q X_{j+1-q}, inverse-transformed. Every partition of level k starts at least b_k
+//   taps in, so that is ready before it is needed, and output sample n is the convolution at n. Small blocks near the
+//   start keep the latency at zero; large blocks for the long tail cost fewer multiply-adds per sample (one level,
+//   block b0, is plain uniform partitioning).
+// - process() takes how much work to do (Work). `full`: the output. `spectra`: the FDLs are kept current (forward FFTs
+//   only) but no output is computed, so full output can resume at any sample for the cost of one output block per
+//   level. `history`: only the time-domain input history is kept, no FFTs; going back to the others rebuilds the FDLs
+//   from that history at once (a one-off spike). So a caller can stop the output whenever it is multiplied by 0, at no
+//   cost to correctness.
 //
 // Not real-time: prepare() allocates. process() doesn't allocate, lock or log.
 namespace pa::dsp
@@ -28,54 +32,29 @@ namespace pa::dsp
 class PartitionedConvolver
 {
   public:
-    void prepare(const std::vector<float>& kernel, int blockSize, int numChannelsIn)
+    // blockSizes: b0 (the head's length, and the first level's block), then each further level's block.
+    void prepare(const std::vector<float>& kernel, const std::vector<int>& blockSizes, int numChannelsIn)
     {
-        b = blockSize;
-        int order = 0;
-        while ((1 << order) < 2 * b)
-            ++order;
-        n = 1 << order;
-        bins = n / 2 + 1;
-        fft = std::make_unique<juce::dsp::FFT>(order);
-        partitions = std::max(1, ((int)kernel.size() + b - 1) / b);
         numChannels = numChannelsIn;
-        work.assign((size_t)(2 * n), 0.0f);
+        headLength = blockSizes.front();
+        const auto kernelLength = (int)kernel.size();
 
-        // The head: its nonzero taps.
         head.clear();
-        for (int k = 0; k < b && k < (int)kernel.size(); ++k)
+        for (int k = 0; k < headLength && k < kernelLength; ++k)
             if (! std::equal_to<float>()(kernel[(size_t)k], 0.0f))
                 head.push_back({k, kernel[(size_t)k]});
 
-        // Tail partition spectra (p >= 1; slot 0 unused), split into real and imaginary parts so the multiply-adds
-        // vectorise.
-        hRe.assign((size_t)(partitions * bins), 0.0f);
-        hIm.assign((size_t)(partitions * bins), 0.0f);
-        for (int p = 1; p < partitions; ++p)
+        levels.clear();
+        for (size_t i = 0; i < blockSizes.size(); ++i)
         {
-            std::fill(work.begin(), work.end(), 0.0f);
-            for (int k = 0; k < b && p * b + k < (int)kernel.size(); ++k)
-                work[(size_t)k] = kernel[(size_t)(p * b + k)];
-            fft->performRealOnlyForwardTransform(work.data(), true);
-            for (int k = 0; k < bins; ++k)
-            {
-                hRe[(size_t)(p * bins + k)] = work[(size_t)(2 * k)];
-                hIm[(size_t)(p * bins + k)] = work[(size_t)(2 * k + 1)];
-            }
+            const auto b = blockSizes[i];
+            const auto end = i + 1 < blockSizes.size() ? std::min(blockSizes[i + 1], kernelLength) : kernelLength;
+            if (b >= end)
+                break;
+            levels.push_back(std::make_unique<Level>());
+            levels.back()->prepare(kernel, b, end, numChannels);
         }
-
-        historyBlocks = partitions + 2; // P + 1 complete blocks plus the one filling
-        channels.assign((size_t)numChannels, {});
-        for (auto& c : channels)
-        {
-            c.history.assign((size_t)(historyBlocks * b), 0.0f);
-            c.xRe.assign((size_t)(partitions * bins), 0.0f);
-            c.xIm.assign((size_t)(partitions * bins), 0.0f);
-            c.out.assign((size_t)b, 0.0f);
-        }
-        headLine.prepare(numChannels, b, b);
-        yRe.assign((size_t)bins, 0.0f);
-        yIm.assign((size_t)bins, 0.0f);
+        headLine.prepare(numChannels, headLength, headLength);
         reset();
     }
 
@@ -88,21 +67,12 @@ class PartitionedConvolver
 
     void reset()
     {
-        for (auto& c : channels)
-        {
-            std::fill(c.history.begin(), c.history.end(), 0.0f);
-            std::fill(c.xRe.begin(), c.xRe.end(), 0.0f);
-            std::fill(c.xIm.begin(), c.xIm.end(), 0.0f);
-            std::fill(c.out.begin(), c.out.end(), 0.0f);
-        }
+        for (auto& level : levels)
+            level->reset();
         headLine.clear();
-        block = 0;
-        pos = 0;
-        spectraValid = outputValid = true; // all-zero history: the zero FDL and output are right
     }
 
     int getLatency() const { return 0; }
-    int getBlockSize() const { return b; }
 
     // n samples of each channel in `in`; with Work::full, the convolution into `out` (which may alias `in`); otherwise
     // `out` gets zeros, or is untouched if null.
@@ -110,141 +80,295 @@ class PartitionedConvolver
     {
         for (int start = 0; start < numSamples;)
         {
-            if (mode != Work::history && ! spectraValid)
-                rebuildSpectra();
-            if (mode == Work::full && ! outputValid)
+            auto m = std::min({numSamples - start, maxHeadChunk, headLength});
+            for (auto& level : levels)
             {
-                for (auto& c : channels) // the tail's part of this block, from the FDL up to block - 1
-                    computeTail(c, block);
-                outputValid = true;
+                level->prepareFor(mode);
+                m = std::min(m, level->untilBlockEnd());
             }
 
-            const auto m = std::min(numSamples - start, b - pos);
-            const auto slot = wrap(block, historyBlocks) * b;
             for (int ch = 0; ch < numChannels; ++ch)
             {
-                auto& c = channels[(size_t)ch];
-                std::copy(in[ch] + start, in[ch] + start + m, c.history.data() + slot + pos);
+                for (auto& level : levels)
+                    level->write(ch, in[ch] + start, m);
                 headLine.write(ch, in[ch] + start, m);
                 if (mode == Work::full)
                 {
-                    // The tail, plus the head applied directly: x[i - k] for each nonzero head tap k. Taps outside and
-                    // outputs inside, so it vectorises.
-                    auto* o = out[ch] + start;
+                    // The levels, plus the head applied directly: x[i - k] for each nonzero head tap k, in tap order.
                     float acc[maxHeadChunk];
-                    std::copy(c.out.data() + pos, c.out.data() + pos + m, acc);
-                    const auto* x = headLine.span(ch, m - 1, 0, b + m - 1) + (b - 1); // x[i - k] = x[i - k]
-                    for (const auto& t : head)
-                        for (int i = 0; i < m; ++i)
-                            acc[i] += t.weight * x[i - t.offset];
-                    std::copy(acc, acc + m, o);
+                    std::fill(acc, acc + m, 0.0f);
+                    for (auto& level : levels)
+                        level->addOutput(ch, acc, m);
+                    const auto* x = headLine.span(ch, m - 1, 0, headLength + m - 1) + (headLength - 1);
+                    applyHead(x, acc, m);
+                    std::copy(acc, acc + m, out[ch] + start);
                 }
                 else if (out != nullptr)
                     std::fill(out[ch] + start, out[ch] + start + m, 0.0f);
             }
             headLine.advance(m);
-            pos += m;
+            for (auto& level : levels)
+                level->advance(m, mode);
             start += m;
-
-            if (pos == b) // a block is complete
-            {
-                for (auto& c : channels)
-                {
-                    if (mode != Work::history)
-                        computeSpectrum(c, block);
-                    if (mode == Work::full)
-                        computeTail(c, block + 1);
-                }
-                spectraValid = mode != Work::history;
-                outputValid = mode == Work::full;
-                ++block;
-                pos = 0;
-            }
         }
     }
 
   private:
-    struct Channel
+    // acc[i] += sum over head taps of weight * x[i - offset], i < m. Outputs in register-sized chunks with the taps
+    // inside, so the accumulators stay in registers instead of going through memory once per tap.
+    void applyHead(const float* x, float* acc, int m) const
     {
-        std::vector<float> history;  // historyBlocks blocks, by block number modulo historyBlocks
-        std::vector<float> xRe, xIm; // FDL, circular: the spectrum of input block j is in slot j mod P
-        std::vector<float> out;      // the output block being played
-    };
-
-    static int wrap(long long j, int count) { return (int)(((j % count) + count) % count); }
-
-    // FFT of input blocks j - 1 and j into the FDL as the newest entry (it replaces block j - P, which drops out).
-    void computeSpectrum(Channel& c, long long j)
-    {
-        const auto prev = wrap(j - 1, historyBlocks) * b;
-        const auto cur = wrap(j, historyBlocks) * b;
-        std::copy(c.history.data() + prev, c.history.data() + prev + b, work.data());
-        std::copy(c.history.data() + cur, c.history.data() + cur + b, work.data() + b);
-        std::fill(work.data() + 2 * b, work.data() + 2 * n, 0.0f);
-        fft->performRealOnlyForwardTransform(work.data(), true);
-        const auto newest = wrap(j, partitions) * bins;
-        for (int k = 0; k < bins; ++k)
+        constexpr int chunk = 16;
+        int i0 = 0;
+        for (; i0 + chunk <= m; i0 += chunk)
         {
-            c.xRe[(size_t)(newest + k)] = work[(size_t)(2 * k)];
-            c.xIm[(size_t)(newest + k)] = work[(size_t)(2 * k + 1)];
+            float a[chunk];
+            std::copy(acc + i0, acc + i0 + chunk, a);
+            for (const auto& t : head)
+            {
+                const auto* xs = x + i0 - t.offset;
+                for (int i = 0; i < chunk; ++i)
+                    a[i] += t.weight * xs[i];
+            }
+            std::copy(a, a + chunk, acc + i0);
         }
+        for (const auto& t : head)
+            for (int i = i0; i < m; ++i)
+                acc[i] += t.weight * x[i - t.offset];
     }
 
-    // The tail's part of output block j (played while block j fills): sum over p >= 1 of H_p X_{j-p}, from the FDL up
-    // to block j - 1, inverse-transformed.
-    void computeTail(Channel& c, long long j)
+    // One level of uniform partitions: block b, taps [b, end) of the kernel.
+    class Level
     {
-        std::fill(yRe.begin(), yRe.end(), 0.0f);
-        std::fill(yIm.begin(), yIm.end(), 0.0f);
-        for (int p = 1; p < partitions; ++p)
+      public:
+        void prepare(const std::vector<float>& kernel, int blockSize, int end, int numChannelsIn)
         {
-            const auto* hr = hRe.data() + p * bins;
-            const auto* hi = hIm.data() + p * bins;
-            const auto slot = wrap(j - p, partitions) * bins; // input block j - p meets partition p
-            const auto* xr = c.xRe.data() + slot;
-            const auto* xi = c.xIm.data() + slot;
-            for (int k = 0; k < bins; ++k)
+            b = blockSize;
+            int order = 0;
+            while ((1 << order) < 2 * b)
+                ++order;
+            n = 1 << order;
+            bins = n / 2;
+            fft.prepare(order);
+            parts = (end - b + b - 1) / b;
+            work.assign((size_t)n, 0.0f);
+
+            // Partition q (1 to parts) holds taps [q b, (q + 1) b), as packed split spectra (RealFft.h; the engine's
+            // scale folded in) so the multiply-adds vectorise. Stored at index q - 1.
+            hRe.assign((size_t)(parts * bins), 0.0f);
+            hIm.assign((size_t)(parts * bins), 0.0f);
+            for (int q = 1; q <= parts; ++q)
             {
-                yRe[(size_t)k] += hr[k] * xr[k] - hi[k] * xi[k];
-                yIm[(size_t)k] += hr[k] * xi[k] + hi[k] * xr[k];
+                std::fill(work.begin(), work.end(), 0.0f);
+                for (int k = 0; k < b && q * b + k < end; ++k)
+                    work[(size_t)k] = kernel[(size_t)(q * b + k)] * fft.convolutionScale();
+                fft.forward(work.data(), hRe.data() + (q - 1) * bins, hIm.data() + (q - 1) * bins);
+            }
+
+            historyBlocks = parts + 2; // parts + 1 complete blocks plus the one filling
+            channels.assign((size_t)numChannelsIn, {});
+            for (auto& c : channels)
+            {
+                c.history.assign((size_t)(historyBlocks * b), 0.0f);
+                c.xRe.assign((size_t)(parts * bins), 0.0f);
+                c.xIm.assign((size_t)(parts * bins), 0.0f);
+                c.out.assign((size_t)b, 0.0f);
+            }
+            yRe.assign((size_t)(numChannelsIn * bins), 0.0f);
+            yIm.assign((size_t)(numChannelsIn * bins), 0.0f);
+            slots.assign((size_t)parts, 0);
+        }
+
+        void reset()
+        {
+            for (auto& c : channels)
+            {
+                std::fill(c.history.begin(), c.history.end(), 0.0f);
+                std::fill(c.xRe.begin(), c.xRe.end(), 0.0f);
+                std::fill(c.xIm.begin(), c.xIm.end(), 0.0f);
+                std::fill(c.out.begin(), c.out.end(), 0.0f);
+            }
+            block = 0;
+            pos = 0;
+            spectraValid = outputValid = true; // all-zero history: the zero FDL and output are right
+        }
+
+        int untilBlockEnd() const { return b - pos; }
+
+        // Before samples are taken in with `mode`: catch up on what the mode needs.
+        void prepareFor(Work mode)
+        {
+            if (mode != Work::history && ! spectraValid)
+            {
+                for (auto& c : channels) // the FDL from the last `parts` complete blocks
+                    for (auto j = block - parts; j < block; ++j)
+                        computeSpectrum(c, j);
+                spectraValid = true;
+                outputValid = false;
+            }
+            if (mode == Work::full && ! outputValid)
+            {
+                computeOutputs(block); // this block's output, from the FDL up to block - 1
+                outputValid = true;
             }
         }
-        for (int k = 0; k < bins; ++k)
-        {
-            work[(size_t)(2 * k)] = yRe[(size_t)k];
-            work[(size_t)(2 * k + 1)] = yIm[(size_t)k];
-        }
-        std::fill(work.data() + 2 * bins, work.data() + 2 * n, 0.0f);
-        fft->performRealOnlyInverseTransform(work.data());
-        // Overlap-save: the last B samples of the 2B are the valid part (block j - p's convolution, shifted by pB).
-        std::copy(work.data() + b, work.data() + 2 * b, c.out.data());
-    }
 
-    // After `history` work: the FDL from the last P complete blocks.
-    void rebuildSpectra()
-    {
-        for (auto& c : channels)
-            for (auto j = block - partitions; j < block; ++j)
-                computeSpectrum(c, j);
-        spectraValid = true;
-        outputValid = false;
-    }
+        void write(int ch, const float* x, int m)
+        {
+            auto& c = channels[(size_t)ch];
+            std::copy(x, x + m, c.history.data() + wrap(block, historyBlocks) * b + pos);
+        }
+
+        void addOutput(int ch, float* acc, int m) const
+        {
+            const auto* o = channels[(size_t)ch].out.data() + pos;
+            for (int i = 0; i < m; ++i)
+                acc[i] += o[i];
+        }
+
+        void advance(int m, Work mode)
+        {
+            pos += m;
+            if (pos < b)
+                return;
+            if (mode != Work::history) // a block is complete
+                for (auto& c : channels)
+                    computeSpectrum(c, block);
+            if (mode == Work::full)
+                computeOutputs(block + 1);
+            spectraValid = mode != Work::history;
+            outputValid = mode == Work::full;
+            ++block;
+            pos = 0;
+        }
+
+      private:
+        struct Channel
+        {
+            std::vector<float> history;  // historyBlocks blocks, by block number modulo historyBlocks
+            std::vector<float> xRe, xIm; // FDL, circular: the spectrum of input block j is in slot j mod parts
+            std::vector<float> out;      // the output block being played
+        };
+
+        static int wrap(long long j, int count) { return (int)(((j % count) + count) % count); }
+
+        // FFT of input blocks j - 1 and j into the FDL as the newest entry (it replaces block j - parts).
+        void computeSpectrum(Channel& c, long long j)
+        {
+            const auto prev = wrap(j - 1, historyBlocks) * b;
+            const auto cur = wrap(j, historyBlocks) * b;
+            std::copy(c.history.data() + prev, c.history.data() + prev + b, work.data());
+            std::copy(c.history.data() + cur, c.history.data() + cur + b, work.data() + b);
+            const auto newest = (size_t)(wrap(j, parts) * bins);
+            fft.forward(work.data(), c.xRe.data() + newest, c.xIm.data() + newest);
+        }
+
+        // This level's part of output block j (played while block j fills), for every channel: the sum over q of
+        // H_q X_{j-q}, from the FDL up to block j - 1, inverse-transformed.
+        void computeOutputs(long long j)
+        {
+            for (int q = 1; q <= parts; ++q)
+                slots[(size_t)(q - 1)] = wrap(j - q, parts) * bins; // input block j - q meets partition q
+            const auto nch = (int)channels.size();
+            int ch = 0;
+            for (; ch + 2 <= nch; ch += 2)
+                accumulate<2>(ch);
+            if (ch < nch)
+                accumulate<1>(ch);
+
+            for (ch = 0; ch < nch; ++ch)
+            {
+                fft.inverse(yRe.data() + ch * bins, yIm.data() + ch * bins, work.data());
+                // Overlap-save: the last b samples of the 2b are the valid part.
+                std::copy(work.data() + b, work.data() + 2 * b, channels[(size_t)ch].out.data());
+            }
+        }
+
+        // The spectra of C channels from `first` into yRe/yIm. Bins in register-sized chunks with the partitions
+        // inside, so the sums stay in registers, and each partition's H is loaded once for all C channels. Each bin
+        // sums the partitions in order, as a plain loop would.
+        template <int C>
+        void accumulate(int first)
+        {
+            constexpr int chunk = 8;
+            const Channel* cs[C];
+            for (int c = 0; c < C; ++c)
+                cs[c] = &channels[(size_t)(first + c)];
+            int k0 = 0;
+            for (; k0 + chunk <= bins; k0 += chunk)
+            {
+                float ar[C][chunk] = {}, ai[C][chunk] = {};
+                for (int q = 1; q <= parts; ++q)
+                {
+                    const auto* hr = hRe.data() + (q - 1) * bins + k0;
+                    const auto* hi = hIm.data() + (q - 1) * bins + k0;
+                    const auto slot = slots[(size_t)(q - 1)] + k0;
+                    for (int c = 0; c < C; ++c)
+                    {
+                        const auto* xr = cs[c]->xRe.data() + slot;
+                        const auto* xi = cs[c]->xIm.data() + slot;
+                        for (int k = 0; k < chunk; ++k)
+                        {
+                            ar[c][k] += hr[k] * xr[k] - hi[k] * xi[k];
+                            ai[c][k] += hr[k] * xi[k] + hi[k] * xr[k];
+                        }
+                    }
+                }
+                for (int c = 0; c < C; ++c)
+                {
+                    std::copy(ar[c], ar[c] + chunk, yRe.data() + (first + c) * bins + k0);
+                    std::copy(ai[c], ai[c] + chunk, yIm.data() + (first + c) * bins + k0);
+                }
+            }
+            for (int c = 0; c < C; ++c) // the bins left over (none unless b < chunk)
+                for (int k = k0; k < bins; ++k)
+                {
+                    float ar = 0.0f, ai = 0.0f;
+                    for (int q = 1; q <= parts; ++q)
+                    {
+                        const auto hr = hRe[(size_t)((q - 1) * bins + k)], hi = hIm[(size_t)((q - 1) * bins + k)];
+                        const auto slot = (size_t)(slots[(size_t)(q - 1)] + k);
+                        const auto xr = cs[c]->xRe[slot], xi = cs[c]->xIm[slot];
+                        ar += hr * xr - hi * xi;
+                        ai += hr * xi + hi * xr;
+                    }
+                    yRe[(size_t)((first + c) * bins + k)] = ar;
+                    yIm[(size_t)((first + c) * bins + k)] = ai;
+                }
+            for (int c = 0; c < C; ++c) // bin 0 is DC (re) and Nyquist (im), each real
+            {
+                float dc = 0.0f, nyquist = 0.0f;
+                for (int q = 1; q <= parts; ++q)
+                {
+                    const auto h = (size_t)((q - 1) * bins), x = (size_t)slots[(size_t)(q - 1)];
+                    dc += hRe[h] * cs[c]->xRe[x];
+                    nyquist += hIm[h] * cs[c]->xIm[x];
+                }
+                yRe[(size_t)((first + c) * bins)] = dc;
+                yIm[(size_t)((first + c) * bins)] = nyquist;
+            }
+        }
+
+        int b = 128, n = 256, bins = 128, parts = 1, historyBlocks = 3;
+        RealFft fft;
+        std::vector<float> hRe, hIm, yRe, yIm, work; // y: per channel
+        std::vector<int> slots;                      // FDL offset of the block each partition meets
+        std::vector<Channel> channels;
+        long long block = 0; // number of the block being filled
+        int pos = 0;
+        bool spectraValid = true, outputValid = true;
+    };
 
     struct HeadTap
     {
         int offset;
         float weight;
     };
-    static constexpr int maxHeadChunk = 1024; // the largest block size used
+    static constexpr int maxHeadChunk = 1024; // the most samples taken in one step (also limited by the blocks)
 
-    int b = 256, n = 512, bins = 257, partitions = 1, numChannels = 0, historyBlocks = 3;
+    int headLength = 128, numChannels = 0;
     std::vector<HeadTap> head;
     DelayLine headLine;
-    std::unique_ptr<juce::dsp::FFT> fft;
-    std::vector<float> hRe, hIm, yRe, yIm, work;
-    std::vector<Channel> channels;
-    long long block = 0; // number of the block being filled
-    int pos = 0;
-    bool spectraValid = true, outputValid = true;
+    std::vector<std::unique_ptr<Level>> levels;
 };
 } // namespace pa::dsp

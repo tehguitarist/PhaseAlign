@@ -4,9 +4,12 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <chrono>
 #include <cmath>
 #include <complex>
+#include <cstdlib>
 #include <random>
+#include <string>
 #include <vector>
 
 // The phase stage (IMPLEMENTATION_PLAN 2.3, 2.4, M2): Hi/Lo is flat and its readout is the knob angle; Constant is a
@@ -245,4 +248,162 @@ TEST_CASE("entering and leaving Constant changes the latency between fades", "[d
     chain.setSettings(phaseOnly(PhaseMode::low, 0.0));
     chain.process(&p, 1, 4800);
     CHECK(chain.latency() == 0);
+}
+
+TEST_CASE("leaving 0 or 90 degrees on broadband input releases no burst", "[dsp][phase]")
+{
+    // At identity a section's pole is just inside z = -1. Run as a TPT structure, its state held a near-lossless
+    // resonance at Nyquist driven by the input's top end, which came out when the knob moved: white noise at +-0.5 peaked
+    // at over 4 (plan 2.3). Rotated noise legitimately peaks higher than the input (about 3 sigma, 0.9 here), so the
+    // limit is 1.0.
+    std::mt19937 rng(67);
+    std::uniform_real_distribution<float> dist(-0.5f, 0.5f);
+    struct Case
+    {
+        PhaseMode mode;
+        double from, to;
+        bool viaConstant; // settled in Constant first, then Hi/Lo at `from`, then the move
+    };
+    for (const auto fs : {44100.0, 48000.0, 96000.0, 192000.0})
+        for (const auto& c : {Case{PhaseMode::high, 0.0, 60.0, false}, Case{PhaseMode::high, 90.0, 150.0, false},
+                              Case{PhaseMode::low, 0.0, 60.0, false}, Case{PhaseMode::low, 90.0, 150.0, false},
+                              Case{PhaseMode::high, 0.0, 60.0, true}})
+        {
+            INFO("fs " << fs << ", mode " << (int)c.mode << ", " << c.from << " to " << c.to
+                       << (c.viaConstant ? " after Constant" : ""));
+            const auto length = (int)(0.6 * fs);
+            std::vector<float> x((size_t)length);
+            for (auto& v : x)
+                v = dist(rng);
+            Chain chain;
+            chain.prepare(fs, 1, 400);
+            chain.reset(phaseOnly(c.viaConstant ? PhaseMode::constant : c.mode, c.from));
+            float worst = 0.0f;
+            for (int pos = 0; pos < length; pos += 64)
+            {
+                if (c.viaConstant && pos == (int)(0.1 * fs) / 64 * 64)
+                    chain.setSettings(phaseOnly(c.mode, c.from)); // leaves Constant (a latency switch)
+                if (pos == (int)(0.3 * fs) / 64 * 64)
+                    chain.setSettings(phaseOnly(c.mode, c.to));
+                float* p = x.data() + pos;
+                chain.process(&p, 1, std::min(64, length - pos));
+                for (int i = pos; i < std::min(pos + 64, length); ++i)
+                    worst = std::max(worst, std::abs(x[(size_t)i]));
+            }
+            CHECK(worst < 1.0f);
+        }
+}
+
+namespace
+{
+std::vector<float> hilbertKernel(double fs)
+{
+    const auto h = HilbertFir::design(HilbertFir::tapsFor(fs));
+    return {h.begin() + 1, h.end() - 1}; // as ConstantRotator uses it
+}
+} // namespace
+
+TEST_CASE("the partitioned convolver equals direct convolution for any block layout and work changes", "[dsp][phase]")
+{
+    const auto kernel = hilbertKernel(48000.0);
+    const auto length = 20000;
+    std::mt19937 rng(53);
+    std::uniform_real_distribution<float> dist(-0.5f, 0.5f);
+    std::vector<float> x((size_t)length);
+    for (auto& v : x)
+        v = dist(rng);
+
+    // Direct convolution in double.
+    std::vector<double> expected((size_t)length, 0.0);
+    for (int n = 0; n < length; ++n)
+        for (int k = 0; k < (int)kernel.size() && k <= n; k += 1)
+            expected[(size_t)n] += (double)kernel[(size_t)k] * x[(size_t)(n - k)];
+
+    for (const auto& blocks : std::vector<std::vector<int>>{{128}, {256}, {64, 512}, {128, 1024}, {128, 512, 2048}})
+    {
+        INFO("blocks " << blocks.front() << " .. " << blocks.back() << " (" << blocks.size() << " levels)");
+        PartitionedConvolver conv;
+        conv.prepare(kernel, blocks, 1);
+        std::vector<float> y((size_t)length, 0.0f);
+        // Odd step sizes, and stretches of history-only and spectra-only work: the output is checked only where it
+        // was computed, and must be exact there however the work changed before.
+        std::mt19937 steps(59);
+        std::uniform_int_distribution<int> stepDist(1, 700);
+        double worst = 0.0;
+        for (int pos = 0; pos < length;)
+        {
+            const auto m = std::min(stepDist(steps), length - pos);
+            const auto phase = (pos / 3000) % 4;
+            const auto mode = phase == 1   ? PartitionedConvolver::Work::history
+                              : phase == 3 ? PartitionedConvolver::Work::spectra
+                                           : PartitionedConvolver::Work::full;
+            const float* in = x.data() + pos;
+            float* out = y.data() + pos;
+            conv.process(&in, &out, m, mode);
+            if (mode == PartitionedConvolver::Work::full)
+                for (int i = pos; i < pos + m; ++i)
+                    worst = std::max(worst, std::abs((double)y[(size_t)i] - expected[(size_t)i]));
+            pos += m;
+        }
+        CHECK(worst < 2.0e-6);
+    }
+}
+
+// Hidden benchmark: the convolver alone, stereo, in the rotator's 32-sample steps, for candidate block layouts.
+TEST_CASE("convolver cost per stereo frame by block layout", "[.][bench]")
+{
+    for (const auto fs : {44100.0, 48000.0, 96000.0, 192000.0})
+    {
+        const auto kernel = hilbertKernel(fs);
+        const auto* seconds = std::getenv("PA_BENCH_SECONDS");
+        const auto length = (int)((seconds != nullptr ? std::atof(seconds) : 5.0) * fs);
+        std::mt19937 rng(61);
+        std::uniform_real_distribution<float> dist(-0.5f, 0.5f);
+        std::vector<float> l((size_t)length), r((size_t)length);
+        for (int i = 0; i < length; ++i)
+            l[(size_t)i] = dist(rng), r[(size_t)i] = dist(rng);
+
+        for (const auto& blocks : std::vector<std::vector<int>>{{64},
+                                                                {128},
+                                                                {256},
+                                                                {64, 512},
+                                                                {128, 512},
+                                                                {128, 1024},
+                                                                {128, 2048},
+                                                                {256, 1024},
+                                                                {256, 2048},
+                                                                {64, 256, 1024},
+                                                                {64, 512, 2048},
+                                                                {128, 512, 2048},
+                                                                {128, 1024, 4096},
+                                                                {256, 1024, 4096}})
+        {
+            std::string name;
+            for (const auto b : blocks)
+                name += (name.empty() ? "" : "/") + std::to_string(b);
+            const auto* filter = std::getenv("PA_BENCH"); // e.g. "48 kHz, blocks 128:"
+            if (filter != nullptr &&
+                (std::to_string((int)(fs / 1000)) + " kHz, blocks " + name + ":").find(filter) == std::string::npos)
+                continue;
+            PartitionedConvolver conv;
+            conv.prepare(kernel, blocks, 2);
+            auto best = 1.0e30;
+            for (int repeat = 0; repeat < 3; ++repeat)
+            {
+                conv.reset();
+                const auto start = std::chrono::steady_clock::now();
+                for (int pos = 0; pos < length; pos += 32)
+                {
+                    const float* in[] = {l.data() + pos, r.data() + pos};
+                    float out0[32], out1[32];
+                    float* out[] = {out0, out1};
+                    conv.process(in, out, std::min(32, length - pos), PartitionedConvolver::Work::full);
+                }
+                best = std::min(
+                    best, std::chrono::duration<double, std::nano>(std::chrono::steady_clock::now() - start).count() /
+                              length);
+            }
+            WARN(fs / 1000.0 << " kHz, blocks " << name << ": " << best << " ns per stereo frame");
+        }
+    }
 }

@@ -6,8 +6,11 @@
 #include <catch2/generators/catch_generators.hpp>
 
 #include <chrono>
+#include <cstdio>
+#include <cstdlib>
 #include <cmath>
 #include <random>
+#include <string>
 #include <vector>
 
 using namespace pa::dsp;
@@ -241,12 +244,13 @@ TEST_CASE("an impulse is delayed by exactly the latency plus the set number of s
 
 TEST_CASE("the chain's latency is the reach plus the kernels' lookahead while on, and 0 while off", "[dsp]")
 {
-    // Reach rounded up to whole samples, plus the lookahead of the rate's interpolation kernels.
-    CHECK(latencyAt(44100.0) == 177 + 23); // 176.4 samples; 48 taps
-    CHECK(latencyAt(48000.0) == 192 + 11); // 24 taps
-    CHECK(latencyAt(88200.0) == 353 + 3);  // 352.8 samples; 8 taps
-    CHECK(latencyAt(96000.0) == 384 + 3);
-    CHECK(latencyAt(192000.0) == 768 + 3);
+    // Reach rounded up to whole samples, plus the lookahead of the rate's interpolation kernels (FractionalDelay.h).
+    const auto kaiser = FractionalKernels::design == FractionalKernels::Design::kaiser;
+    CHECK(latencyAt(44100.0) == 177 + (kaiser ? 23 : 6)); // 176.4 samples; 48 taps (low delay: 28)
+    CHECK(latencyAt(48000.0) == 192 + (kaiser ? 11 : 4)); // 24 taps (16)
+    CHECK(latencyAt(88200.0) == 353 + (kaiser ? 3 : 1));  // 352.8 samples; 8 taps (6)
+    CHECK(latencyAt(96000.0) == 384 + (kaiser ? 3 : 1));
+    CHECK(latencyAt(192000.0) == 768 + (kaiser ? 3 : 0)); // (4)
     for (const auto fs : rates)
     {
         INFO("fs " << fs);
@@ -559,8 +563,10 @@ TEST_CASE("processing never allocates", "[dsp]")
     CHECK(probe.allocations() == 0);
 }
 
-// Hidden benchmark (plan 2.6: Hi/Lo full chain under 50 ns per stereo frame). The phase stage is still the
-// identity, so this measures the delay, polarity and fades only. Build in Release for meaningful numbers.
+// Hidden benchmark (plan 2.6 budgets, full chain per stereo frame: Hi/Lo under 50 ns, Constant under 150 ns). Build in
+// Release for meaningful numbers. Each case is the best of three runs of 5 s of audio in 512-sample blocks. Set
+// PA_BENCH to a substring of a case's name to run only the cases that match, and PA_BENCH_SECONDS for longer runs (for
+// a profiler).
 TEST_CASE("chain cost per stereo frame", "[.][bench]")
 {
     struct Case
@@ -571,47 +577,89 @@ TEST_CASE("chain cost per stereo frame", "[.][bench]")
         bool automated;
         PhaseMode mode;
         bool phase; // the phase stage on at 60 degrees (Constant: on at 0 when false)
+        bool delayOn = true;
     };
-    // Plan 2.6 budgets, full chain per stereo frame: Hi/Lo under 50 ns, Constant under 150 ns.
+    const auto* filter = std::getenv("PA_BENCH");
     for (const auto& c :
-         {Case{"delay only, whole samples, 48 kHz", 48000.0, 770, false, PhaseMode::high, false},
+         {Case{"idle: delay off, Hi with phase off, 48 kHz", 48000.0, 0, false, PhaseMode::high, false, false},
+          Case{"delay only, whole samples, 48 kHz", 48000.0, 770, false, PhaseMode::high, false},
           Case{"delay only, fractional, 48 kHz (24 taps)", 48000.0, 773, false, PhaseMode::high, false},
           Case{"delay only, fractional, 44.1 kHz (48 taps)", 44100.0, 773, false, PhaseMode::high, false},
           Case{"delay only, fractional, 96 kHz (8 taps)", 96000.0, 773, false, PhaseMode::high, false},
+          Case{"Hi at 60, delay off, 48 kHz", 48000.0, 0, false, PhaseMode::high, true, false},
           Case{"Hi at 60, fractional delay, 44.1 kHz", 44100.0, 773, false, PhaseMode::high, true},
           Case{"Hi at 60, fractional delay, 48 kHz", 48000.0, 773, false, PhaseMode::high, true},
+          Case{"Constant at 60, delay off, 48 kHz", 48000.0, 0, false, PhaseMode::constant, true, false},
+          Case{"Constant at 60, fractional delay, 44.1 kHz", 44100.0, 773, false, PhaseMode::constant, true},
           Case{"Constant at 60, fractional delay, 48 kHz", 48000.0, 773, false, PhaseMode::constant, true},
           Case{"Constant at 60, fractional delay, 96 kHz", 96000.0, 773, false, PhaseMode::constant, true},
+          Case{"Constant at 60, fractional delay, 192 kHz", 192000.0, 773, false, PhaseMode::constant, true},
           Case{"Constant at 0 (no convolution), 48 kHz", 48000.0, 773, false, PhaseMode::constant, false},
           Case{"constant automation (all modes), 48 kHz", 48000.0, 773, true, PhaseMode::high, true},
           Case{"constant automation (all modes), 44.1 kHz", 44100.0, 773, true, PhaseMode::high, true}})
     {
-        const auto length = (int)(10.0 * c.fs);
-        auto signal = noise(2, length, 29);
+        if (filter != nullptr && std::string(c.name).find(filter) == std::string::npos)
+            continue;
+        const auto* seconds = std::getenv("PA_BENCH_SECONDS");
+        const auto length = (int)((seconds != nullptr ? std::atof(seconds) : 5.0) * c.fs);
         const auto script = automationScript(c.fs, length, 31);
-
-        Chain chain;
-        chain.prepare(c.fs, 2, reachTenths(c.fs));
-        auto settings = withDelayTenths(c.tenths);
-        settings.phaseMode = c.mode;
-        settings.phaseOn = c.mode != PhaseMode::constant || c.phase;
-        settings.phaseDegrees = c.phase ? 60.0 : 0.0;
-        if (c.mode != PhaseMode::constant)
-            settings.phaseOn = c.phase;
-        chain.reset(settings);
-        float* ptrs[2];
-        size_t next = 0;
-        const auto start = std::chrono::steady_clock::now();
-        for (int pos = 0; pos < length; pos += 512)
+        auto best = 1.0e30;
+        for (int repeat = 0; repeat < 3; ++repeat)
         {
-            while (c.automated && next < script.size() && script[next].at <= pos)
-                chain.setSettings(script[next++].settings);
-            ptrs[0] = signal[0].data() + pos;
-            ptrs[1] = signal[1].data() + pos;
-            chain.process(ptrs, 2, std::min(512, length - pos));
+            auto signal = noise(2, length, 29);
+            Chain chain;
+            chain.prepare(c.fs, 2, reachTenths(c.fs));
+            auto settings = withDelayTenths(c.tenths);
+            settings.delayOn = c.delayOn;
+            settings.phaseMode = c.mode;
+            settings.phaseOn = c.mode == PhaseMode::constant || c.phase;
+            settings.phaseDegrees = c.phase ? 60.0 : 0.0;
+            chain.reset(settings);
+            float* ptrs[2];
+            size_t next = 0;
+            const auto start = std::chrono::steady_clock::now();
+            for (int pos = 0; pos < length; pos += 512)
+            {
+                while (c.automated && next < script.size() && script[next].at <= pos)
+                    chain.setSettings(script[next++].settings);
+                ptrs[0] = signal[0].data() + pos;
+                ptrs[1] = signal[1].data() + pos;
+                chain.process(ptrs, 2, std::min(512, length - pos));
+            }
+            const auto ns = std::chrono::duration<double, std::nano>(std::chrono::steady_clock::now() - start).count();
+            best = std::min(best, ns / length);
         }
-        const auto ns = std::chrono::duration<double, std::nano>(std::chrono::steady_clock::now() - start).count();
-        WARN(c.name << ": " << ns / length << " ns per stereo frame");
+        WARN(c.name << ": " << best << " ns per stereo frame");
+    }
+    if (filter != nullptr)
+        return;
+
+    // The worst single callback (64 samples) in Constant, where the convolver's larger blocks complete: a spike, not
+    // an average.
+    for (const auto fs : {48000.0, 96000.0, 192000.0})
+    {
+        Chain chain;
+        chain.prepare(fs, 2, reachTenths(fs));
+        auto s = withDelayTenths(773);
+        s.phaseMode = PhaseMode::constant;
+        s.phaseOn = true;
+        s.phaseDegrees = 60.0;
+        chain.reset(s);
+        const auto length = (int)(2.0 * fs);
+        auto signal = noise(2, length, 47);
+        double worst = 0.0, total = 0.0;
+        for (int pos = 0; pos + 64 <= length; pos += 64)
+        {
+            float* ptrs[] = {signal[0].data() + pos, signal[1].data() + pos};
+            const auto start = std::chrono::steady_clock::now();
+            chain.process(ptrs, 2, 64);
+            const auto us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - start).count();
+            worst = std::max(worst, us);
+            total += us;
+        }
+        // Short enough not to wrap: of a callback's 1333 / 667 / 333 us at 48 / 96 / 192 kHz.
+        WARN("Constant 64-sample callback, " << fs / 1000.0 << " kHz: worst " << worst << " us, mean "
+                                             << total / (length / 64) << " us");
     }
 
     // The one-off cost of the convolver rebuilding itself from its history (Constant switched back on): one callback.
@@ -635,4 +683,26 @@ TEST_CASE("chain cost per stereo frame", "[.][bench]")
         const auto us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - start).count();
         WARN("rebuild in one 64-sample callback, " << fs / 1000.0 << " kHz: " << us << " us");
     }
+}
+
+// Hidden: renders the automation script (every stage and mode, at every rate, stereo and mono) to raw float files in
+// $PA_DUMP_DIR, so two builds can be compared byte for byte (an optimisation that should be bit-exact).
+TEST_CASE("dump renders for comparing builds", "[.][dump]")
+{
+    const auto* dir = std::getenv("PA_DUMP_DIR");
+    REQUIRE(dir != nullptr);
+    for (const auto fs : rates)
+        for (const auto numChannels : {2, 1})
+        {
+            const auto length = (int)(2.0 * fs);
+            const auto input = noise(numChannels, length, 41);
+            const auto out = run(fs, input, withDelay(0), automationScript(fs, length, 43), 512);
+            const auto name =
+                std::string(dir) + "/chain_" + std::to_string((int)fs) + "_" + std::to_string(numChannels) + ".f32";
+            auto* f = std::fopen(name.c_str(), "wb");
+            REQUIRE(f != nullptr);
+            for (const auto& ch : out)
+                std::fwrite(ch.data(), sizeof(float), ch.size(), f);
+            std::fclose(f);
+        }
 }

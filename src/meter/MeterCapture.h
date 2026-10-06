@@ -97,11 +97,8 @@ class MeterCapture
             const auto m = std::min({chunk, alignmentBlock, n - start});
             alignment.write(0, in + start, m);
             alignment.write(1, sc + start, m);
-            for (int i = 0; i < m; ++i)
-            {
-                inAligned[i] = alignment.read(0, i, delay);
-                scAligned[i] = alignment.read(1, i, delay);
-            }
+            alignment.read(0, m, delay, inAligned);
+            alignment.read(1, m, delay, scAligned);
             alignment.advance(m);
             queue(inAligned, out + start, scAligned, m);
             start += m;
