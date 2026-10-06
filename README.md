@@ -1,9 +1,15 @@
 # Phase Align
 
+![Build](https://github.com/tehguitarist/PhaseAlign/actions/workflows/ci.yml/badge.svg?branch=master)
+[![License](https://img.shields.io/badge/License-AGPLv3-blue.svg)](https://opensource.org/license/agpl-v3)
+[![Downloads](https://img.shields.io/github/downloads/tehguitarist/PhaseAlign/total)](https://somsubhra.github.io/github-release-stats/?username=tehguitarist&repository=PhaseAlign&page=1&per_page=30)
+
 A low-CPU phase alignment utility plugin (AU and VST3) built with JUCE: variable all-pass or constant phase rotation,
 a −4 to +4 ms delay in 0.1-sample steps, polarity, and a correlation meter against a sidechain input. Inspired by phase
 alignment tools like the Little Labs IBP. See [PLAN.md](PLAN.md) for the design and
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for how it is built.
+
+**[⬇ Download the latest release](https://github.com/tehguitarist/PhaseAlign/releases/latest)**
 
 ## Quick start
 
