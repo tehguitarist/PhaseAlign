@@ -477,8 +477,17 @@ void MeterScreen::paintGrid(juce::Graphics& g) const
     if (isFrozen()) // a frame round HOLD while the picture is frozen
     {
         g.setColour(design::meterAxisText.withAlpha(0.6f));
+        // Equal clearance round the drawn letters: the text's width includes the kerning after its last letter, so
+        // the right edge is pulled in by that much. Capitals are 13 high above the baseline.
         const auto hold = controlArea(Control::hold);
-        g.drawRect(juce::Rectangle<float>(hold.getX(), titleY - 17.0f * s, hold.getWidth(), 26.0f * s), thin);
+        const auto textRight = hold.getRight() - 14.0f * s;
+        const auto trailing = viewFont.getExtraKerningFactor() * viewFont.getHeight();
+        const auto textLeft = textRight - textWidth(viewFont, controlText((int)Control::hold));
+        const auto margin = 8.0f * s;
+        g.setColour(design::meterAxisText.withAlpha(0.6f));
+        g.drawRect(juce::Rectangle<float>::leftTopRightBottom(textLeft - margin, titleY - 13.0f * s - margin,
+                                                              textRight - trailing + margin, titleY + margin),
+                   thin);
     }
 
     // Separator and the overall column's axis.
