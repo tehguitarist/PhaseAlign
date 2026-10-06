@@ -27,7 +27,7 @@ in, if at all.
 
 ## 1. De-cramp Hi/Lo, so a setting sounds the same at every rate
 
-**Status (2026-10-06): built on branch `decramp-hilo`, not merged; waiting for the user's listening.** The approach below
+**Status (2026-10-06): merged to master at the user's request (not pushed); the user's listening is still to come.** The approach below
 turned out to be impossible: at zero latency no all-pass can have less top-end lag than the first-order section with
 the same lag at the reference frequency (Foster's reactance theorem; plan 2.3). The user chose oversampling with a small
 latency (R13): 32 samples at 44.1 kHz, 18 at 48, 5 at 96, 0 at 192. Every rate is within 2.5° of analog to 20 kHz; the
@@ -92,9 +92,10 @@ What follows is the original brief, kept for the record.
 
 ## 2. Constant on Windows and Linux: PFFFT
 
-**Status (2026-10-06): steps 1–3 built on branch `pffft-engine` (from master), not merged.** PFFFT is a submodule in
+**Status (2026-10-06): steps 1–3 built and merged to master (not pushed).** PFFFT is a submodule in
 `libs/pffft`, the engine behind `RealFft` wherever vDSP isn't; licence in `THIRD_PARTY_NOTICES.md`. On the M1 (NEON) it
-matches vDSP (plan 2.6, K). Left: CI's x86 numbers (needs a push or a manual dispatch, the user's call) and step 4.
+matches vDSP (plan 2.6, K). Left: CI's x86 numbers (with the next push, the user's call), for Constant and for the
+oversampled Hi/Lo (item 1 may go over 50 ns at 44.1 kHz there), and step 4.
 
 CI's numbers (plan 2.6, run 37396526948) put Constant over budget:
 - **Linux:** 119–160 ns, and 160 at 192 kHz, over 150.

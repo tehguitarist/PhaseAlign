@@ -87,16 +87,18 @@ job, better.
       - CI: the DSP benchmark on every OS, pluginval logs, `workflow_dispatch`, `_USE_MATH_DEFINES` for MSVC.
       - pluginval at strictness 10 passes locally on the VST3.
 
-      Next: **`HANDOVER.md`** (the 44.1 kHz delay's roll-off above 20 kHz is accepted, user 2026-10-06).
-   6. **Hi/Lo de-cramping: built on branch `decramp-hilo` (2026-10-06), waiting for the user's listening before it
-      merges.** De-cramping at zero latency is impossible (Foster's reactance theorem, plan 2.3), so (user's choice)
-      Hi/Lo runs oversampled between linear-phase halfbands and reports 32 samples at 44.1 kHz, 18 at 48, 5 at 96, 0 at
-      192 whenever Constant isn't selected (R13). Within 2.5° of analog to 20 kHz at every rate. A/B renders:
+      Next: **`HANDOVER.md`** (the 44.1 kHz delay's roll-off above 20 kHz is accepted, user 2026-10-06). Benchmarks:
+      `PhaseAlignDspTests "chain cost per stereo frame"` (Release); `[dump]` writes renders for comparing two builds
+      bit for bit.
+   6. **Hi/Lo de-cramping: merged to master (user, 2026-10-06; not pushed).** De-cramping at zero latency is
+      impossible (Foster's reactance theorem, plan 2.3), so (user's choice) Hi/Lo runs oversampled between linear-phase
+      halfbands and reports 32 samples at 44.1 kHz, 18 at 48, 5 at 96, 0 at 192 whenever Constant isn't selected (R13).
+      Within 2.5° of analog to 20 kHz at every rate. **The user's listening is still to come:** A/B renders,
       `prototype/decramp_ab.py` → `prototype/out/decramp/`. Cost: plan 2.6 (J); the user wants CPU and latency kept as
-      low as possible, but working first. Benchmarks: `PhaseAlignDspTests "chain cost per
-      stereo frame"` (Release); `[dump]` writes renders for comparing two builds bit for bit.
-   7. **PFFFT engine: built on branch `pffft-engine` (2026-10-06), not merged.** `libs/pffft` (submodule) behind
-      `RealFft` where vDSP isn't; within a few ns of vDSP on the M1. Waiting on CI's x86 numbers (HANDOVER item 2).
+      low as possible, but working first.
+   7. **PFFFT engine: merged to master (user, 2026-10-06; not pushed).** `libs/pffft` (submodule) behind `RealFft`
+      where vDSP isn't; within a few ns of vDSP on the M1. CI's x86 numbers for both 6 and 7 come with the next push
+      (HANDOVER items 1 and 2).
    - The stem analysis and auto-suggest (ANALYSE) work is dead last. Real multi-mic stem pairs are still wanted for the
      P2/P3 listening.
    - Installing (when the user asks): `/Library/Audio/Plug-Ins/{Components,VST3}`, not ~/Library.

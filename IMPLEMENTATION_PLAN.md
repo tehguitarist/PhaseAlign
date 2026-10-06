@@ -27,7 +27,7 @@ Items marked **[verify]** are things I believe are right but have not confirmed.
 | R9 | Assets ship at 2.5× the default size and are **cached pre-scaled to physical pixels** on resize | Sharpness comes from the cache, not only from the asset resolution (section 4.2) | Agrees |
 | R10 | **Delay −4 to +4 ms** (user, 2026-10-06; built 2026-10-06, branch `dsp-negative-delay`): delay on reports 4 ms of latency so the delay can be negative; delay off reports none (2.1a) | Align either track without moving clips | Yes (3.1, 3.4 "zero latency") |
 | R12 | **Delay in steps of 0.1 sample** (user, 2026-10-06; built on `dsp-negative-delay`), replacing whole samples (PLAN decision 12) | Whole samples leave up to 2.4 dB of dip at 20 kHz on a coherent pair at 44.1 kHz; 0.1 sample leaves 0.02 dB (2.1a) | Yes (2.1, decision 12, open question 7) |
-| R13 | **Hi/Lo runs oversampled** (4× below 85 kHz, 2× below 170 kHz) between linear-phase halfbands, and **reports a small latency whenever Constant isn't selected**: 32 samples at 44.1 kHz (0.73 ms), 18 at 48 kHz (0.38 ms), 5 at 88.2/96 kHz, none from 176.4 kHz (user, 2026-10-06; built on `decramp-hilo`, pending the user's listening) | De-cramping: within 2.5° of analog sections to 20 kHz at every rate (was up to 80° at 44.1 kHz), so a setting sounds the same at every rate. Impossible at zero latency (Foster's reactance theorem, 2.3) | Yes (3.4 and 4.8 "zero latency", decision 4 "oversampling dropped") |
+| R13 | **Hi/Lo runs oversampled** (4× below 85 kHz, 2× below 170 kHz) between linear-phase halfbands, and **reports a small latency whenever Constant isn't selected**: 32 samples at 44.1 kHz (0.73 ms), 18 at 48 kHz (0.38 ms), 5 at 88.2/96 kHz, none from 176.4 kHz (user, 2026-10-06; merged to master, the user's listening still to come) | De-cramping: within 2.5° of analog sections to 20 kHz at every rate (was up to 80° at 44.1 kHz), so a setting sounds the same at every rate. Impossible at zero latency (Foster's reactance theorem, 2.3) | Yes (3.4 and 4.8 "zero latency", decision 4 "oversampling dropped") |
 | R11 | **Dim a switched-off section** (user, 2026-10-06; not built yet): its knob, switch, readout values and buttons go semi-transparent but stay usable; the on/off toggles stay at full opacity (4.5) | Shows at a glance what's in the signal path | New |
 
 ---
@@ -531,7 +531,9 @@ NEON), master's generic engine and the branch back to back (ns per stereo frame)
 The convolver's layouts were re-measured with PFFFT and the best are vDSP's (uniform 128 below 80 kHz, 128 + 2048
 above: 27.7 / 33.6 ns for the convolver alone at 96 / 192 kHz), so `ConstantRotator::blockSizesFor` no longer depends on
 the engine. **Still to do: CI's x86 numbers** (SSE, and whether MSVC vectorises the register-blocked loops), which decide
-whether the layouts need an x86 variant.
+whether the layouts need an x86 variant. With J and K together (master after the merge, M1): Constant at 60°,
+fractional delay, 44.1 / 48 / 96 / 192 kHz, 50.8 / 44.9 / 38.8 / 39.5 ns with vDSP and 51.1 / 45.7 / 38.1 / 39.1 with
+PFFFT (the warm oversampled Hi/Lo is about 13 ns of it at 44.1 and 48 kHz).
 
 **Candidates looked at and not built:**
 - Polyphase split of the Hilbert (every other tap is zero): in the frequency domain it is the same work as doubling the
