@@ -6,6 +6,7 @@
 #include "dsp/Ramp.h"
 
 #include <algorithm>
+#include <cmath>
 
 // The processing chain: polarity flip -> phase -> delay (IMPLEMENTATION_PLAN 1, PLAN 4.1). Plain C++ that runs
 // on any float buffers with its own state, so the v0.8 analyser can reuse it offline (PLAN 4.9).
@@ -289,6 +290,7 @@ class Chain
             applyPathGain(sub, nch, n);
             delay.process(sub, nch, n);
             applyOutputGain(sub, nch, n);
+            flushTiny(sub, nch, n);
             start += n;
         }
     }
@@ -333,6 +335,16 @@ class Chain
         return activeDelayOn
                    ? DelayStage::tenths * delayLatency + std::clamp(delayTenths, -maxDelayTenths, maxDelayTenths)
                    : 0;
+    }
+
+    // Values below about -700 dBFS become 0. A fade's first small gains times an already tiny value (a decaying tail
+    // through a fractional kernel) can land below float's normal range; with flush-to-zero on, as in processBlock, that
+    // never happens, but offline use (the v0.8 analyser, tests) may run without it.
+    static void flushTiny(float* const* io, int nch, int n)
+    {
+        for (int ch = 0; ch < nch; ++ch)
+            for (int i = 0; i < n; ++i)
+                io[ch][i] = std::abs(io[ch][i]) < 1.0e-35f ? 0.0f : io[ch][i];
     }
 
     void applyPathGain(float* const* io, int nch, int n)

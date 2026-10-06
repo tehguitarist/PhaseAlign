@@ -503,19 +503,26 @@ TEST_CASE("no sample step above the threshold under scripted automation", "[dsp]
 
 TEST_CASE("no NaN, infinity or denormal under fast automation", "[dsp]")
 {
-    const auto fs = 96000.0;
-    const auto length = (int)(2.0 * fs);
-    auto input = noise(2, length, 3, 1.0f);
-    for (auto& ch : input) // then a long silence
-        std::fill(ch.begin() + length / 2, ch.end(), 0.0f);
-    input[0][(size_t)(length / 2 + 10)] = 1.0e-30f; // a tiny value the fades scale down
-
-    const auto out = run(fs, input, withDelay(0), automationScript(fs, length, 11));
-    for (const auto& ch : out)
-        for (const auto x : ch)
+    // Without flush-to-zero (offline use). Several scripts: the random sequences differ between standard libraries, so
+    // one seed covers different automation on each platform (CI found a subnormal on Linux and Windows that macOS's
+    // sequence never reached).
+    for (const auto fs : {96000.0, 48000.0})
+        for (unsigned seed = 1; seed <= 20; ++seed)
         {
-            REQUIRE(std::isfinite(x));
-            REQUIRE(std::fpclassify(x) != FP_SUBNORMAL);
+            INFO("fs " << fs << ", seed " << seed);
+            const auto length = (int)(1.0 * fs);
+            auto input = noise(2, length, seed, 1.0f);
+            for (auto& ch : input) // then a long silence
+                std::fill(ch.begin() + length / 2, ch.end(), 0.0f);
+            input[0][(size_t)(length / 2 + 10)] = 1.0e-30f; // a tiny value the fades scale down
+
+            const auto out = run(fs, input, withDelay(0), automationScript(fs, length, 7 * seed + 4));
+            for (const auto& ch : out)
+                for (const auto x : ch)
+                {
+                    REQUIRE(std::isfinite(x));
+                    REQUIRE(std::fpclassify(x) != FP_SUBNORMAL);
+                }
         }
 }
 

@@ -111,7 +111,10 @@ highest-priority engine on macOS).
   instead of reallocating.
 - Read parameters through cached `std::atomic<float>*`. Handle control changes in sub-blocks of 32 samples, which
   is where coefficients get recomputed while a parameter is moving.
-- `ScopedNoDenormals` in `processBlock`, double-precision IIR state, and no `-ffast-math`.
+- `ScopedNoDenormals` in `processBlock`, double-precision IIR state, and no `-ffast-math`. For offline use without
+  flush-to-zero, `Chain` also sets outputs below 1e-35 (about −700 dBFS) to 0: fades multiplying an already tiny
+  value could otherwise produce subnormal floats (found by CI on Linux and Windows, whose random automation differs
+  from macOS's; the test now runs 20 scripts).
 - **Latency:** `Lmax + H` while the delay is on (2.1a: the reach in whole samples plus the interpolation lookahead), plus `L` in Constant (section 2.4). It never
   follows phase on/off, so toggling the phase stage never changes it. **As built (2.1a):** a listener on `delayOn`
   calls `setLatencySamples` at once when the change arrives on the message thread (an `AsyncUpdater` otherwise), and
