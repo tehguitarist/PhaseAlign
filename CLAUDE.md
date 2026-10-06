@@ -111,6 +111,12 @@ job, better.
       zip ships `installer/stage_docs.sh`'s readme (the README quick start) and licences. macOS releases are separate
       arm64 and Intel builds (R14); notarisation is set up (the Apple secrets are in the repo); Windows and Linux ship
       unsigned; no trademark search (open source). **Next: `HANDOVER.md`.**
+   9. **Meter v2 (user, 2026-10-07; merged to master except step 2 below; not pushed): R17 to R20 in IMPLEMENTATION_PLAN.**
+      PHASE and BANDS views, SLOW/FAST, HOLD (also while the host is stopped), a drop-up view selector (FREQUENCY, TIME
+      OFFSET, PHASE, BANDS, ALIGNMENT), the ATTACK reading in TIME OFFSET (three bands, tuned on the user's own
+      kick/snare/bass/guitar/hats pairs in `captures/`; raw copies `captures/*_a.f32`, `*_b.f32`; hidden tests
+      `[.userpairs]`), ALIGNMENT (waveform overlay, wheel zoom, slide-to-preview), and, while held, the DELAY, polarity
+      and phase knobs preview on the frozen picture (`dsp/PhaseResponse.h`). Pending: the user's DAW verdict.
    - The stem analysis and auto-suggest (ANALYSE) work is dead last. Real multi-mic stem pairs are still wanted for the
      P2/P3 listening.
    - Installing (when the user asks): `/Library/Audio/Plug-Ins/{Components,VST3}`, not ~/Library.

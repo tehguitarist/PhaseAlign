@@ -181,9 +181,10 @@ void CorrelationAnalyser::setPreviewDelayMs(double ms)
         updateResults();
 }
 
-void CorrelationAnalyser::setPreview(double ms, bool inverted)
+void CorrelationAnalyser::setPreview(double ms, bool inverted, PhaseResponse phase)
 {
     previewInverted = inverted;
+    previewPhase = std::move(phase);
     setPreviewDelayMs(ms);
 }
 
@@ -193,6 +194,7 @@ void CorrelationAnalyser::clearPreview()
         return;
     previewActive = false;
     previewInverted = false;
+    previewPhase = nullptr;
     if (fft != nullptr)
         updateResults();
 }
@@ -393,9 +395,14 @@ void CorrelationAnalyser::updateResults()
             const auto w = 2.0 * juce::MathConstants<double>::pi * k / fftSize * samples;
             const auto c = std::cos(w), s = std::sin(w);
             const auto kk = (size_t)k;
-            const auto sign = previewInverted ? -1.0 : 1.0; // a polarity flip is a turn of 180 degrees
-            previewRe[kk] = sign * (zyRe[kk] * c + zyIm[kk] * s);
-            previewIm[kk] = sign * (zyIm[kk] * c - zyRe[kk] * s);
+            // The input's cross-spectrum turned by the delay, then by the phase stage and a polarity flip (180 degrees).
+            std::complex<double> turned(zyRe[kk] * c + zyIm[kk] * s, zyIm[kk] * c - zyRe[kk] * s);
+            if (previewPhase)
+                turned *= previewPhase(k * fs / fftSize);
+            if (previewInverted)
+                turned = -turned;
+            previewRe[kk] = turned.real();
+            previewIm[kk] = turned.imag();
         }
         pRe = &previewRe;
         pIm = &previewIm;

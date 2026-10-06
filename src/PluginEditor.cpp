@@ -1,4 +1,5 @@
 #include "PluginEditor.h"
+#include "dsp/PhaseResponse.h"
 #include "ui/Design.h"
 
 #include <string_view>
@@ -147,19 +148,30 @@ PhaseAlignEditor::PhaseAlignEditor(PhaseAlignProcessor& p)
                                  updateDelayReadout();
                                  updateHeldPreview();
                              }),
-      phaseReadoutAttachment(parameter(id::phase), [this](float) { updatePhaseReadout(); }),
+      phaseReadoutAttachment(parameter(id::phase),
+                             [this](float)
+                             {
+                                 updatePhaseReadout();
+                                 updateHeldPreview();
+                             }),
       polarityReadoutAttachment(parameter(id::polarity),
                                 [this](float)
                                 {
                                     updatePhaseReadout();
                                     updateHeldPreview();
                                 }),
-      rangeAttachment(parameter(id::phaseRange), [this](float) { updateRangeUi(); }),
+      rangeAttachment(parameter(id::phaseRange),
+                      [this](float)
+                      {
+                          updateRangeUi();
+                          updateHeldPreview();
+                      }),
       modeAttachment(parameter(id::phaseMode),
                      [this](float v)
                      {
                          modeSwitch.setIndex(juce::roundToInt(v));
                          updateRangeUi();
+                         updateHeldPreview();
                      }),
       delayOnAttachment(parameter(id::delayOn),
                         [this](float)
@@ -167,7 +179,12 @@ PhaseAlignEditor::PhaseAlignEditor(PhaseAlignProcessor& p)
                             updateDimming();
                             updateHeldPreview();
                         }),
-      phaseOnAttachment(parameter(id::phaseOn), [this](float) { updateDimming(); })
+      phaseOnAttachment(parameter(id::phaseOn),
+                       [this](float)
+                       {
+                           updateDimming();
+                           updateHeldPreview();
+                       })
 {
     setLookAndFeel(&lookAndFeel);
     setOpaque(true);
@@ -462,13 +479,24 @@ void PhaseAlignEditor::updateMeter()
     meterScreen.setMeterOn(on);
 }
 
-// While the meter is frozen, turning the delay or the polarity shows what they would do (plan R20): the screen applies
-// them to the held picture. The delay counts as 0 when it is off.
+// While the meter is frozen, turning the knobs shows what they would do (plan R20): the screen applies them to the held
+// picture. The delay counts as 0 when it is off; the phase stage's response is applied when it is on.
 void PhaseAlignEditor::updateHeldPreview()
 {
-    const auto delayOn = parameter(id::delayOn).getValue() >= 0.5f;
-    const auto ms = delayOn ? (double)parameter(id::delayMs).convertFrom0to1(parameter(id::delayMs).getValue()) : 0.0;
-    meterScreen.setHeldSettings(ms, parameter(id::polarity).getValue() >= 0.5f);
+    const auto value = [this](const char* paramId)
+    { return (double)parameter(paramId).convertFrom0to1(parameter(paramId).getValue()); };
+    pa::dsp::ChainSettings settings;
+    settings.delayOn = parameter(id::delayOn).getValue() >= 0.5f;
+    settings.polarityInverted = parameter(id::polarity).getValue() >= 0.5f;
+    settings.phaseOn = parameter(id::phaseOn).getValue() >= 0.5f;
+    settings.phaseWide = parameter(id::phaseRange).getValue() >= 0.5f;
+    settings.phaseDegrees = value(id::phase) * pa::params::rangeDegrees(settings.phaseWide);
+    settings.phaseMode = (pa::dsp::PhaseMode)juce::jlimit(0, 2, juce::roundToInt(value(id::phaseMode)));
+
+    pa::meter::CorrelationAnalyser::PhaseResponse response;
+    if (settings.phaseOn)
+        response = [settings, fs = sampleRate()](double hz) { return pa::dsp::phaseStageResponse(settings, fs, hz); };
+    meterScreen.setHeldSettings(settings.delayOn ? value(id::delayMs) : 0.0, settings.polarityInverted, response);
 }
 
 void PhaseAlignEditor::updateDimming()

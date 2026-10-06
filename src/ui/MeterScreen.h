@@ -74,8 +74,9 @@ class MeterScreen : public DesignComponent, private juce::Timer
     bool isPreviewing() const { return analyser.isPreviewing(); }
     void setPreviewDelayMs(double ms); // frozen only; clamped to the delay knob's reach, snapped to 0.1 sample
     // The delay and polarity knobs, while frozen: the screen shows the result of those settings (delay 0 when the
-    // delay is off), phase stage left out. Not frozen: ignored (the audio shows it itself).
-    void setHeldSettings(double delayMs, bool inverted);
+    // delay is off), with the phase stage's response if given (the analysis views show it; ALIGNMENT's waveforms don't
+    // and say so). Not frozen: ignored (the audio shows it itself).
+    void setHeldSettings(double delayMs, bool inverted, meter::CorrelationAnalyser::PhaseResponse phase = {});
 
     State getState() const { return state; }
     bool isTimerRunningForTesting() const { return isTimerRunning(); }

@@ -186,14 +186,14 @@ void MeterScreen::freezeChanged()
     repaint();
 }
 
-void MeterScreen::setHeldSettings(double delayMs, bool inverted)
+void MeterScreen::setHeldSettings(double delayMs, bool inverted, meter::CorrelationAnalyser::PhaseResponse phase)
 {
     if (! isFrozen())
         return;
     const auto reach = (double)params::maxDelayMs;
     const auto sampleMs = 1000.0 / juce::jmax(1.0, analyser.getSampleRate());
     const auto step = 0.1 * sampleMs;
-    analyser.setPreview(juce::jlimit(-reach, reach, std::round(delayMs / step) * step), inverted);
+    analyser.setPreview(juce::jlimit(-reach, reach, std::round(delayMs / step) * step), inverted, std::move(phase));
     repaint();
 }
 
@@ -925,7 +925,8 @@ void MeterScreen::paintPreviewNote(juce::Graphics& g) const
         const auto y = view == View::bands ? ly(design::meterMinusOneY) - 14.0f * s
                                            : ly(design::meterPlusOneY) + (view == View::time ? 112.0f : view == View::scope ? 44.0f : 24.0f) * s;
         const juce::String note = "PREVIEW  DELAY " + juce::String(ms >= 0.0 ? "+" : "") + juce::String(ms, 3) + " ms" +
-                                  (analyser.isPreviewInverted() ? "  INVERTED" : "");
+                                  (analyser.isPreviewInverted() ? "  INVERTED" : "") +
+                                  (analyser.previewHasPhase() && view == View::scope ? "  (PHASE NOT SHOWN HERE)" : "");
         g.setColour(design::screenBlack.withAlpha(0.85f));
         g.fillRect(juce::Rectangle<float>(textWidth(font, note) + 16.0f * s, 22.0f * s).withX(x - 8.0f * s).withY(y - 16.0f * s));
         g.setColour(design::phosphor);

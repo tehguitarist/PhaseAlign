@@ -242,11 +242,13 @@ trace becomes the **PREVIEW**, the input as it would be with the delay knob at t
 
 ### Holding the screen and previewing a delay
 
-While the screen is held (or the host is stopped), **turn the DELAY knob or press the polarity button** and every view
-updates as if the audio were running: the OUTPUT trace becomes the **PREVIEW**, this track with those settings applied
-to the held picture. Turn the delay on or off, change it, flip the polarity, and watch the correlation, the phase line
-or the waveforms line up. The PHASE knob doesn't preview yet (the preview is of delay and polarity alone, with the
-phase stage left out).
+While the screen is held (or the host is stopped), **turn the DELAY knob, press the polarity button, or set the phase**
+(the PHASE knob, the mode switch, RANGE, and the PHASE button) and the views update as if the audio were running: the
+OUTPUT trace becomes the **PREVIEW**, this track with those settings applied to the held picture. Turn the delay on or
+off, change it, flip the polarity, try HIGH, LOW or CONSTANT, and watch the correlation, the phase line and the bands
+line up. The phase turn is worked out from the stage's own response, so it agrees with what the plugin does to within a
+couple of degrees. The ALIGNMENT waveforms show the delay and polarity but not the phase turn (they say so); use the
+other views for that.
 
 **HOLD** freezes the screen, and releasing it carries on. Frozen, drag across the TIME OFFSET view (or, in ALIGNMENT, slide the input): the OUTPUT trace
 becomes **PREVIEW**, what the track would read with the DELAY knob at the point you're dragging (in 0.1-sample steps, within

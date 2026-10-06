@@ -2,6 +2,8 @@
 
 #include <juce_dsp/juce_dsp.h>
 
+#include <complex>
+#include <functional>
 #include <memory>
 #include <vector>
 
@@ -75,7 +77,11 @@ class CorrelationAnalyser
     // its own delay phase. Replaces the processed curve, phase and overall values until cleared; touches nothing
     // else. Exact for the pure delay the plugin applies.
     void setPreviewDelayMs(double ms); // keeps the polarity as it is
-    void setPreview(double ms, bool inverted); // delay and polarity flip together (the knobs, while held)
+    // Delay and polarity flip together, and optionally the phase stage's response (a function of frequency in Hz, unit
+    // magnitude, a lag as a negative angle: dsp::phaseStageResponse), for the knobs while held.
+    using PhaseResponse = std::function<std::complex<double>(double hz)>;
+    void setPreview(double ms, bool inverted, PhaseResponse phase = {});
+    bool previewHasPhase() const { return (bool)previewPhase; }
     bool isPreviewInverted() const { return previewInverted; }
     void clearPreview();
     bool isPreviewing() const { return previewActive; }
@@ -188,6 +194,7 @@ class CorrelationAnalyser
 
     Speed speed = Speed::slow;
     bool previewActive = false, previewInverted = false;
+    PhaseResponse previewPhase;
     double previewMs = 0.0;
     std::vector<double> previewRe, previewIm;
 

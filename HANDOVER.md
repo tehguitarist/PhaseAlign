@@ -58,16 +58,12 @@ sections are IMPLEMENTATION_PLAN.md. Nothing here needs code first: what's left 
 
 ## Next: needs the user (decisions and listening)
 
-1. **The meter views (the user wants a discussion first, to understand the options and their ramifications).** What is
-   built (plan 3 and `prototype/out/p4/report.md`): two views chosen by clicking labels under the screen, **FREQUENCY**
-   (default; r(f) over 1/6 octave at 256 log-spaced points, processed bright with a faint fill, unprocessed dim) and
-   **TIME OFFSET** (the PHAT lag function, -5 to +5 ms, the delay knob's reach shaded, a coarse search to 40 ms behind
-   "TRANSIENTS OUT OF DELAY RANGE"), plus an overall bar on the right; averaging time constant max(0.3 s, 8 cycles) per
-   bin; 30 Hz screen; "NO SIDECHAIN SIGNAL" after 1 s of silence. The panel art's 16 band bars were only an example
-   (comb filtering of spaced mics averages away above about 1 kHz). Things to settle in the discussion: which views to
-   keep and which is the default; whether to add a phase-difference view (R6 left room for it); the averaging speed
-   against jitter; the overall bar's meaning; how it should feed the auto-suggest work later. The user's verdict in a
-   DAW is still outstanding.
+1. **The meter views: discussed and built (2026-10-07, plan R17 to R20); the user's verdict in a DAW is outstanding.**
+   FREQUENCY, TIME OFFSET (waveform and ATTACK readings), PHASE, BANDS and ALIGNMENT from a drop-up selector; SLOW/FAST;
+   HOLD (also while the host is stopped); while held, the DELAY, polarity and phase knobs preview on the frozen picture.
+   Still open: the scrub-to-find-a-delay and auto-suggest that belong to ANALYSE (the meter's pieces are ready: the
+   attack and waveform lags, the preview); ATTACK on FAST is less reliable; bleed between mics is out of scope
+   (user); CPU of the new meter work has not been profiled (`tools/meter_profile.py` should be re-run).
 2. **Listening.** (a) The 180-range A/B files in `prototype/out/range/` (current vs new; see `report.md` and
    `fr_check.png`; only the RANGE in files differ; nothing sounding wrong means done). (b) M2 in a DAW. (c) P2: is true
    rotation useful on real material. (d) P3 fade tuning (`prototype/out/p3/`). Real multi-mic stems are still wanted.

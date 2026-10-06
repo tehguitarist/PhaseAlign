@@ -432,3 +432,26 @@ TEST_CASE("meter hold: while frozen, the delay and polarity knobs preview their 
     setParam(id::delayMs, 0.5f);
     CHECK_FALSE(screen.isPreviewing());
 }
+
+TEST_CASE("meter hold: while frozen, the phase knob and mode preview too (phase on)", "[interaction]")
+{
+    Fixture f;
+    auto& screen = f.editor->getMeterScreen();
+    const auto setParam = [&](const char* paramId, float v)
+    {
+        auto* p = f.proc.getValueTreeState().getParameter(paramId);
+        p->setValueNotifyingHost(p->convertTo0to1(v));
+    };
+
+    screen.setHeld(true);
+    setParam(id::phaseOn, 0.0f);
+    CHECK_FALSE(screen.getAnalyser().previewHasPhase()); // phase off: no phase in the preview
+    setParam(id::phaseOn, 1.0f);
+    CHECK(screen.getAnalyser().previewHasPhase());
+    setParam(id::phaseMode, 2.0f); // CONSTANT
+    setParam(id::phase, 0.5f);     // half the range
+    CHECK(screen.getAnalyser().previewHasPhase());
+    CHECK(screen.isPreviewing());
+    screen.setHeld(false);
+    CHECK_FALSE(screen.getAnalyser().previewHasPhase());
+}

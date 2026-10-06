@@ -2,6 +2,8 @@
 #include "meter/CorrelationAnalyser.h"
 #include "meter/MeterCapture.h"
 #include "meter/ScopeBuffer.h"
+#include "dsp/Chain.h"
+#include "dsp/PhaseResponse.h"
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -740,4 +742,147 @@ TEST_CASE("preview with polarity: a delayed, inverted sidechain reads +1 with bo
         CHECK(std::abs(a.phaseProcessed()[i]) > 170.0f);
     a.clearPreview();
     CHECK_FALSE(a.isPreviewInverted());
+}
+
+// The closed-form response the held preview uses, against the real stage: white noise through the Chain, the transfer
+// function from the averaged cross-spectrum, the latency taken out.
+TEST_CASE("phaseStageResponse matches the stage's measured transfer function", "[meter]")
+{
+    struct Setting
+    {
+        pa::dsp::PhaseMode mode;
+        bool wide;
+        double degrees;
+    };
+    using pa::dsp::PhaseMode;
+    for (const auto fs : {44100.0, 48000.0})
+        for (const auto& c : {Setting{PhaseMode::high, false, 40.0}, Setting{PhaseMode::low, false, 90.0},
+                              Setting{PhaseMode::low, true, 130.0}, Setting{PhaseMode::high, true, 100.0},
+                              Setting{PhaseMode::constant, false, 60.0}, Setting{PhaseMode::constant, true, 150.0}})
+        {
+            INFO("fs " << fs << " mode " << (int)c.mode << " wide " << c.wide << " degrees " << c.degrees);
+            pa::dsp::ChainSettings settings;
+            settings.phaseOn = true;
+            settings.delayOn = false;
+            settings.phaseMode = c.mode;
+            settings.phaseWide = c.wide;
+            settings.phaseDegrees = c.degrees;
+
+            pa::dsp::Chain chain;
+            chain.prepare(fs, 1, 0);
+            chain.reset(settings);
+            const auto length = (int)(8.0 * fs);
+            const auto input = noise(length, 41, 0.2f);
+            auto output = input;
+            for (int pos = 0; pos < length; pos += 512)
+            {
+                float* channel[1] = {output.data() + pos};
+                chain.process(channel, 1, std::min(512, length - pos));
+            }
+            const auto latency = chain.latency();
+
+            // Welch: Hann frames of 8192, 50% overlap, averaged X Y* and X X*.
+            const int n = 8192;
+            juce::dsp::FFT fft(13);
+            std::vector<float> win((size_t)n), fx((size_t)(2 * n)), fy((size_t)(2 * n));
+            for (int i = 0; i < n; ++i)
+                win[(size_t)i] = (float)(0.5 - 0.5 * std::cos(2.0 * M_PI * i / n));
+            std::vector<std::complex<double>> xy((size_t)(n / 2 + 1)), xx((size_t)(n / 2 + 1));
+            for (int start = n; start + n + latency < length; start += n / 2)
+            {
+                for (int i = 0; i < n; ++i)
+                {
+                    fx[(size_t)i] = input[(size_t)(start + i)] * win[(size_t)i];
+                    fy[(size_t)i] = output[(size_t)(start + i + latency)] * win[(size_t)i]; // the latency taken out
+                }
+                std::fill(fx.begin() + n, fx.end(), 0.0f);
+                std::fill(fy.begin() + n, fy.end(), 0.0f);
+                fft.performRealOnlyForwardTransform(fx.data(), true);
+                fft.performRealOnlyForwardTransform(fy.data(), true);
+                for (int k = 0; k <= n / 2; ++k)
+                {
+                    const std::complex<double> x(fx[(size_t)(2 * k)], fx[(size_t)(2 * k + 1)]),
+                        y(fy[(size_t)(2 * k)], fy[(size_t)(2 * k + 1)]);
+                    xy[(size_t)k] += y * std::conj(x);
+                    xx[(size_t)k] += x * std::conj(x);
+                }
+            }
+
+            double worst = 0.0;
+            int compared = 0;
+            for (double hz = 60.0; hz < 12000.0; hz *= 1.15)
+            {
+                const auto k = (int)std::lround(hz / (fs / n));
+                const auto measured = xy[(size_t)k] / xx[(size_t)k];
+                const auto predicted = pa::dsp::phaseStageResponse(settings, fs, k * fs / n);
+                auto diff = std::arg(measured / predicted) * 180.0 / M_PI;
+                worst = std::max(worst, std::abs(diff));
+                ++compared;
+                CHECK(std::abs(measured) == Approx(1.0).margin(0.02));
+            }
+            CHECK(compared > 30);
+            CHECK(worst < 2.0); // degrees
+        }
+}
+
+TEST_CASE("preview with the phase stage: a sidechain that is the input through the real stage reads +1 once the same phase is previewed", "[meter]")
+{
+    using pa::dsp::PhaseMode;
+    struct Setting
+    {
+        PhaseMode mode;
+        bool wide;
+        double degrees;
+    };
+    const auto fs = 48000.0;
+    const auto length = (int)(4.0 * fs);
+    const auto source = noise(length, 51, 0.2f);
+    for (const auto& c : {Setting{PhaseMode::high, false, 70.0}, Setting{PhaseMode::low, true, 120.0},
+                          Setting{PhaseMode::constant, false, 80.0}})
+    {
+        INFO("mode " << (int)c.mode << " degrees " << c.degrees);
+        pa::dsp::ChainSettings settings;
+        settings.phaseOn = true;
+        settings.delayOn = false;
+        settings.phaseMode = c.mode;
+        settings.phaseWide = c.wide;
+        settings.phaseDegrees = c.degrees;
+
+        // The "other track": this one through the stage, the stage's latency taken out.
+        pa::dsp::Chain chain;
+        chain.prepare(fs, 1, 0);
+        chain.reset(settings);
+        auto processed = source;
+        for (int pos = 0; pos < length; pos += 512)
+        {
+            float* channel[1] = {processed.data() + pos};
+            chain.process(channel, 1, std::min(512, length - pos));
+        }
+        const auto latency = chain.latency();
+        std::vector<float> sidechain((size_t)length, 0.0f);
+        for (int i = 0; i + latency < length; ++i)
+            sidechain[(size_t)i] = processed[(size_t)(i + latency)];
+
+        CorrelationAnalyser a;
+        a.prepare(fs);
+        feed(a, source, source, sidechain); // this track as it is: out of phase with the sidechain
+        const auto before = a.overallProcessed();
+        a.setPreview(0.0, false, [settings, fs](double hz) { return pa::dsp::phaseStageResponse(settings, fs, hz); });
+        CHECK(a.previewHasPhase());
+        CHECK(a.overallProcessed() > 0.98f);
+        CHECK(a.overallProcessed() > before);
+        // The phase view: flat at 0 where it is drawn.
+        int drawn = 0;
+        for (const auto v : a.phaseProcessed())
+            if (! std::isnan(v))
+            {
+                ++drawn;
+                CHECK(std::abs(v) < 6.0f);
+            }
+        CHECK(drawn > 150);
+        // Without the phase, it is as before.
+        a.setPreview(0.0, false);
+        CHECK_FALSE(a.previewHasPhase());
+        CHECK(a.overallProcessed() == Approx(before).margin(1e-4));
+    }
 }
