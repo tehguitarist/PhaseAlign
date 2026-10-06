@@ -31,11 +31,11 @@ MeterScreen::MeterScreen(const SourceAssets& assetsIn, meter::MeterCapture& capt
 {
     setOpaque(true);
     setInterceptsMouseClicks(true, false); // only the view labels: see hitTest
-    setTooltip("Click to switch the view: FREQUENCY, the correlation with the sidechain per band; TIME OFFSET, how far "
-               "this track is from the sidechain; PHASE, the angle between them per band (a slope is a delay, a flat "
-               "offset a rotation). SLOW or FAST sets the averaging. HOLD freezes the screen (it also freezes "
-               "while the host is stopped); frozen, drag across TIME OFFSET to preview a delay on every view. INPUT "
-               "is this track before the plugin, OUTPUT after it.");
+    setTooltip("Click a label to switch the view: FREQUENCY, the correlation with the sidechain per frequency; TIME "
+               "OFFSET, how far this track is from the sidechain; PHASE, the angle between them (a slope is a delay, "
+               "a flat offset a rotation); BANDS, the correlation in six wide bands. SLOW or FAST sets the "
+               "averaging. HOLD freezes the screen (it also freezes while the host is stopped); frozen, drag across "
+               "TIME OFFSET to preview a delay on every view. INPUT is this track before the plugin, OUTPUT after it.");
     for (auto& s : scratch)
         s.resize((size_t)meter::MeterCapture::capacity);
     if (capture.getSampleRate() > 0.0)
@@ -212,7 +212,7 @@ namespace
 {
 const char* controlText(int control)
 {
-    static const char* const text[] = {"", "FREQUENCY (Hz)", "TIME OFFSET (ms)", "PHASE (deg)", "SLOW", "FAST", "HOLD"};
+    static const char* const text[] = {"", "FREQUENCY", "TIME OFFSET", "PHASE", "BANDS", "SLOW", "FAST", "HOLD"};
     return text[control];
 }
 } // namespace
@@ -229,7 +229,8 @@ juce::Rectangle<float> MeterScreen::controlArea(Control c) const
     const auto width = [&](Control k) { return textWidth(font, controlText((int)k)) + 2.0f * pad; };
     const auto box = [&](float x, Control k) { return juce::Rectangle<float>(x, rowY, width(k), height); };
 
-    const auto viewsWidth = width(Control::frequency) + width(Control::time) + width(Control::phase) + 2.0f * gap;
+    const auto viewsWidth =
+        width(Control::frequency) + width(Control::time) + width(Control::phase) + width(Control::bands) + 3.0f * gap;
     // Centred under the plot, but never over SLOW and FAST.
     const auto speedRight = left - pad + width(Control::slow) + 0.5f * gap + width(Control::fast);
     const auto viewsLeft = juce::jmax(centre - 0.5f * viewsWidth, speedRight + gap);
@@ -238,6 +239,8 @@ juce::Rectangle<float> MeterScreen::controlArea(Control c) const
         case Control::frequency: return box(viewsLeft, c);
         case Control::time: return box(viewsLeft + width(Control::frequency) + gap, c);
         case Control::phase: return box(viewsLeft + width(Control::frequency) + width(Control::time) + 2.0f * gap, c);
+        case Control::bands:
+            return box(viewsLeft + width(Control::frequency) + width(Control::time) + width(Control::phase) + 3.0f * gap, c);
         case Control::slow: return box(left - pad, c);
         case Control::fast: return box(left - pad + width(Control::slow) + 0.5f * gap, c);
         case Control::hold: return box(right + pad - width(c), c);
@@ -248,7 +251,7 @@ juce::Rectangle<float> MeterScreen::controlArea(Control c) const
 
 MeterScreen::Control MeterScreen::controlAt(juce::Point<float> p) const
 {
-    for (const auto c : {Control::frequency, Control::time, Control::phase, Control::slow, Control::fast, Control::hold})
+    for (const auto c : {Control::frequency, Control::time, Control::phase, Control::bands, Control::slow, Control::fast, Control::hold})
         if (controlArea(c).contains(p))
             return c;
     return Control::none;
@@ -282,6 +285,7 @@ void MeterScreen::mouseDown(const juce::MouseEvent& e)
         case Control::frequency: onViewSelected ? onViewSelected(View::frequency) : setView(View::frequency); return;
         case Control::time: onViewSelected ? onViewSelected(View::time) : setView(View::time); return;
         case Control::phase: onViewSelected ? onViewSelected(View::phase) : setView(View::phase); return;
+        case Control::bands: onViewSelected ? onViewSelected(View::bands) : setView(View::bands); return;
         case Control::slow: onSpeedSelected ? onSpeedSelected(Speed::slow) : setSpeed(Speed::slow); return;
         case Control::fast: onSpeedSelected ? onSpeedSelected(Speed::fast) : setSpeed(Speed::fast); return;
         case Control::hold: setHeld(! held); return;
@@ -328,6 +332,15 @@ void MeterScreen::paintStatic(juce::Graphics& g, float pixelScale) const
     // Overall column: unlit segments (the live bar lights them).
     const auto overallLeft = lx(design::meterOverallLeft), overallRight = lx(design::meterOverallRight);
     paintSegments(g, overallLeft, overallRight, 0.0f, true);
+    if (view == View::bands)
+    {
+        const auto slot = (lx(design::meterPlotRight) - lx(design::meterPlotLeft)) / (float)meter::CorrelationAnalyser::numBands;
+        for (int b = 0; b < meter::CorrelationAnalyser::numBands; ++b)
+        {
+            const auto centre = lx(design::meterPlotLeft) + slot * ((float)b + 0.5f);
+            paintSegments(g, centre - 0.2f * slot, centre + 0.2f * slot, 0.0f, true);
+        }
+    }
 
     if (state != State::noSidechain)
         return;
@@ -364,7 +377,22 @@ void MeterScreen::paintGrid(juce::Graphics& g) const
 
     // Vertical grid and x labels for the view.
     g.setColour(design::meterGrid.withAlpha(0.7f));
-    if (view != View::time)
+    if (view == View::bands)
+    {
+        // Six slots; the labels say which band each is.
+        g.setColour(design::meterAxisText);
+        const auto slot = (right - left) / (float)meter::CorrelationAnalyser::numBands;
+        for (int b = 0; b < meter::CorrelationAnalyser::numBands; ++b)
+        {
+            const auto lo = (float)meter::CorrelationAnalyser::bandEdgesHz[b],
+                       hi = (float)meter::CorrelationAnalyser::bandEdgesHz[b + 1];
+            drawTextAt(g, labelFont, hzLabel(lo) + "-" + hzLabel(hi),
+                       left + slot * ((float)b + 0.5f), labelY, juce::Justification::horizontallyCentred);
+            if (b > 0)
+                g.drawDashedLine({left + slot * (float)b, top, left + slot * (float)b, bottom}, dashes, 2, thin);
+        }
+    }
+    else if (view != View::time)
     {
         for (const auto hz : gridHz)
             g.drawDashedLine({xForHz(hz), top, xForHz(hz), bottom}, dashes, 2, thin);
@@ -435,11 +463,13 @@ void MeterScreen::paintGrid(juce::Graphics& g) const
     label(Control::frequency, view == View::frequency, juce::Justification::left);
     label(Control::time, view == View::time, juce::Justification::left);
     label(Control::phase, view == View::phase, juce::Justification::left);
+    label(Control::bands, view == View::bands, juce::Justification::left);
     label(Control::slow, analyser.getSpeed() == Speed::slow, juce::Justification::left);
     label(Control::fast, analyser.getSpeed() == Speed::fast, juce::Justification::left);
     label(Control::hold, isFrozen(), juce::Justification::right);
     g.setColour(design::meterAxisText.withAlpha(0.3f));
-    for (const auto between : {std::pair{Control::frequency, Control::time}, std::pair{Control::time, Control::phase}})
+    for (const auto between : {std::pair{Control::frequency, Control::time}, std::pair{Control::time, Control::phase},
+                               std::pair{Control::phase, Control::bands}})
     {
         const auto sepX = 0.5f * (controlArea(between.first).getRight() + controlArea(between.second).getX());
         g.drawLine(sepX, titleY - 11.0f * s, sepX, titleY + 2.0f * s, thin);
@@ -482,6 +512,10 @@ void MeterScreen::paintLive(juce::Graphics& g) const
     else if (view == View::phase)
     {
         paintPhase(g);
+    }
+    else if (view == View::bands)
+    {
+        paintBands(g);
     }
     else
     {
@@ -533,6 +567,46 @@ void MeterScreen::paintPhase(juce::Graphics& g) const
     draw(analyser.phaseProcessed(), analyser.phaseProcessedCoherence(), true);
 }
 
+void MeterScreen::paintBands(juce::Graphics& g) const
+{
+    // Per band: the output as a bar from zero, the input as a tick across the slot, and the output's value.
+    const auto s = getScale();
+    const auto left = lx(design::meterPlotLeft), right = lx(design::meterPlotRight);
+    const auto slot = (right - left) / (float)meter::CorrelationAnalyser::numBands;
+    const auto zero = ly(design::meterZeroY);
+    const auto valueFont = meterFont(assets, 16.0f * s, true);
+    const auto& x = analyser.bandsProcessed();
+    const auto& z = analyser.bandsUnprocessed();
+    for (int b = 0; b < meter::CorrelationAnalyser::numBands; ++b)
+    {
+        const auto centre = left + slot * ((float)b + 0.5f);
+        const auto r = x[(size_t)b];
+        if (! std::isnan(r))
+        {
+            // Segmented like the overall bar (the unlit ones are in the static layer).
+            paintSegments(g, centre - 0.2f * slot, centre + 0.2f * slot, r, false);
+            // The value sits past the bar's end, or inside it when that would run into the legend or the axis, on a
+            // black patch so the segments don't cut through it.
+            const auto y = yForR(r);
+            const auto above = r >= 0.0f;
+            const auto inside = std::abs(r) > 0.8f;
+            const auto textY = above ? (inside ? y + 24.0f * s : y - 8.0f * s) : (inside ? y - 8.0f * s : y + 22.0f * s);
+            const juce::String text = (r > 0.0f ? "+" : "") + juce::String(r, 2);
+            g.setColour(design::screenBlack.withAlpha(0.85f));
+            g.fillRect(juce::Rectangle<float>(textWidth(valueFont, text) + 10.0f * s, 20.0f * s)
+                           .withCentre({centre, textY - 6.0f * s}));
+            g.setColour(design::phosphor);
+            drawTextAt(g, valueFont, text, centre, textY, juce::Justification::horizontallyCentred);
+        }
+        if (! std::isnan(z[(size_t)b]))
+        {
+            g.setColour(design::phosphor.withAlpha(0.5f));
+            g.fillRect(juce::Rectangle<float>(0.64f * slot, juce::jmax(2.0f, 3.0f * s))
+                           .withCentre({centre, yForR(z[(size_t)b])}));
+        }
+    }
+}
+
 void MeterScreen::paintPreviewNote(juce::Graphics& g) const
 {
     const auto s = getScale();
@@ -554,7 +628,11 @@ void MeterScreen::paintPreviewNote(juce::Graphics& g) const
         const auto ms = std::abs(analyser.previewDelayMs()) < 0.0005 ? 0.0 : analyser.previewDelayMs();
         const auto font = meterFont(assets, 16.0f * s, true);
         // Below the time view's readouts, at the top left elsewhere.
-        const auto y = ly(design::meterPlusOneY) + (view == View::time ? 90.0f : 24.0f) * s;
+        const auto y = view == View::bands ? ly(design::meterMinusOneY) - 14.0f * s
+                                           : ly(design::meterPlusOneY) + (view == View::time ? 90.0f : 24.0f) * s;
+        const juce::String note = "PREVIEW  DELAY " + juce::String(ms >= 0.0 ? "+" : "") + juce::String(ms, 3) + " ms";
+        g.setColour(design::screenBlack.withAlpha(0.85f));
+        g.fillRect(juce::Rectangle<float>(textWidth(font, note) + 16.0f * s, 22.0f * s).withX(x - 8.0f * s).withY(y - 16.0f * s));
         g.setColour(design::phosphor);
         drawTextAt(g, font, "PREVIEW  DELAY " + juce::String(ms >= 0.0 ? "+" : "") + juce::String(ms, 3) + " ms", x, y,
                    juce::Justification::left);

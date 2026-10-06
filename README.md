@@ -92,7 +92,9 @@ work, so you can set them up before switching them on).
 | Control | What it does |
 |---|---|
 | **METER button** | Turns the meter on or off. When it's off (or the window is closed) the meter does no work at all, which saves CPU. |
-| **FREQUENCY / TIME OFFSET** | Click either label under the screen to switch views. See [Reading the meter](#reading-the-meter). |
+| **FREQUENCY / TIME OFFSET / PHASE / BANDS** | Click a label under the screen to switch views. See [Reading the meter](#reading-the-meter). |
+| **SLOW / FAST** | How much the meter averages. SLOW is steadier (it settles in about 0.75 s); FAST follows your changes sooner (about a third of that) but flickers more. |
+| **HOLD** | Freezes the screen so you can study it. It also freezes by itself while your DAW's transport is stopped (if the DAW reports it). Frozen, you can drag across the TIME OFFSET view to preview a delay (see below). |
 | **ANALYSE** | Reserved for a future automatic-suggestion feature. It doesn't do anything yet. |
 
 ### Using the knobs
@@ -176,7 +178,7 @@ band. Set the **delay** first, and flip **Ø** if the curve sits near −1 every
 
 The meter compares the track Phase Align is on with the track in its **sidechain**. It shows a correlation, *r*, which
 is **+1** when the two agree perfectly, **0** when they are unrelated, and **−1** when one is the exact opposite of the
-other. Both tracks need to be playing the same source at the same time; the meter settles within about a second.
+other. Both tracks need to be playing the same source at the same time; the meter settles within about a second (a third of that on FAST).
 
 Each view draws two things: the **INPUT** (what the pair looks like without Phase Align, dim) and the **OUTPUT** (with
 it, bright), so "better or worse" is the gap between them.
@@ -202,6 +204,28 @@ If the peak is outside the delay's reach, the screen says **TRANSIENTS OUT OF DE
 ![Offset beyond the delay's range](docs/images/meter-out-of-range.png)
 
 Move one of the clips in your DAW by that amount first (up to ±40 ms is detected), then fine-tune with the delay.
+
+### PHASE view
+
+The angle between this track and the sidechain at each frequency, from −180° to +180°. A straight slope running up through
+the frequencies is a **delay**; a flat line away from 0° is a **rotation**; a line at ±180° is a **polarity flip**. The
+goal is a bright line along 0°. The line is drawn faintly where the two tracks only weakly agree, and not at all where they
+don't agree enough for an angle to mean anything. A long delay wraps the line round and round at high frequencies: set
+the delay first and it straightens out.
+
+### BANDS view
+
+Six bars, one per band (20–100 Hz, 100–250, 250–630, 630 Hz–1.6k, 1.6k–4k, 4k–20k), each showing *r* for the OUTPUT with its
+number, and a tick for the INPUT. It reads at a glance, but each bar averages everything in its band, so for two spaced
+mics the upper bars hover around 0 whatever you do (the comb averages away). The FREQUENCY view has the detail.
+
+### Holding the screen and previewing a delay
+
+**HOLD** freezes the screen, and releasing it carries on. Frozen, drag across the TIME OFFSET view: the OUTPUT trace
+becomes **PREVIEW**, what the track would read with the DELAY knob at the point you're dragging (in 0.1-sample steps, within
+the knob's reach), on every view and on the overall bar. Find the position where the FREQUENCY curve and BANDS sit at
++1 or the PHASE line goes flat, then set the knob there. The preview is of a delay alone, with PHASE off. Letting go of HOLD
+clears it.
 
 ### Messages
 
@@ -270,7 +294,7 @@ crossfades two read taps over 50 ms, so it doesn't click. At 44.1 kHz the delay 
 **The meter.** The sidechain, the input and the output are analysed in overlapping FFT frames (8192 points at 44.1 and 48 kHz,
 Hann window, 75% overlap), and the cross-spectrum between each of the pair and the sidechain is averaged over about
 a second per frequency bin. *r* is the normalised correlation of the two signals within a band, the real part of that
-cross-spectrum divided by the geometric mean of the two powers. The FREQUENCY view plots it per 1/6 octave. The TIME OFFSET view whitens the cross-spectrum (every bin set to unit
+cross-spectrum divided by the geometric mean of the two powers (FAST averages over about a third of that). The FREQUENCY view plots it per 1/6 octave; the BANDS view takes it over six wide bands; the PHASE view is the angle of that cross-spectrum over 1/24 octave, drawn only where it is coherent. The delay preview turns each bin of the input's cross-spectrum by the phase of the chosen delay before it is summed. The TIME OFFSET view whitens the cross-spectrum (every bin set to unit
 magnitude, the "PHAT" weighting) and takes the inverse FFT: a pure delay then shows as a single sharp peak at its lag,
 and a phase rotation as a peak at 0 ms, which a plain cross-correlation would blur into a hump that suggests a delay
 that isn't there. The audio thread only copies samples into a buffer; the analysis runs on the interface's 30 Hz timer, and only while

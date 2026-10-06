@@ -448,3 +448,29 @@ TEST_CASE("phase view: a delay is a slope, a polarity flip is 180, noise is not 
         drawn += std::isnan(v) ? 0 : 1;
     CHECK(drawn < (int)hz.size() / 4);
 }
+
+TEST_CASE("bands view: six bands, +1 when aligned, the delayed input comb-averages, preview follows", "[meter]")
+{
+    const auto fs = 48000.0;
+    const auto d = 62;
+    const auto source = noise((int)(3.0 * fs), 9);
+    const auto sidechain = delayed(source, d);
+
+    CorrelationAnalyser a;
+    a.prepare(fs);
+    feed(a, source, delayed(source, d), sidechain); // output aligned, input not
+    REQUIRE((int)a.bandsProcessed().size() == CorrelationAnalyser::numBands);
+    for (const auto v : a.bandsProcessed())
+        CHECK(v > 0.99f);
+    // The unaligned input: the lowest band (20-100 Hz, d = 1.3 ms) is still nearly in phase, the top ones comb away.
+    CHECK(a.bandsUnprocessed()[0] > 0.8f);
+    CHECK(std::abs(a.bandsUnprocessed()[5]) < 0.3f);
+
+    CorrelationAnalyser b;
+    b.prepare(fs);
+    feed(b, source, source, sidechain);
+    CHECK(b.bandsProcessed()[5] < 0.3f);
+    b.setPreviewDelayMs(1000.0 * d / fs);
+    for (const auto v : b.bandsProcessed())
+        CHECK(v > 0.99f);
+}

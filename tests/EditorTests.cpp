@@ -421,6 +421,9 @@ TEST_CASE("meter on screen: reads +1 when aligned, and stops when off", "[.][des
     proc.getUiState().setProperty(UiProps::meterSpeed, "fast", nullptr);
     play(2.0);
     snapshot("meter_phase_unaligned.png");
+    proc.getUiState().setProperty(UiProps::meterView, "bands", nullptr);
+    play(0.3);
+    snapshot("meter_bands_unaligned.png");
     proc.getUiState().setProperty(UiProps::meterView, "time", nullptr);
     play(0.3);
     screen.setHeld(true);
@@ -438,6 +441,9 @@ TEST_CASE("meter on screen: reads +1 when aligned, and stops when off", "[.][des
     proc.getUiState().setProperty(UiProps::meterView, "phase", nullptr);
     mm->runDispatchLoopUntil(100);
     snapshot("meter_phase_preview.png");
+    proc.getUiState().setProperty(UiProps::meterView, "bands", nullptr);
+    mm->runDispatchLoopUntil(100);
+    snapshot("meter_bands_preview.png");
     screen.setHeld(false);
     CHECK_FALSE(screen.isPreviewing());
     proc.getUiState().setProperty(UiProps::meterSpeed, "slow", nullptr);

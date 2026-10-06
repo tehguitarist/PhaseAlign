@@ -217,7 +217,7 @@ PhaseAlignEditor::PhaseAlignEditor(PhaseAlignProcessor& p)
     meterButton.setTooltip(
         juce::String::fromUTF8("Correlation meter on/off: how well this track lines up with the sidechain, per "
                                "frequency band (+1 in phase, \xe2\x88\x92"
-                               "1 out of phase) or as the time offset between them. Needs a sidechain input; it "
+                               "1 out of phase), as the time offset between them, or as the phase angle. Needs a sidechain input; it "
                                "only runs while this window is open."));
     meterButton.onClick = [this]
     { uiState.setProperty(PhaseAlignProcessor::UiProps::meterOn, ! meterButton.isLit(), nullptr); };
@@ -227,6 +227,7 @@ PhaseAlignEditor::PhaseAlignEditor(PhaseAlignProcessor& p)
         uiState.setProperty(PhaseAlignProcessor::UiProps::meterView,
                             v == pa::ui::MeterScreen::View::time    ? "time"
                             : v == pa::ui::MeterScreen::View::phase ? "phase"
+                            : v == pa::ui::MeterScreen::View::bands ? "bands"
                                                                     : "frequency",
                             nullptr);
     };
@@ -436,6 +437,7 @@ void PhaseAlignEditor::updateMeter()
     const auto view = uiState.getProperty(PhaseAlignProcessor::UiProps::meterView).toString();
     meterScreen.setView(view == "time"    ? pa::ui::MeterScreen::View::time
                         : view == "phase" ? pa::ui::MeterScreen::View::phase
+                        : view == "bands" ? pa::ui::MeterScreen::View::bands
                                           : pa::ui::MeterScreen::View::frequency);
     meterScreen.setSpeed(uiState.getProperty(PhaseAlignProcessor::UiProps::meterSpeed).toString() == "fast"
                              ? pa::ui::MeterScreen::Speed::fast

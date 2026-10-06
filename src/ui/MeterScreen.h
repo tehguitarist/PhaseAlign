@@ -37,7 +37,8 @@ class MeterScreen : public DesignComponent, private juce::Timer
     {
         frequency,
         time,
-        phase
+        phase,
+        bands
     };
     using Speed = meter::CorrelationAnalyser::Speed;
 
@@ -67,7 +68,10 @@ class MeterScreen : public DesignComponent, private juce::Timer
     // Centres of the bottom row's labels, in local coordinates (for tests).
     juce::Point<float> viewLabelCentreForTesting(View v) const
     {
-        return controlArea(v == View::frequency ? Control::frequency : v == View::time ? Control::time : Control::phase)
+        return controlArea(v == View::frequency ? Control::frequency
+                           : v == View::time    ? Control::time
+                           : v == View::phase   ? Control::phase
+                                                : Control::bands)
             .getCentre();
     }
     juce::Point<float> speedLabelCentreForTesting(Speed v) const
@@ -106,6 +110,7 @@ class MeterScreen : public DesignComponent, private juce::Timer
         frequency,
         time,
         phase,
+        bands,
         slow,
         fast,
         hold
@@ -122,6 +127,7 @@ class MeterScreen : public DesignComponent, private juce::Timer
     void paintTrace(juce::Graphics&, const std::function<float(int)>& xAt, const std::vector<float>& values,
                     bool processed) const;
     void paintPhase(juce::Graphics&) const;
+    void paintBands(juce::Graphics&) const;
     void paintLagReadout(juce::Graphics&) const;
     void paintPreviewNote(juce::Graphics&) const;
     void paintOverall(juce::Graphics&) const;

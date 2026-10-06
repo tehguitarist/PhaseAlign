@@ -323,6 +323,9 @@ TEST_CASE("meter view: click FREQUENCY or TIME OFFSET on the screen's bottom row
     click(screen, phase);
     CHECK(f.proc.getUiState()[UiProps::meterView].toString() == "phase");
     CHECK(screen.getView() == pa::ui::MeterScreen::View::phase);
+    click(screen, screen.viewLabelCentreForTesting(View::bands));
+    CHECK(f.proc.getUiState()[UiProps::meterView].toString() == "bands");
+    CHECK(screen.getView() == View::bands);
     click(screen, freq);
     CHECK(f.proc.getUiState()[UiProps::meterView].toString() == "frequency");
     CHECK(screen.getView() == pa::ui::MeterScreen::View::frequency);

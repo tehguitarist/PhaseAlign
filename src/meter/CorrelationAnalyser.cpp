@@ -76,6 +76,11 @@ void CorrelationAnalyser::prepare(double sampleRate)
         windowFor(f, half, curveLo, curveHi, i);
         windowFor(f, phaseHalf, phaseLo, phaseHi, i);
     }
+    for (int b = 0; b < numBands; ++b)
+    {
+        bandLo[b] = juce::jlimit(binLo, binHi, (int)std::ceil(bandEdgesHz[b] / binHz));
+        bandHi[b] = juce::jlimit(binLo, binHi, (int)std::ceil(bandEdgesHz[b + 1] / binHz) - 1);
+    }
     previewRe.assign((size_t)numBins, 0.0);
     previewIm.assign((size_t)numBins, 0.0);
 
@@ -147,6 +152,8 @@ void CorrelationAnalyser::reset()
     curveZ.assign((size_t)curvePoints, notMeasured);
     phaseX.assign((size_t)curvePoints, notMeasured);
     phaseZ.assign((size_t)curvePoints, notMeasured);
+    bandX.assign((size_t)numBands, notMeasured);
+    bandZ.assign((size_t)numBands, notMeasured);
     cohX.assign((size_t)curvePoints, 0.0f);
     cohZ.assign((size_t)curvePoints, 0.0f);
     overallX = overallZ = notMeasured;
@@ -293,6 +300,11 @@ void CorrelationAnalyser::updateResults()
         curveZ[i] = correlation(zyRe, zz, curveLo[i], curveHi[i]);
         phase(*pRe, *pIm, *pPow, phaseLo[i], phaseHi[i], phaseX[i], cohX[i]);
         phase(zyRe, zyIm, zz, phaseLo[i], phaseHi[i], phaseZ[i], cohZ[i]);
+    }
+    for (int b = 0; b < numBands; ++b)
+    {
+        bandX[(size_t)b] = correlation(*pRe, *pPow, bandLo[b], bandHi[b]);
+        bandZ[(size_t)b] = correlation(zyRe, zz, bandLo[b], bandHi[b]);
     }
     overallX = correlation(*pRe, *pPow, binLo, binHi);
     overallZ = correlation(zyRe, zz, binLo, binHi);

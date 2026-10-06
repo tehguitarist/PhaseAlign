@@ -206,7 +206,7 @@ void PhaseAlignProcessor::restoreUiState(const juce::ValueTree& loaded)
     uiState.setProperty(UiProps::meterOn, (bool)get(UiProps::meterOn), nullptr);
     uiState.setProperty(UiProps::uiScale, juce::jlimit(minUiScale, maxUiScale, (double)get(UiProps::uiScale)), nullptr);
     const auto view = get(UiProps::meterView).toString();
-    uiState.setProperty(UiProps::meterView, view == "time" || view == "phase" ? view : juce::String("frequency"),
+    uiState.setProperty(UiProps::meterView, view == "time" || view == "phase" || view == "bands" ? view : juce::String("frequency"),
                         nullptr);
     uiState.setProperty(UiProps::meterSpeed, get(UiProps::meterSpeed).toString() == "fast" ? "fast" : "slow", nullptr);
 }

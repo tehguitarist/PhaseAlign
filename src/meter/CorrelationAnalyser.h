@@ -76,6 +76,13 @@ class CorrelationAnalyser
     // The time view's value for the input at a lag (nearest sample), for the scrub readout.
     float lagUnprocessedAt(double ms) const;
 
+    // Bands view (R17): r over six bands, bandEdgesHz[i] to bandEdgesHz[i + 1]; NaN where gated. The processed ones
+    // follow the preview like the curve does.
+    static constexpr int numBands = 6;
+    static constexpr double bandEdgesHz[numBands + 1] = {20.0, 100.0, 250.0, 630.0, 1600.0, 4000.0, 20000.0};
+    const std::vector<float>& bandsProcessed() const { return bandX; }
+    const std::vector<float>& bandsUnprocessed() const { return bandZ; }
+
     // Overall broadband r, NaN while gated.
     float overallProcessed() const { return overallX; }
     float overallUnprocessed() const { return overallZ; }
@@ -135,6 +142,8 @@ class CorrelationAnalyser
 
     std::vector<float> curveHz, curveX, curveZ, phaseX, phaseZ, cohX, cohZ;
     std::vector<int> curveLo, curveHi;     // bin range per curve point, inclusive
+    std::vector<float> bandX, bandZ;
+    int bandLo[numBands] = {}, bandHi[numBands] = {};
     std::vector<int> phaseLo, phaseHi;     // the same for the phase view's narrower windows
     float overallX = 0.0f, overallZ = 0.0f;
 
