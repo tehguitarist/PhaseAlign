@@ -1,6 +1,6 @@
 # Phase Align: Project Plan
 
-**Status:** planning complete, prototyping not started **Milestones:** v0.7 is the core feature set (sections 3.1 to 3.4). Record and compare (section 3.5) is planned as the next milestone, and v0.7 is structured to support it (section 4.9). **Framework:** JUCE (C++), AU and VST3, macOS first **Goal:** a low-CPU phase alignment utility. Inspired by phase alignment tools like the Little Labs IBP. This is a utility, not an analogue emulation.
+**Status:** planning complete, prototyping not started **Milestones:** v0.7 is the core feature set (sections 3.1 to 3.4). Record and compare (section 3.5) is planned as the next milestone, and v0.7 is structured to support it (section 4.9). **Framework:** JUCE (C++), AU and VST3, macOS first **Goal:** a low-CPU phase alignment utility. This is a utility, not an analogue emulation.
 
 ---
 
