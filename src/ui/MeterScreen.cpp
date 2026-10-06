@@ -61,7 +61,7 @@ void MeterScreen::setView(View newView)
         return;
     view = newView;
     if (view == View::time)
-        analyser.computeLag();
+        analyser.computeLag(isFrozen());
     repaint();
 }
 
@@ -95,7 +95,7 @@ void MeterScreen::freezeChanged()
     if (frozen)
     {
         if (view == View::time)
-            analyser.computeLag();
+            analyser.computeLag(true);
     }
     else
         analyser.clearPreview(); // a preview belongs to the frozen picture

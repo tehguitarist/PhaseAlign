@@ -101,7 +101,9 @@ class CorrelationAnalyser
         bool clear = false;  // strong and well above everything else in the range
         bool coarse = false; // from the wide search: to the nearest sample, beyond the time view
     };
-    void computeLag();
+    // `settled`: the screen is frozen (or just switched to this view), so the current picture is all there is to go
+    // on: readings count as steady straight away.
+    void computeLag(bool settled = false);
     double lagMsAt(int index) const { return (index - lagHalf) * 1000.0 / fs; }
     const std::vector<float>& lagProcessed() const { return lagX; }
     const std::vector<float>& lagUnprocessed() const { return lagZ; }
@@ -114,10 +116,16 @@ class CorrelationAnalyser
 
     // Attack view (R18): the same offsets read from the ATTACKS of the signals, not their waveforms, for material
     // whose waveforms don't match (a kick against a kick sample: different pitch, tail and click, so the waveform
-    // lag lands on whatever the sub bass happens to line up on). Each stream is high-passed at 600 Hz, rectified,
-    // smoothed over 1 ms, taken to the log, and only its rises kept (log-envelope flux); the cross-correlation of
-    // those (normalised, averaged like the rest) peaks where the attacks line up. Computed with computeLag().
-    static constexpr double attackHighPassHz = 600.0, attackSmoothMs = 1.0;
+    // lag lands on whatever the sub bass happens to line up on). Each stream is split into three bands (so a snare's
+    // top, a guitar's mids and a bass note's body each get their say), and in each band rectified, smoothed (longer
+    // for lower bands), taken to the log, and only its rises kept (log-envelope flux). The cross-correlation of those,
+    // normalised per band and averaged over the bands, peaks where the attacks line up. Computed with computeLag().
+    struct AttackBand
+    {
+        double lowHz, highHz, smoothMs; // highHz 0: no upper limit
+    };
+    static constexpr int numAttackBands = 3;
+    static constexpr AttackBand attackBands[numAttackBands] = {{35.0, 150.0, 4.0}, {150.0, 600.0, 1.5}, {600.0, 0.0, 1.0}};
     Peak attackPeakProcessed() const { return attackX; }
     Peak attackPeakUnprocessed() const { return attackInput(); }
     const std::vector<float>& attackProcessed() const { return attackLagX; }
@@ -140,9 +148,22 @@ class CorrelationAnalyser
     void lagFunction(const std::vector<double>& re, const std::vector<double>& im, const std::vector<double>& power,
                      std::vector<float>& out, Peak& peak, Peak* wide = nullptr);
     double windowLevelDb(double powerSum) const;
-    void attackFunction(const std::vector<double>& re, const std::vector<double>& im, double powerA, double powerB,
-                        std::vector<float>& out, Peak& peak, Peak* wide);
-    float attackFeature(int stream, float x); // mean-square level, in dBFS, of a sum of |X|² over bins
+    void attackFunction(bool processed, std::vector<float>& out, Peak& peak, Peak* wide);
+
+    // A reading is only called clear once most of the last few computations agree (a hit that has just landed can
+    // put a spurious peak up for a frame, and between hits a clear one can lapse): at least steadyNeeded of the last
+    // steadyCount are clear and within steadyMs of each other. Its lag is then their median, which doesn't jitter.
+    static constexpr int steadyCount = 8, steadyNeeded = 6;
+    static constexpr double steadyMs = 0.3;
+    struct Steadiness
+    {
+        double lag[steadyCount] = {};
+        bool clear[steadyCount] = {};
+        int count = 0, pos = 0;
+        bool update(Peak&, bool settled); // true: clear; sets the peak's lag to the median of the clear ones
+    };
+    Steadiness steadyX, steadyZ, steadyWideZ;
+    float attackFeature(int stream, int band, float x); // mean-square level, in dBFS, of a sum of |X|² over bins
 
     double fs = 0.0;
     int fftSize = 0, hop = 0, numBins = 0, lagHalf = 0, wideHalf = 0, binLo = 0, binHi = 0;
@@ -168,21 +189,25 @@ class CorrelationAnalyser
     std::vector<int> phaseLo, phaseHi;     // the same for the phase view's narrower windows
     float overallX = 0.0f, overallZ = 0.0f;
 
-    // The attack features (see attackFunction): per stream, a 4th-order high-pass, a 1 ms moving average of |x|, and the
-    // previous log value; their ring history; and the averaged cross-spectra of the feature signals.
-    struct AttackStream
+    // The attack features (see attackFunction): per stream and band, the filters' state, a moving average of |x| and
+    // the previous log value; their ring histories; and per band the averaged cross-spectra of the feature signals.
+    struct Biquad
     {
-        double s1[2] = {0, 0}, s2[2] = {0, 0};
-        std::vector<double> ring;
+        double b0 = 1, b1 = 0, b2 = 0, a1 = 0, a2 = 0;
+    };
+    struct AttackChannel
+    {
+        std::vector<double> s1, s2, ring; // filter states (per section) and the moving average
         double sum = 0.0, previousLog = 0.0;
         int pos = 0;
     };
-    AttackStream attackStream[3];
-    double hp[2][5] = {}; // b0 b1 b2 a1 a2 per biquad
-    std::vector<float> featHistory[3];
-    std::vector<double> fxyRe, fxyIm, fzyRe, fzyIm;
-    double fxx = 0.0, fzz = 0.0, fyy = 0.0, attackAlpha = 0.0;
-    std::vector<float> attackLagX, attackLagZ;
+    std::vector<Biquad> attackSections[numAttackBands];
+    AttackChannel attackChannel[3][numAttackBands];
+    std::vector<float> featHistory[3][numAttackBands];
+    std::vector<double> fxyRe[numAttackBands], fxyIm[numAttackBands], fzyRe[numAttackBands], fzyIm[numAttackBands];
+    double fxx[numAttackBands] = {}, fzz[numAttackBands] = {}, fyy[numAttackBands] = {};
+    double attackAlpha = 0.0;
+    std::vector<float> attackLagX, attackLagZ, attackMix;
     Peak attackX, attackZ, attackWideZ;
 
     std::vector<float> lagX, lagZ;
