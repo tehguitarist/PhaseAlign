@@ -6,6 +6,7 @@ on:
   push:
     branches: [master]
   pull_request:
+  workflow_dispatch: # run on any branch from the Actions tab or `gh workflow run ci.yml --ref <branch>`
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -56,6 +57,17 @@ jobs:
             ctest --test-dir build -C Release --output-on-failure
           fi
 
+      - name: Benchmark the DSP (information only)
+        # Numbers for IMPLEMENTATION_PLAN 2.6 on every OS: Windows and Linux use the generic FFT engine (no vDSP).
+        # Budgets per stereo frame: Hi/Lo under 50 ns, Constant under 150 ns. Never fails the build.
+        continue-on-error: true
+        shell: bash
+        run: |
+          bin=build/PhaseAlignDspTests_artefacts/Release/PhaseAlignDspTests
+          [ -f "$bin.exe" ] && bin="$bin.exe"
+          "$bin" "chain cost per stereo frame" 2>&1 | grep -E 'ns per|us$' || true
+          "$bin" "convolver cost per stereo frame by block layout" 2>&1 | grep -E 'ns per' || true
+
       - name: Validate AU (auval)
         if: runner.os == 'macOS'
         run: |
@@ -81,5 +93,14 @@ jobs:
         run: |
           curl -sSL -o pluginval.zip https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_macOS.zip
           unzip -q pluginval.zip
+          pluginval.app/Contents/MacOS/pluginval --version || true
           pluginval.app/Contents/MacOS/pluginval --strictness-level 10 --validate-in-process \
-            --timeout-ms 300000 "build/PhaseAlign_artefacts/Release/VST3/Phase Align.vst3"
+            --timeout-ms 300000 --output-dir pluginval-logs "build/PhaseAlign_artefacts/Release/VST3/Phase Align.vst3"
+
+      - name: Upload pluginval logs
+        if: failure() && runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pluginval-logs
+          path: pluginval-logs
+          if-no-files-found: ignore
