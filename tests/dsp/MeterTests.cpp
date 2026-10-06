@@ -531,6 +531,12 @@ TEST_CASE("a kick against a different kick sample: the time view finds the offse
         }
         else if (peak.clear) // fast has about two frames to go on: it may decline, but not claim a wrong offset
             CHECK(peak.lagMs == Approx(1000.0 * d / fs).margin(0.15));
+
+        // The attacks, though, are what a kick is about: found by both speeds, with different bodies.
+        const auto attack = a.attackInput();
+        INFO("attack " << attack.lagMs << " ms value " << attack.value);
+        CHECK(attack.clear);
+        CHECK(attack.lagMs == Approx(1000.0 * d / fs).margin(0.1));
     }
 }
 
@@ -559,5 +565,55 @@ TEST_CASE("fast: a delay on steady material is found, and the meter follows a ch
         feed(a, head, head, head);
         feed(a, head, head, flipped);
         CHECK(a.overallProcessed() < 0.0f);
+    }
+}
+
+// Hidden: the user's own kick pair (captures/, gitignored; raw float32 mono at 48 kHz written by a script). The
+// attacks are 1.23 ms apart (onsets read off the waveforms: 1483.35 ms and 1484.58 ms); the sub bodies disagree.
+TEST_CASE("the user's kick pair: the attack lag finds the onset offset", "[.kickfiles]")
+{
+    const auto load = [](const char* path)
+    {
+        std::vector<float> v;
+        if (auto* f = std::fopen(path, "rb"))
+        {
+            std::fseek(f, 0, SEEK_END);
+            v.resize((size_t)std::ftell(f) / sizeof(float));
+            std::rewind(f);
+            REQUIRE(std::fread(v.data(), sizeof(float), v.size(), f) == v.size());
+            std::fclose(f);
+        }
+        return v;
+    };
+    const auto mic = load("captures/kick_mic.f32"), sample = load("captures/kick_smp.f32");
+    REQUIRE_FALSE(mic.empty());
+    const auto fs = 48000.0;
+    for (const auto speed : {CorrelationAnalyser::Speed::slow, CorrelationAnalyser::Speed::fast})
+    {
+        CorrelationAnalyser a;
+        a.prepare(fs);
+        a.setSpeed(speed);
+        const auto n = std::min(mic.size(), sample.size());
+        int readings = 0, clear = 0;
+        for (size_t pos = 0; pos < n; pos += 1600) // 30 Hz pulls
+        {
+            const auto m = (int)std::min<size_t>(1600, n - pos);
+            a.process(mic.data() + pos, mic.data() + pos, sample.data() + pos, m);
+            if (pos % (size_t)(fs * 3) < 1600 && pos > (size_t)(fs * 4))
+            {
+                a.computeLag();
+                const auto w = a.inputPeak(), t = a.attackInput();
+                ++readings;
+                if (t.clear)
+                {
+                    ++clear;
+                    CHECK(t.lagMs == Approx(1.23).margin(0.15)); // never a wrong one called clear
+                }
+                std::printf("%s t=%5.1fs  waveform %+7.2f ms (%.2f%s)  attack %+6.2f ms (%.2f%s)\n",
+                            speed == CorrelationAnalyser::Speed::fast ? "fast" : "slow", pos / fs, w.lagMs, w.value,
+                            w.clear ? " clear" : "", t.lagMs, t.value, t.clear ? " clear" : "");
+            }
+        }
+        CHECK(clear >= readings - 2);
     }
 }

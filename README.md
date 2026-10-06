@@ -199,6 +199,12 @@ Where the two tracks line up, from −5 ms to +5 ms. A single sharp peak is the 
 position is printed next to INPUT and OUTPUT (positive means the sidechain is later). The part the delay knob can reach
 (−4 to +4 ms) is shaded. After you set the delay (or the right phase), the OUTPUT peak should move to 0 ms.
 
+There are two readings of the offset for INPUT and OUTPUT, in two columns. **WAVEFORM** compares the signals themselves
+(the solid line), which suits two mics on the same source. **ATTACK** compares where the hits start (the dashed line):
+it only looks at the sharp rises, above about 600 Hz, so it works for a kick against a kick sample, whose pitch and tail
+differ so much that the waveforms don't match. When the two agree, trust them; for drums with a sample, trust ATTACK. A
+`--` means no clear peak was found. Once the delay is set, the OUTPUT readings should go to 0.
+
 If the peak is outside the delay's reach, the screen says **TRANSIENTS OUT OF DELAY RANGE** and shows the offset:
 
 ![Offset beyond the delay's range](docs/images/meter-out-of-range.png)
@@ -294,7 +300,7 @@ crossfades two read taps over 50 ms, so it doesn't click. At 44.1 kHz the delay 
 **The meter.** The sidechain, the input and the output are analysed in overlapping FFT frames (8192 points at 44.1 and 48 kHz,
 Hann window, 75% overlap), and the cross-spectrum between each of the pair and the sidechain is averaged over about
 a second per frequency bin. *r* is the normalised correlation of the two signals within a band, the real part of that
-cross-spectrum divided by the geometric mean of the two powers (FAST uses half-length frames and averages over about a third of that). The FREQUENCY view plots it per 1/6 octave; the BANDS view takes it over six wide bands; the PHASE view is the angle of that cross-spectrum over 1/24 octave, drawn only where it is coherent. The delay preview turns each bin of the input's cross-spectrum by the phase of the chosen delay before it is summed. The TIME OFFSET view whitens the cross-spectrum (every bin set to unit
+cross-spectrum divided by the geometric mean of the two powers (FAST uses half-length frames and averages over about a third of that). The FREQUENCY view plots it per 1/6 octave; the BANDS view takes it over six wide bands; the PHASE view is the angle of that cross-spectrum over 1/24 octave, drawn only where it is coherent. The delay preview turns each bin of the input's cross-spectrum by the phase of the chosen delay before it is summed. The ATTACK reading high-passes each signal at 600 Hz, takes its 1 ms envelope, and keeps only the rises of its logarithm; those are cross-correlated like the audio, with the same averaging. The TIME OFFSET view whitens the cross-spectrum (every bin set to unit
 magnitude, the "PHAT" weighting) and weights each bin by how coherent the two signals are in it (so the bins a kick drum has nothing in, which are most of them, don't bury its peak), and takes the inverse FFT: a pure delay then shows as a single sharp peak at its lag,
 and a phase rotation as a peak at 0 ms, which a plain cross-correlation would blur into a hump that suggests a delay
 that isn't there. The audio thread only copies samples into a buffer; the analysis runs on the interface's 30 Hz timer, and only while

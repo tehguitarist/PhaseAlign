@@ -112,6 +112,18 @@ class CorrelationAnalyser
     // within +-wideLagRangeMs lies beyond that range, that one (coarse).
     Peak inputPeak() const;
 
+    // Attack view (R18): the same offsets read from the ATTACKS of the signals, not their waveforms, for material
+    // whose waveforms don't match (a kick against a kick sample: different pitch, tail and click, so the waveform
+    // lag lands on whatever the sub bass happens to line up on). Each stream is high-passed at 600 Hz, rectified,
+    // smoothed over 1 ms, taken to the log, and only its rises kept (log-envelope flux); the cross-correlation of
+    // those (normalised, averaged like the rest) peaks where the attacks line up. Computed with computeLag().
+    static constexpr double attackHighPassHz = 600.0, attackSmoothMs = 1.0;
+    Peak attackPeakProcessed() const { return attackX; }
+    Peak attackPeakUnprocessed() const { return attackInput(); }
+    const std::vector<float>& attackProcessed() const { return attackLagX; }
+    const std::vector<float>& attackUnprocessed() const { return attackLagZ; }
+    Peak attackInput() const { return attackWideZ.clear && std::abs(attackWideZ.lagMs) > lagRangeMs ? attackWideZ : attackZ; }
+
     // Whether the input's clear peak is beyond what a delay of +-maxMs can reach (by more than half of its 0.1-sample
     // step): the screen then says TRANSIENTS OUT OF DELAY RANGE (plan 2.1a).
     bool inputOutOfReach(double maxMs) const;
@@ -127,7 +139,10 @@ class CorrelationAnalyser
     void setAlpha();
     void lagFunction(const std::vector<double>& re, const std::vector<double>& im, const std::vector<double>& power,
                      std::vector<float>& out, Peak& peak, Peak* wide = nullptr);
-    double windowLevelDb(double powerSum) const; // mean-square level, in dBFS, of a sum of |X|² over bins
+    double windowLevelDb(double powerSum) const;
+    void attackFunction(const std::vector<double>& re, const std::vector<double>& im, double powerA, double powerB,
+                        std::vector<float>& out, Peak& peak, Peak* wide);
+    float attackFeature(int stream, float x); // mean-square level, in dBFS, of a sum of |X|² over bins
 
     double fs = 0.0;
     int fftSize = 0, hop = 0, numBins = 0, lagHalf = 0, wideHalf = 0, binLo = 0, binHi = 0;
@@ -152,6 +167,23 @@ class CorrelationAnalyser
     int bandLo[numBands] = {}, bandHi[numBands] = {};
     std::vector<int> phaseLo, phaseHi;     // the same for the phase view's narrower windows
     float overallX = 0.0f, overallZ = 0.0f;
+
+    // The attack features (see attackFunction): per stream, a 4th-order high-pass, a 1 ms moving average of |x|, and the
+    // previous log value; their ring history; and the averaged cross-spectra of the feature signals.
+    struct AttackStream
+    {
+        double s1[2] = {0, 0}, s2[2] = {0, 0};
+        std::vector<double> ring;
+        double sum = 0.0, previousLog = 0.0;
+        int pos = 0;
+    };
+    AttackStream attackStream[3];
+    double hp[2][5] = {}; // b0 b1 b2 a1 a2 per biquad
+    std::vector<float> featHistory[3];
+    std::vector<double> fxyRe, fxyIm, fzyRe, fzyIm;
+    double fxx = 0.0, fzz = 0.0, fyy = 0.0, attackAlpha = 0.0;
+    std::vector<float> attackLagX, attackLagZ;
+    Peak attackX, attackZ, attackWideZ;
 
     std::vector<float> lagX, lagZ;
     Peak peakX, peakZ, wideZ;

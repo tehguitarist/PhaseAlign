@@ -126,6 +126,8 @@ class MeterScreen : public DesignComponent, private juce::Timer
     void paintLive(juce::Graphics&) const;
     void paintTrace(juce::Graphics&, const std::function<float(int)>& xAt, const std::vector<float>& values,
                     bool processed) const;
+    void paintDashedTrace(juce::Graphics&, const std::function<float(int)>& xAt, const std::vector<float>& values,
+                          bool processed) const;
     void paintPhase(juce::Graphics&) const;
     void paintBands(juce::Graphics&) const;
     void paintLagReadout(juce::Graphics&) const;

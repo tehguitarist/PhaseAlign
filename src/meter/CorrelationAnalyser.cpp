@@ -82,6 +82,30 @@ void CorrelationAnalyser::prepare(double sampleRate)
         bandLo[b] = juce::jlimit(binLo, binHi, (int)std::ceil(bandEdgesHz[b] / binHz));
         bandHi[b] = juce::jlimit(binLo, binHi, (int)std::ceil(bandEdgesHz[b + 1] / binHz) - 1);
     }
+    // Attack features: 4th-order Butterworth high-pass as two biquads (RBJ), and a moving average of |x|.
+    {
+        const auto w0 = 2.0 * juce::MathConstants<double>::pi * attackHighPassHz / fs;
+        const auto cw = std::cos(w0), sw = std::sin(w0);
+        const double qs[2] = {0.5411961, 1.3065630};
+        for (int b = 0; b < 2; ++b)
+        {
+            const auto alphaQ = sw / (2.0 * qs[b]);
+            const auto a0 = 1.0 + alphaQ;
+            hp[b][0] = (1.0 + cw) / 2.0 / a0;
+            hp[b][1] = -(1.0 + cw) / a0;
+            hp[b][2] = hp[b][0];
+            hp[b][3] = -2.0 * cw / a0;
+            hp[b][4] = (1.0 - alphaQ) / a0;
+        }
+        const auto length = std::max(1, juce::roundToInt(attackSmoothMs * 1.0e-3 * fs));
+        for (auto& st : attackStream)
+            st.ring.assign((size_t)length, 0.0);
+        for (auto& f : featHistory)
+            f.assign((size_t)fftSize, 0.0f);
+        for (auto* v : {&fxyRe, &fxyIm, &fzyRe, &fzyIm})
+            v->assign((size_t)numBins, 0.0);
+        attackAlpha = 1.0 - std::exp(-(hop / fs) / ((speed == Speed::slow ? 0.5 : 0.15)));
+    }
     previewRe.assign((size_t)numBins, 0.0);
     previewIm.assign((size_t)numBins, 0.0);
 
@@ -159,6 +183,19 @@ void CorrelationAnalyser::reset()
         std::fill(history[s].begin(), history[s].end(), 0.0f);
     for (auto* v : {&xyRe, &xyIm, &zyRe, &zyIm, &xx, &zz, &yy})
         std::fill(v->begin(), v->end(), 0.0);
+    for (auto& st : attackStream)
+    {
+        st = AttackStream{.ring = std::vector<double>(st.ring.size(), 0.0)};
+        st.previousLog = std::log(1.0e-4);
+    }
+    for (auto& f : featHistory)
+        std::fill(f.begin(), f.end(), 0.0f);
+    for (auto* v : {&fxyRe, &fxyIm, &fzyRe, &fzyIm})
+        std::fill(v->begin(), v->end(), 0.0);
+    fxx = fzz = fyy = 0.0;
+    attackLagX.assign((size_t)(2 * lagHalf + 1), 0.0f);
+    attackLagZ.assign((size_t)(2 * lagHalf + 1), 0.0f);
+    attackX = attackZ = attackWideZ = {};
     writePos = sinceFrame = filled = 0;
     curveX.assign((size_t)curvePoints, notMeasured);
     curveZ.assign((size_t)curvePoints, notMeasured);
@@ -186,6 +223,9 @@ int CorrelationAnalyser::process(const float* in, const float* out, const float*
         history[0][(size_t)writePos] = in[i];
         history[1][(size_t)writePos] = out[i];
         history[2][(size_t)writePos] = sc[i];
+        featHistory[0][(size_t)writePos] = attackFeature(0, in[i]);
+        featHistory[1][(size_t)writePos] = attackFeature(1, out[i]);
+        featHistory[2][(size_t)writePos] = attackFeature(2, sc[i]);
         writePos = (writePos + 1) % fftSize;
         filled = std::min(filled + 1, fftSize);
         if (++sinceFrame >= hop && filled == fftSize)
@@ -198,6 +238,27 @@ int CorrelationAnalyser::process(const float* in, const float* out, const float*
     if (frames > 0)
         updateResults();
     return frames;
+}
+
+float CorrelationAnalyser::attackFeature(int stream, float xIn)
+{
+    auto& st = attackStream[stream];
+    auto x = (double)xIn;
+    for (int b = 0; b < 2; ++b) // transposed direct form II
+    {
+        const auto y = hp[b][0] * x + st.s1[b];
+        st.s1[b] = hp[b][1] * x - hp[b][3] * y + st.s2[b];
+        st.s2[b] = hp[b][2] * x - hp[b][4] * y;
+        x = y;
+    }
+    auto& slot = st.ring[(size_t)st.pos];
+    st.sum += std::abs(x) - slot;
+    slot = std::abs(x);
+    st.pos = (st.pos + 1) % (int)st.ring.size();
+    const auto level = std::log(std::max(st.sum, 0.0) / (double)st.ring.size() + 1.0e-4);
+    const auto rise = std::max(level - st.previousLog, 0.0);
+    st.previousLog = level;
+    return (float)rise;
 }
 
 void CorrelationAnalyser::analyseFrame()
@@ -231,6 +292,37 @@ void CorrelationAnalyser::analyseFrame()
         zz[kk] += a * (zr * zr + zi * zi - zz[kk]);
         yy[kk] += a * (py - yy[kk]);
         framePowerY += py;
+    }
+
+    // The feature signals through the same frame: cross-spectra with the sidechain's, for the attack lag.
+    {
+        std::vector<float>* spec[3] = {&work[0], &work[1], &work[2]}; // free again: the audio's are summed
+        for (int s = 0; s < 3; ++s)
+        {
+            for (int n = 0; n < fftSize; ++n)
+                fftData[(size_t)n] = featHistory[s][(size_t)((writePos + n) % fftSize)] * window[(size_t)n];
+            std::fill(fftData.begin() + fftSize, fftData.end(), 0.0f);
+            fft->performRealOnlyForwardTransform(fftData.data(), true);
+            std::copy(fftData.begin(), fftData.begin() + 2 * numBins, spec[s]->begin());
+        }
+        double px = 0.0, pz = 0.0, py = 0.0;
+        for (int k = 3; k <= binHi; ++k) // clear of DC (the features are all positive) and Nyquist
+        {
+            const auto re = (size_t)(2 * k), im = re + 1;
+            const double zr = (*spec[0])[re], zi = (*spec[0])[im], xr = (*spec[1])[re], xi = (*spec[1])[im],
+                         yr = (*spec[2])[re], yi = (*spec[2])[im];
+            const auto kk = (size_t)k;
+            fxyRe[kk] += attackAlpha * (xr * yr + xi * yi - fxyRe[kk]);
+            fxyIm[kk] += attackAlpha * (xi * yr - xr * yi - fxyIm[kk]);
+            fzyRe[kk] += attackAlpha * (zr * yr + zi * yi - fzyRe[kk]);
+            fzyIm[kk] += attackAlpha * (zi * yr - zr * yi - fzyIm[kk]);
+            px += xr * xr + xi * xi;
+            pz += zr * zr + zi * zi;
+            py += yr * yr + yi * yi;
+        }
+        fxx += attackAlpha * (px - fxx);
+        fzz += attackAlpha * (pz - fzz);
+        fyy += attackAlpha * (py - fyy);
     }
 
     if (windowLevelDb(framePowerY) < gateDb)
@@ -328,6 +420,8 @@ void CorrelationAnalyser::computeLag()
         return;
     lagFunction(xyRe, xyIm, xx, lagX, peakX);
     lagFunction(zyRe, zyIm, zz, lagZ, peakZ, &wideZ);
+    attackFunction(fxyRe, fxyIm, fxx, fyy, attackLagX, attackX, nullptr);
+    attackFunction(fzyRe, fzyIm, fzz, fyy, attackLagZ, attackZ, &attackWideZ);
 }
 
 CorrelationAnalyser::Peak CorrelationAnalyser::inputPeak() const
@@ -337,9 +431,71 @@ CorrelationAnalyser::Peak CorrelationAnalyser::inputPeak() const
 
 bool CorrelationAnalyser::inputOutOfReach(double maxMs) const
 {
-    const auto peak = inputPeak();
+    // The attacks are what the message is about; the waveform's peak stands in where there are none to read.
+    const auto attack = attackInput();
+    const auto peak = attack.clear ? attack : inputPeak();
     const auto halfStepMs = 0.05 * 1000.0 / fs;
     return peak.clear && std::abs(peak.lagMs) > maxMs + halfStepMs;
+}
+
+void CorrelationAnalyser::attackFunction(const std::vector<double>& re, const std::vector<double>& im, double powerA,
+                                         double powerB, std::vector<float>& out, Peak& peak, Peak* wide)
+{
+    // Plain normalised cross-correlation of the feature signals: conj of A·B* at every bin, inverse FFT, divided by
+    // sqrt(Pa Pb) (lagUnit: one unit bin's value at lag 0), so identical signals peak at 1.
+    std::fill(out.begin(), out.end(), 0.0f);
+    peak = {};
+    if (wide != nullptr)
+        *wide = {};
+    if (powerA <= 0.0 || powerB <= 0.0)
+        return;
+    std::fill(fftData.begin(), fftData.end(), 0.0f);
+    for (int k = 3; k <= binHi; ++k)
+    {
+        fftData[(size_t)(2 * k)] = (float)re[(size_t)k];
+        fftData[(size_t)(2 * k + 1)] = (float)-im[(size_t)k];
+    }
+    fft->performRealOnlyInverseTransform(fftData.data());
+    const auto norm = lagUnit * std::sqrt(powerA * powerB);
+    const auto at = [&](int lag) { return (float)(fftData[(size_t)((lag + fftSize) % fftSize)] / norm); };
+    const auto apart = juce::roundToInt(0.1e-3 * fs);
+
+    // The strongest lag in a range, and whether it is clear: strong, and well above everything outside its main lobe.
+    const auto find = [&](int half, Peak& result)
+    {
+        int best = 0;
+        for (int lag = -half; lag <= half; ++lag)
+            if (at(lag) > at(best)) // attacks only line up positively
+                best = lag;
+        int lo = best, hi = best;
+        while (lo > -half && at(lo - 1) > 0.0f)
+            --lo;
+        while (hi < half && at(hi + 1) > 0.0f)
+            ++hi;
+        lo = std::min(lo, best - apart);
+        hi = std::max(hi, best + apart);
+        float runnerUp = 0.0f;
+        for (int lag = -half; lag <= half; ++lag)
+            if (lag < lo || lag > hi)
+                runnerUp = std::max(runnerUp, std::abs(at(lag)));
+        // Parabola on the three samples round the peak.
+        auto offset = 0.0;
+        const double a = at(best - 1), b = at(best), c = at(best + 1);
+        if (a - 2.0 * b + c < 0.0)
+            offset = juce::jlimit(-0.5, 0.5, 0.5 * (a - c) / (a - 2.0 * b + c));
+        result.lagMs = (best + offset) * 1000.0 / fs;
+        result.value = at(best);
+        result.clear = result.value >= 0.12f && runnerUp <= 0.5f * result.value;
+    };
+
+    for (int j = 0; j <= 2 * lagHalf; ++j)
+        out[(size_t)j] = at(j - lagHalf);
+    find(lagHalf, peak);
+    if (wide != nullptr)
+    {
+        find(wideHalf, *wide);
+        wide->coarse = true;
+    }
 }
 
 void CorrelationAnalyser::lagFunction(const std::vector<double>& re, const std::vector<double>& im,

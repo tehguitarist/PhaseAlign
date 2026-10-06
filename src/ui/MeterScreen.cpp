@@ -32,7 +32,7 @@ MeterScreen::MeterScreen(const SourceAssets& assetsIn, meter::MeterCapture& capt
     setOpaque(true);
     setInterceptsMouseClicks(true, false); // only the view labels: see hitTest
     setTooltip("Click a label to switch the view: FREQUENCY, the correlation with the sidechain per frequency; TIME "
-               "OFFSET, how far this track is from the sidechain; PHASE, the angle between them (a slope is a delay, "
+               "OFFSET, how far this track is from the sidechain, by waveform and by attack (for drums); PHASE, the angle between them (a slope is a delay, "
                "a flat offset a rotation); BANDS, the correlation in six wide bands. SLOW or FAST sets the "
                "averaging. HOLD freezes the screen (it also freezes while the host is stopped); frozen, drag across "
                "TIME OFFSET to preview a delay on every view. INPUT is this track before the plugin, OUTPUT after it.");
@@ -530,6 +530,8 @@ void MeterScreen::paintLive(juce::Graphics& g) const
         const auto xAt = [&](int i) { return xForMs(analyser.lagMsAt(i)); };
         paintTrace(g, xAt, analyser.lagUnprocessed(), false);
         paintTrace(g, xAt, analyser.lagProcessed(), true);
+        paintDashedTrace(g, xAt, analyser.attackUnprocessed(), false);
+        paintDashedTrace(g, xAt, analyser.attackProcessed(), true);
         paintLagReadout(g);
     }
     paintPreviewNote(g);
@@ -637,7 +639,7 @@ void MeterScreen::paintPreviewNote(juce::Graphics& g) const
         const auto font = meterFont(assets, 16.0f * s, true);
         // Below the time view's readouts, at the top left elsewhere.
         const auto y = view == View::bands ? ly(design::meterMinusOneY) - 14.0f * s
-                                           : ly(design::meterPlusOneY) + (view == View::time ? 90.0f : 24.0f) * s;
+                                           : ly(design::meterPlusOneY) + (view == View::time ? 112.0f : 24.0f) * s;
         const juce::String note = "PREVIEW  DELAY " + juce::String(ms >= 0.0 ? "+" : "") + juce::String(ms, 3) + " ms";
         g.setColour(design::screenBlack.withAlpha(0.85f));
         g.fillRect(juce::Rectangle<float>(textWidth(font, note) + 16.0f * s, 22.0f * s).withX(x - 8.0f * s).withY(y - 16.0f * s));
@@ -654,7 +656,7 @@ void MeterScreen::paintPreviewNote(juce::Graphics& g) const
     else if (isFrozen() && view == View::time)
     {
         g.setColour(design::meterAxisText.withAlpha(0.5f));
-        drawTextAt(g, meterFont(assets, 12.0f * s), "DRAG TO PREVIEW A DELAY", x, ly(design::meterPlusOneY) + 90.0f * s,
+        drawTextAt(g, meterFont(assets, 12.0f * s), "DRAG TO PREVIEW A DELAY", x, ly(design::meterPlusOneY) + 112.0f * s,
                    juce::Justification::left);
     }
 }
@@ -726,13 +728,42 @@ void MeterScreen::paintTrace(juce::Graphics& g, const std::function<float(int)>&
     }
 }
 
+void MeterScreen::paintDashedTrace(juce::Graphics& g, const std::function<float(int)>& xAt,
+                                   const std::vector<float>& values, bool processed) const
+{
+    const auto s = getScale();
+    juce::Path line;
+    for (int i = 0; i < (int)values.size(); ++i)
+    {
+        const auto x = xAt(i), y = yForR(std::max(0.0f, values[(size_t)i])); // attacks line up positively only
+        if (i == 0)
+            line.startNewSubPath(x, y);
+        else
+            line.lineTo(x, y);
+    }
+    const float dashes[] = {5.0f * s, 4.0f * s};
+    juce::Path dashed;
+    juce::PathStrokeType(1.0f).createDashedStroke(dashed, line, dashes, 2);
+    const auto plot =
+        juce::Rectangle<float>::leftTopRightBottom(lx(design::meterPlotLeft), ly(design::meterPlusOneY),
+                                                   lx(design::meterPlotRight), ly(design::meterMinusOneY));
+    juce::Graphics::ScopedSaveState save(g);
+    g.reduceClipRegion(plot.getSmallestIntegerContainer());
+    g.setColour(design::phosphor.withAlpha(processed ? 0.9f : 0.4f));
+    g.strokePath(dashed, juce::PathStrokeType(juce::jmax(1.0f, 1.6f * s)));
+}
+
 void MeterScreen::paintLagReadout(juce::Graphics& g) const
 {
-    // Where the input's peak sits says how much delay aligns it; the output's should sit at 0 once it is aligned.
+    // Two readings of the offset, for input and output: from the waveforms (best for steady material and mic pairs),
+    // and from the attacks (best for hits whose waveforms differ, such as a kick against a sample). Once aligned,
+    // the output's should sit at 0.
     const auto s = getScale();
     const auto font = meterFont(assets, 16.0f * s, true);
+    const auto small = meterFont(assets, 12.0f * s).withExtraKerningFactor(0.1f);
     const auto x = lx(design::meterPlotLeft) + 14.0f * s;
-    auto y = ly(design::meterPlusOneY) + 24.0f * s;
+    const auto column1 = x + 120.0f * s, column2 = x + 300.0f * s;
+    auto y = ly(design::meterPlusOneY) + 20.0f * s;
 
     const auto describe = [](const meter::CorrelationAnalyser::Peak& p)
     {
@@ -742,16 +773,26 @@ void MeterScreen::paintLagReadout(juce::Graphics& g) const
         // Beyond the view the reading is coarse (whole samples), so it gets one decimal.
         auto text = (ms > 0.0 ? "+" : "") + juce::String(ms, p.coarse ? 1 : 3) + " ms";
         if (p.value < 0.0f)
-            text << " INVERTED";
+            text << " INV";
         return text;
     };
 
+    g.setColour(design::meterAxisText.withAlpha(0.7f));
+    drawTextAt(g, small, "WAVEFORM", column1, y, juce::Justification::left);
+    drawTextAt(g, small, "ATTACK", column2, y, juce::Justification::left);
+    y += 20.0f * s;
+
     const auto in = analyser.inputPeak(), out = analyser.lagPeakProcessed();
+    const auto attackIn = analyser.attackInput(), attackOut = analyser.attackPeakProcessed();
     g.setColour(design::phosphor.withAlpha(0.6f));
-    drawTextAt(g, font, "INPUT   " + describe(in), x, y, juce::Justification::left);
+    drawTextAt(g, font, "INPUT", x, y, juce::Justification::left);
+    drawTextAt(g, font, describe(in), column1, y, juce::Justification::left);
+    drawTextAt(g, font, describe(attackIn), column2, y, juce::Justification::left);
     y += 22.0f * s;
     g.setColour(design::phosphor);
-    drawTextAt(g, font, "OUTPUT  " + describe(out), x, y, juce::Justification::left);
+    drawTextAt(g, font, "OUTPUT", x, y, juce::Justification::left);
+    drawTextAt(g, font, describe(out), column1, y, juce::Justification::left);
+    drawTextAt(g, font, describe(attackOut), column2, y, juce::Justification::left);
 
     // A peak the delay knob can't reach (plan 2.1a), by more than half its 0.1-sample step; up to 40 ms away.
     if (analyser.inputOutOfReach(params::maxDelayMs))
