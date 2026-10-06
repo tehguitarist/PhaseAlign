@@ -133,6 +133,7 @@ class MeterScreen : public DesignComponent, private juce::Timer
     void freezeChanged();
     void showViewMenu();
     void refreshTrigger(bool force);
+    void applyNeeds(); // only the current view's work runs in the analyser (plan R21)
 
     void paintStatic(juce::Graphics&, float pixelScale) const;
     void paintGrid(juce::Graphics&) const;

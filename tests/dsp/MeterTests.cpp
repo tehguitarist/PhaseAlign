@@ -8,6 +8,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <chrono>
 #include <cmath>
 #include <random>
 #include <vector>
@@ -884,5 +885,78 @@ TEST_CASE("preview with the phase stage: a sidechain that is the input through t
         a.setPreview(0.0, false);
         CHECK_FALSE(a.previewHasPhase());
         CHECK(a.overallProcessed() == Approx(before).margin(1e-4));
+    }
+}
+
+TEST_CASE("needs: only the current view's results are worked out, and switching one on fills it at once", "[meter]")
+{
+    const auto fs = 48000.0;
+    const auto d = 62;
+    const auto source = noise((int)(3.0 * fs), 71);
+    CorrelationAnalyser a;
+    a.prepare(fs);
+    a.setNeeds({false, false, false, false}); // ALIGNMENT: nothing but the overall bar
+    feed(a, source, source, delayed(source, d));
+    CHECK_FALSE(std::isnan(a.overallProcessed()));       // always
+    CHECK(std::isnan(a.curveProcessed()[100]));          // not computed
+    CHECK(std::isnan(a.phaseProcessed()[100]));
+    CHECK(std::isnan(a.bandsProcessed()[2]));
+    a.computeLag();
+    CHECK_FALSE(a.attackInput().clear);                  // no attack features were running
+
+    a.setNeeds({true, false, true, false});              // FREQUENCY and BANDS at once: filled from the averages
+    CHECK_FALSE(std::isnan(a.curveProcessed()[100]));
+    CHECK_FALSE(std::isnan(a.bandsProcessed()[2]));
+    CHECK(std::isnan(a.phaseProcessed()[100]));
+    a.setNeeds({false, true, false, false});
+    CHECK_FALSE(std::isnan(a.phaseProcessed()[100]));
+
+    // The attack starts from nothing when switched on, and finds the delay once it has a second of audio.
+    a.setNeeds({false, false, false, true});
+    const auto more = noise((int)(3.0 * fs), 72);
+    feed(a, more, more, delayed(more, d));
+    for (int i = 0; i < 10; ++i)
+        a.computeLag();
+    CHECK(a.attackInput().lagMs == Approx(1000.0 * d / fs).margin(0.05));
+}
+
+// Hidden, Release: what the analyser costs per second of audio for each view's needs (plan R21). The averages the overall
+// bar needs always run; the rest is per view.
+TEST_CASE("analyser cost by view", "[.analysercost]")
+{
+    const auto fs = 48000.0;
+    const auto seconds = 20;
+    const auto x = noise((int)(seconds * fs), 61), y = delayed(x, 60);
+    struct Config
+    {
+        const char* name;
+        CorrelationAnalyser::Needs needs;
+    };
+    const Config configs[] = {{"everything on (before)", {true, true, true, true}},
+                              {"FREQUENCY", {true, false, false, false}},
+                              {"PHASE", {false, true, false, false}},
+                              {"BANDS", {false, false, true, false}},
+                              {"TIME OFFSET (+ lag at 30 Hz)", {false, false, false, true}},
+                              {"ALIGNMENT (nothing but the overall bar)", {false, false, false, false}}};
+    for (const auto speed : {CorrelationAnalyser::Speed::slow, CorrelationAnalyser::Speed::fast})
+    {
+        std::printf("%s\n", speed == CorrelationAnalyser::Speed::slow ? "slow (frame 8192)" : "fast (frame 4096)");
+        for (const auto& c : configs)
+        {
+            CorrelationAnalyser a;
+            a.prepare(fs);
+            a.setSpeed(speed);
+            a.setNeeds(c.needs);
+            const auto start = std::chrono::steady_clock::now();
+            for (size_t pos = 0; pos + 1600 <= x.size(); pos += 1600)
+            {
+                a.process(x.data() + pos, x.data() + pos, y.data() + pos, 1600);
+                if (c.needs.attack)
+                    a.computeLag(); // the screen does this at its 30 Hz in the time view
+            }
+            const auto elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+            std::printf("  %-42s %6.2f ms per second of audio (%.2f%% of a core)\n", c.name, 1000.0 * elapsed / seconds,
+                        100.0 * elapsed / seconds);
+        }
     }
 }

@@ -51,6 +51,18 @@ class CorrelationAnalyser
     static int fftSizeFor(double sampleRate, Speed speed = Speed::slow);
 
     void prepare(double sampleRate);
+    // What the screen's current view needs (plan R21): only that work runs. The per-bin averages that the overall bar
+    // and every view are built from always run (three FFTs a frame); the rest is per view: the curve (FREQUENCY), the
+    // phase angles (PHASE), the six bands (BANDS), and the attack features (TIME OFFSET: three bands of filters on each
+    // of three streams, and nine more FFTs a frame). Switching one on fills it at once from the averages, except the
+    // attack, whose own average starts again (about a second to settle).
+    struct Needs
+    {
+        bool curve = true, phase = true, bands = true, attack = true;
+    };
+    void setNeeds(const Needs&);
+    const Needs& getNeeds() const { return needs; }
+
     void setSpeed(Speed);
     Speed getSpeed() const { return speed; }
     double getSampleRate() const { return fs; }
@@ -192,6 +204,8 @@ class CorrelationAnalyser
     double powerToMeanSquare = 0.0, lagNorm = 1.0, lagUnit = 1.0; // lagUnit: one unit-weight bin's value at lag 0
     std::vector<double> lagWeight, lagFloor; // per bin: the weight and the coherence below which it is zero
 
+    Needs needs;
+    void resetAttack();
     Speed speed = Speed::slow;
     bool previewActive = false, previewInverted = false;
     PhaseResponse previewPhase;

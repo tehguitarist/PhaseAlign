@@ -46,6 +46,17 @@ MeterScreen::MeterScreen(const SourceAssets& assetsIn, meter::MeterCapture& capt
         analyser.prepare(capture.getSampleRate());
         scopeBuffer.prepare(capture.getSampleRate());
     }
+    applyNeeds();
+}
+
+void MeterScreen::applyNeeds()
+{
+    meter::CorrelationAnalyser::Needs needs;
+    needs.curve = view == View::frequency;
+    needs.phase = view == View::phase;
+    needs.bands = view == View::bands;
+    needs.attack = view == View::time;
+    analyser.setNeeds(needs); // ALIGNMENT needs none: its waveforms come from the scope buffer
 }
 
 MeterScreen::~MeterScreen()
@@ -66,6 +77,7 @@ void MeterScreen::setView(View newView)
     if (newView == view)
         return;
     view = newView;
+    applyNeeds();
     if (view == View::time)
         analyser.computeLag(isFrozen());
     if (view == View::scope)

@@ -207,12 +207,8 @@ float CorrelationAnalyser::lagUnprocessedAt(double ms) const
     return lagZ[(size_t)j];
 }
 
-void CorrelationAnalyser::reset()
+void CorrelationAnalyser::resetAttack()
 {
-    for (int s = 0; s < 3; ++s)
-        std::fill(history[s].begin(), history[s].end(), 0.0f);
-    for (auto* v : {&xyRe, &xyIm, &zyRe, &zyIm, &xx, &zz, &yy})
-        std::fill(v->begin(), v->end(), 0.0);
     for (int band = 0; band < numAttackBands; ++band)
     {
         for (int stream = 0; stream < 3; ++stream)
@@ -234,6 +230,29 @@ void CorrelationAnalyser::reset()
     attackLagZ.assign((size_t)(2 * lagHalf + 1), 0.0f);
     attackX = attackZ = attackWideZ = {};
     steadyX = steadyZ = steadyWideZ = {};
+}
+
+void CorrelationAnalyser::setNeeds(const Needs& wanted)
+{
+    const auto newAttack = wanted.attack && ! needs.attack;
+    const auto newResults = (wanted.curve && ! needs.curve) || (wanted.phase && ! needs.phase) ||
+                            (wanted.bands && ! needs.bands);
+    needs = wanted;
+    if (fft == nullptr)
+        return;
+    if (newAttack)
+        resetAttack(); // its filters and averages weren't running: start from nothing
+    if (newResults)
+        updateResults(); // from the averages, which always run
+}
+
+void CorrelationAnalyser::reset()
+{
+    for (int s = 0; s < 3; ++s)
+        std::fill(history[s].begin(), history[s].end(), 0.0f);
+    for (auto* v : {&xyRe, &xyIm, &zyRe, &zyIm, &xx, &zz, &yy})
+        std::fill(v->begin(), v->end(), 0.0);
+    resetAttack();
     writePos = sinceFrame = filled = 0;
     curveX.assign((size_t)curvePoints, notMeasured);
     curveZ.assign((size_t)curvePoints, notMeasured);
@@ -261,7 +280,7 @@ int CorrelationAnalyser::process(const float* in, const float* out, const float*
         history[0][(size_t)writePos] = in[i];
         history[1][(size_t)writePos] = out[i];
         history[2][(size_t)writePos] = sc[i];
-        for (int band = 0; band < numAttackBands; ++band)
+        for (int band = 0; needs.attack && band < numAttackBands; ++band)
         {
             featHistory[0][band][(size_t)writePos] = attackFeature(0, band, in[i]);
             featHistory[1][band][(size_t)writePos] = attackFeature(1, band, out[i]);
@@ -338,7 +357,7 @@ void CorrelationAnalyser::analyseFrame()
     }
 
     // The feature signals through the same frame: cross-spectra with the sidechain's, for the attack lag.
-    for (int band = 0; band < numAttackBands; ++band)
+    for (int band = 0; needs.attack && band < numAttackBands; ++band)
     {
         std::vector<float>* spec[3] = {&work[0], &work[1], &work[2]}; // free again: the audio's are summed
         for (int s = 0; s < 3; ++s)
@@ -450,12 +469,18 @@ void CorrelationAnalyser::updateResults()
 
     for (size_t i = 0; i < (size_t)curvePoints; ++i)
     {
-        curveX[i] = correlation(*pRe, *pPow, curveLo[i], curveHi[i]);
-        curveZ[i] = correlation(zyRe, zz, curveLo[i], curveHi[i]);
-        phase(*pRe, *pIm, *pPow, phaseLo[i], phaseHi[i], phaseX[i], cohX[i]);
-        phase(zyRe, zyIm, zz, phaseLo[i], phaseHi[i], phaseZ[i], cohZ[i]);
+        if (needs.curve)
+        {
+            curveX[i] = correlation(*pRe, *pPow, curveLo[i], curveHi[i]);
+            curveZ[i] = correlation(zyRe, zz, curveLo[i], curveHi[i]);
+        }
+        if (needs.phase)
+        {
+            phase(*pRe, *pIm, *pPow, phaseLo[i], phaseHi[i], phaseX[i], cohX[i]);
+            phase(zyRe, zyIm, zz, phaseLo[i], phaseHi[i], phaseZ[i], cohZ[i]);
+        }
     }
-    for (int b = 0; b < numBands; ++b)
+    for (int b = 0; needs.bands && b < numBands; ++b)
     {
         bandX[(size_t)b] = correlation(*pRe, *pPow, bandLo[b], bandHi[b]);
         bandZ[(size_t)b] = correlation(zyRe, zz, bandLo[b], bandHi[b]);
@@ -508,6 +533,8 @@ void CorrelationAnalyser::computeLag(bool settled)
         return;
     lagFunction(xyRe, xyIm, xx, lagX, peakX);
     lagFunction(zyRe, zyIm, zz, lagZ, peakZ, &wideZ);
+    if (! needs.attack)
+        return;
     attackFunction(true, attackLagX, attackX, nullptr, steadyX, steadyX);
     attackFunction(false, attackLagZ, attackZ, &attackWideZ, steadyZ, steadyWideZ);
     attackX.clear = steadyX.update(attackX, settled);
