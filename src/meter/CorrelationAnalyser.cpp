@@ -9,6 +9,7 @@ namespace pa::meter
 namespace
 {
 constexpr float attackMinValue = 0.03f; // below this a peak is too weak to be an offset, however it compares
+constexpr float attackRunnerUpRatio = 0.65f; // the runner-up outside the main lobe may be this much of the peak
 constexpr float notMeasured = std::numeric_limits<float>::quiet_NaN();
 }
 
@@ -463,6 +464,7 @@ bool CorrelationAnalyser::Steadiness::update(Peak& peak, bool settled)
         }
         count = steadyCount;
     }
+    ++sinceShown;
     if (count < steadyCount)
         return false;
     double values[steadyCount];
@@ -480,6 +482,8 @@ bool CorrelationAnalyser::Steadiness::update(Peak& peak, bool settled)
     if (near < steadyNeeded)
         return false;
     peak.lagMs = median;
+    lastLag = median;
+    sinceShown = 0;
     return true;
 }
 
@@ -489,8 +493,8 @@ void CorrelationAnalyser::computeLag(bool settled)
         return;
     lagFunction(xyRe, xyIm, xx, lagX, peakX);
     lagFunction(zyRe, zyIm, zz, lagZ, peakZ, &wideZ);
-    attackFunction(true, attackLagX, attackX, nullptr);
-    attackFunction(false, attackLagZ, attackZ, &attackWideZ);
+    attackFunction(true, attackLagX, attackX, nullptr, steadyX, steadyX);
+    attackFunction(false, attackLagZ, attackZ, &attackWideZ, steadyZ, steadyWideZ);
     attackX.clear = steadyX.update(attackX, settled);
     attackZ.clear = steadyZ.update(attackZ, settled);
     attackWideZ.clear = steadyWideZ.update(attackWideZ, settled);
@@ -510,7 +514,8 @@ bool CorrelationAnalyser::inputOutOfReach(double maxMs) const
     return peak.clear && std::abs(peak.lagMs) > maxMs + halfStepMs;
 }
 
-void CorrelationAnalyser::attackFunction(bool processed, std::vector<float>& out, Peak& peak, Peak* wide)
+void CorrelationAnalyser::attackFunction(bool processed, std::vector<float>& out, Peak& peak, Peak* wide,
+                                         const Steadiness& steady, const Steadiness& steadyWide)
 {
     // Per band, the plain normalised cross-correlation of the feature signals: conj of A·B* at every bin, inverse FFT,
     // divided by sqrt(Pa Pb) (lagUnit: one unit bin's value at lag 0), so identical signals peak at 1. The bands'
@@ -547,12 +552,20 @@ void CorrelationAnalyser::attackFunction(bool processed, std::vector<float>& out
     const auto apart = juce::roundToInt(0.1e-3 * fs);
 
     // The strongest lag in a range, and whether it is clear: strong, and well above everything outside its main lobe.
-    const auto find = [&](int half, Peak& result)
+    const auto find = [&](int half, Peak& result, const Steadiness& incumbent)
     {
         int best = 0;
         for (int lag = -half; lag <= half; ++lag)
             if (at(lag) > at(best)) // attacks only line up positively
                 best = lag;
+        // The peak we have been showing keeps the position unless a rival is clearly stronger (by a third): two
+        // peaks of about the same strength shouldn't take turns.
+        if (incumbent.incumbent())
+        {
+            const auto held = juce::roundToInt(incumbent.lastLag * fs / 1000.0);
+            if (std::abs(held) <= half && at(held) > 0.0f && at(held) * 1.33f >= at(best))
+                best = held;
+        }
         int lo = best, hi = best;
         while (lo > -half && at(lo - 1) > 0.0f)
             --lo;
@@ -571,15 +584,16 @@ void CorrelationAnalyser::attackFunction(bool processed, std::vector<float>& out
             offset = juce::jlimit(-0.5, 0.5, 0.5 * (a - c) / (a - 2.0 * b + c));
         result.lagMs = (best + offset) * 1000.0 / fs;
         result.value = at(best);
-        result.clear = result.value >= attackMinValue && runnerUp <= 0.5f * result.value;
+        result.runnerUp = runnerUp;
+        result.clear = result.value >= attackMinValue && runnerUp <= attackRunnerUpRatio * result.value;
     };
 
     for (int j = 0; j <= 2 * lagHalf; ++j)
         out[(size_t)j] = at(j - lagHalf);
-    find(lagHalf, peak);
+    find(lagHalf, peak, steady);
     if (wide != nullptr)
     {
-        find(wideHalf, *wide);
+        find(wideHalf, *wide, steadyWide);
         wide->coarse = true;
     }
 }

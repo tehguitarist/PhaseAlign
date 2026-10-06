@@ -100,6 +100,7 @@ class CorrelationAnalyser
         float value = 0.0f;
         bool clear = false;  // strong and well above everything else in the range
         bool coarse = false; // from the wide search: to the nearest sample, beyond the time view
+        float runnerUp = 0.0f; // the strongest value outside the peak's main lobe (attack readings; for tuning)
     };
     // `settled`: the screen is frozen (or just switched to this view), so the current picture is all there is to go
     // on: readings count as steady straight away.
@@ -117,15 +118,15 @@ class CorrelationAnalyser
     // Attack view (R18): the same offsets read from the ATTACKS of the signals, not their waveforms, for material
     // whose waveforms don't match (a kick against a kick sample: different pitch, tail and click, so the waveform
     // lag lands on whatever the sub bass happens to line up on). Each stream is split into three bands (so a snare's
-    // top, a guitar's mids and a bass note's body each get their say), and in each band rectified, smoothed (longer
-    // for lower bands), taken to the log, and only its rises kept (log-envelope flux). The cross-correlation of those,
+    // top, a guitar's mids and a bass note's body each get their say), and in each band rectified, smoothed (over about a
+    // cycle of the band's lower notes, or a note's own ripple reads as repeated attacks), taken to the log, and only its rises kept (log-envelope flux). The cross-correlation of those,
     // normalised per band and averaged over the bands, peaks where the attacks line up. Computed with computeLag().
     struct AttackBand
     {
         double lowHz, highHz, smoothMs; // highHz 0: no upper limit
     };
     static constexpr int numAttackBands = 3;
-    static constexpr AttackBand attackBands[numAttackBands] = {{35.0, 150.0, 4.0}, {150.0, 600.0, 1.5}, {600.0, 0.0, 1.0}};
+    static constexpr AttackBand attackBands[numAttackBands] = {{35.0, 150.0, 12.0}, {150.0, 600.0, 5.0}, {600.0, 0.0, 1.5}};
     Peak attackPeakProcessed() const { return attackX; }
     Peak attackPeakUnprocessed() const { return attackInput(); }
     const std::vector<float>& attackProcessed() const { return attackLagX; }
@@ -147,23 +148,29 @@ class CorrelationAnalyser
     void setAlpha();
     void lagFunction(const std::vector<double>& re, const std::vector<double>& im, const std::vector<double>& power,
                      std::vector<float>& out, Peak& peak, Peak* wide = nullptr);
-    double windowLevelDb(double powerSum) const;
-    void attackFunction(bool processed, std::vector<float>& out, Peak& peak, Peak* wide);
+    double windowLevelDb(double powerSum) const; // mean-square level, in dBFS, of a sum of |X|² over bins
 
     // A reading is only called clear once most of the last few computations agree (a hit that has just landed can
     // put a spurious peak up for a frame, and between hits a clear one can lapse): at least steadyNeeded of the last
     // steadyCount are clear and within steadyMs of each other. Its lag is then their median, which doesn't jitter.
     static constexpr int steadyCount = 8, steadyNeeded = 6;
     static constexpr double steadyMs = 0.3;
+    static constexpr int incumbentFrames = 60; // about 2 s at the screen's 30 Hz
     struct Steadiness
     {
         double lag[steadyCount] = {};
         bool clear[steadyCount] = {};
         int count = 0, pos = 0;
+        double lastLag = 0.0;     // the last lag shown...
+        int sinceShown = 1 << 20; // ...and how many computations ago: for a while it is the incumbent, which keeps
+                                  // the peak when a rival is not clearly stronger
+        bool incumbent() const { return sinceShown < incumbentFrames; }
         bool update(Peak&, bool settled); // true: clear; sets the peak's lag to the median of the clear ones
     };
     Steadiness steadyX, steadyZ, steadyWideZ;
-    float attackFeature(int stream, int band, float x); // mean-square level, in dBFS, of a sum of |X|² over bins
+    void attackFunction(bool processed, std::vector<float>& out, Peak& peak, Peak* wide, const Steadiness& steady,
+                        const Steadiness& steadyWide);
+    float attackFeature(int stream, int band, float x);
 
     double fs = 0.0;
     int fftSize = 0, hop = 0, numBins = 0, lagHalf = 0, wideHalf = 0, binLo = 0, binHi = 0;

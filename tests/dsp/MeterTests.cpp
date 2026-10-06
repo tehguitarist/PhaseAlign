@@ -635,3 +635,40 @@ TEST_CASE("the user's pairs: the attack lag finds the offset between the hits", 
                 CHECK(clear >= readings * c.minClear);
         }
 }
+
+// Hidden, for tuning: the raw attack peak (before the steadiness rule) every 0.25 s from the start.
+TEST_CASE("attack peak trace", "[.attacktrace]")
+{
+    const auto load = [](const std::string& path)
+    {
+        std::vector<float> v;
+        if (auto* f = std::fopen(path.c_str(), "rb"))
+        {
+            std::fseek(f, 0, SEEK_END);
+            v.resize((size_t)std::ftell(f) / sizeof(float));
+            std::rewind(f);
+            REQUIRE(std::fread(v.data(), sizeof(float), v.size(), f) == v.size());
+            std::fclose(f);
+        }
+        return v;
+    };
+    const auto fs = 48000.0;
+    for (const char* name : {"kick", "bass"})
+    {
+        const auto a1 = load(std::string("captures/") + name + "_a.f32"), a2 = load(std::string("captures/") + name + "_b.f32");
+        CorrelationAnalyser a;
+        a.prepare(fs);
+        std::printf("%s\n  t     lag    value  runnerUp/value  raw-clear  shown-clear\n", name);
+        for (size_t pos = 0; pos + 1600 < std::min(a1.size(), a2.size()) && pos < (size_t)(fs * 30); pos += 1600)
+        {
+            a.process(a1.data() + pos, a1.data() + pos, a2.data() + pos, 1600);
+            a.computeLag();
+            if (pos % (size_t)(fs * 0.5) < 1600 && (std::string(name) == "bass" ? pos < (size_t)(fs * 14) : ! a.attackInput().clear))
+            {
+                const auto t = a.attackInput();
+                std::printf("%5.1f  %+6.2f  %.3f  %5.2f  %s\n", pos / fs, t.lagMs, t.value,
+                            t.value > 0 ? t.runnerUp / t.value : 9.0f, t.clear ? "shown" : "-");
+            }
+        }
+    }
+}
