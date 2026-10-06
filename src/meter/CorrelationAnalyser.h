@@ -22,11 +22,21 @@ namespace pa::meter
 class CorrelationAnalyser
 {
   public:
+    // Averaging speed (R17): slow is P4's setting (settles in about 0.75 s); fast trades steadiness for a display
+    // that follows the knobs (settles in about a third of that).
+    enum class Speed
+    {
+        slow,
+        fast
+    };
     static constexpr double tauFloorSeconds = 0.3, tauCycles = 8.0;
+    static constexpr double fastTauFloorSeconds = 0.1, fastTauCycles = 3.0;
     static constexpr double gateDb = -70.0; // a signal below this in a window is not measured
     static constexpr double minHz = 20.0, maxHz = 20000.0;
     static constexpr int curvePoints = 256; // log-spaced, minHz to maxHz (or just below Nyquist)
     static constexpr double curveSmoothingOctaves = 1.0 / 6.0;
+    static constexpr double phaseSmoothingOctaves = 1.0 / 24.0; // narrower: a delay turns the phase fast with frequency
+    static constexpr float minPhaseCoherence = 0.2f;           // the least coherence worth drawing; narrow windows need more (see .cpp)
     static constexpr double lagRangeMs = 5.0;      // the time view shows -5 to +5 ms
     static constexpr double wideLagRangeMs = 40.0; // and a coarse search beyond it, well inside the frame
 
@@ -34,6 +44,8 @@ class CorrelationAnalyser
     static int fftSizeFor(double sampleRate);
 
     void prepare(double sampleRate);
+    void setSpeed(Speed);
+    Speed getSpeed() const { return speed; }
     double getSampleRate() const { return fs; }
     void reset();
 
@@ -44,6 +56,25 @@ class CorrelationAnalyser
     const std::vector<float>& curveFrequencies() const { return curveHz; }
     const std::vector<float>& curveProcessed() const { return curveX; }
     const std::vector<float>& curveUnprocessed() const { return curveZ; }
+
+    // Phase view: the angle of the cross-spectrum with the sidechain per curve point, in degrees (-180 to 180;
+    // positive = this track leads), with its coherence (|cross| / sqrt(power product), 0 to 1). NaN where gated or
+    // where the coherence is below minPhaseCoherence.
+    const std::vector<float>& phaseProcessed() const { return phaseX; }
+    const std::vector<float>& phaseUnprocessed() const { return phaseZ; }
+    const std::vector<float>& phaseProcessedCoherence() const { return cohX; }
+    const std::vector<float>& phaseUnprocessedCoherence() const { return cohZ; }
+
+    // Preview (R17, used while the screen is held): what the processed results would be if the delay knob were set
+    // to `ms` with the phase stage off, worked out from the input's averaged cross-spectrum by turning every bin by
+    // its own delay phase. Replaces the processed curve, phase and overall values until cleared; touches nothing
+    // else. Exact for the pure delay the plugin applies.
+    void setPreviewDelayMs(double ms);
+    void clearPreview();
+    bool isPreviewing() const { return previewActive; }
+    double previewDelayMs() const { return previewMs; }
+    // The time view's value for the input at a lag (nearest sample), for the scrub readout.
+    float lagUnprocessedAt(double ms) const;
 
     // Overall broadband r, NaN while gated.
     float overallProcessed() const { return overallX; }
@@ -81,6 +112,7 @@ class CorrelationAnalyser
   private:
     void analyseFrame();
     void updateResults();
+    void setAlpha();
     void lagFunction(const std::vector<double>& re, const std::vector<double>& im, std::vector<float>& out, Peak& peak,
                      Peak* wide = nullptr);
     double windowLevelDb(double powerSum) const; // mean-square level, in dBFS, of a sum of |X|² over bins
@@ -96,8 +128,14 @@ class CorrelationAnalyser
     std::vector<double> xyRe, xyIm, zyRe, zyIm, xx, zz, yy;
     double powerToMeanSquare = 0.0, lagNorm = 1.0;
 
-    std::vector<float> curveHz, curveX, curveZ;
-    std::vector<int> curveLo, curveHi; // bin range per curve point, inclusive
+    Speed speed = Speed::slow;
+    bool previewActive = false;
+    double previewMs = 0.0;
+    std::vector<double> previewRe, previewIm;
+
+    std::vector<float> curveHz, curveX, curveZ, phaseX, phaseZ, cohX, cohZ;
+    std::vector<int> curveLo, curveHi;     // bin range per curve point, inclusive
+    std::vector<int> phaseLo, phaseHi;     // the same for the phase view's narrower windows
     float overallX = 0.0f, overallZ = 0.0f;
 
     std::vector<float> lagX, lagZ;

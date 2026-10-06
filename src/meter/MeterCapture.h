@@ -55,6 +55,18 @@ class MeterCapture
 
     void setSidechainPresent(bool present) { sidechainPresent.store(present, std::memory_order_relaxed); }
 
+    // The host's transport, when it says (not every host, and not the standalone app, does). The screen freezes while
+    // a host that reports it is stopped.
+    void setTransport(bool known, bool playing)
+    {
+        transportKnown.store(known, std::memory_order_relaxed);
+        transportPlaying.store(playing, std::memory_order_relaxed);
+    }
+    bool isTransportStopped() const
+    {
+        return transportKnown.load(std::memory_order_relaxed) && ! transportPlaying.load(std::memory_order_relaxed);
+    }
+
     double getSampleRate() const { return sampleRate.load(); }
 
     bool hasSidechain() const { return sidechainPresent.load(std::memory_order_relaxed); }
@@ -140,7 +152,7 @@ class MeterCapture
 
     juce::AbstractFifo fifo{capacity};
     std::array<std::vector<float>, numStreams> buffers;
-    std::atomic<bool> active{false}, sidechainPresent{false};
+    std::atomic<bool> active{false}, sidechainPresent{false}, transportKnown{false}, transportPlaying{false};
     std::atomic<double> sampleRate{48000.0};
 
     // Audio thread only.

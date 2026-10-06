@@ -340,3 +340,111 @@ TEST_CASE("offsets beyond the time view are found coarsely and read as out of th
     CHECK_FALSE(a.inputPeak().clear);
     CHECK_FALSE(a.inputOutOfReach(4.0));
 }
+
+TEST_CASE("fast averaging follows a change sooner than slow", "[meter]")
+{
+    const auto fs = 48000.0;
+    const auto source = noise((int)(4.0 * fs), 5);
+    auto inverted = source;
+    for (auto& v : inverted)
+        v = -v;
+
+    CorrelationAnalyser slow, fast;
+    slow.prepare(fs);
+    fast.prepare(fs);
+    fast.setSpeed(CorrelationAnalyser::Speed::fast);
+    CHECK(fast.getSpeed() == CorrelationAnalyser::Speed::fast);
+
+    // 3 s of a perfect match, then 0.3 s of the opposite.
+    feed(slow, source, source, source);
+    feed(fast, source, source, source);
+    const std::vector<float> head(source.begin(), source.begin() + (int)(0.3 * fs));
+    const std::vector<float> flipped(inverted.begin(), inverted.begin() + (int)(0.3 * fs));
+    feed(slow, head, head, flipped);
+    feed(fast, head, head, flipped);
+    CHECK(slow.overallProcessed() > fast.overallProcessed());
+    CHECK(fast.overallProcessed() < 0.0f); // fast has turned over, slow hasn't
+    CHECK(slow.overallProcessed() > 0.0f);
+}
+
+TEST_CASE("preview: the input as it would read with the delay knob set; clearing restores the output", "[meter]")
+{
+    for (const auto fs : {44100.0, 48000.0, 96000.0})
+    {
+        INFO("fs " << fs);
+        const auto d = (int)std::lround(0.0013 * fs);
+        const auto source = noise((int)(3.0 * fs), 6);
+        const auto sidechain = delayed(source, d);
+
+        CorrelationAnalyser a;
+        a.prepare(fs);
+        feed(a, source, source, sidechain); // the plugin is doing nothing
+        const auto before = a.overallProcessed();
+        const auto beforeInput = a.overallUnprocessed();
+        CHECK(std::abs(before) < 0.3f);
+
+        a.setPreviewDelayMs(1000.0 * d / fs);
+        CHECK(a.isPreviewing());
+        CHECK(a.overallProcessed() > 0.999f);
+        CHECK(minMeasured(a.curveProcessed()) > 0.99);
+        CHECK(a.overallUnprocessed() == beforeInput); // the input trace never moves
+
+        // Half a millisecond off is worse than right.
+        a.setPreviewDelayMs(1000.0 * d / fs + 0.5);
+        CHECK(a.overallProcessed() < 0.9f);
+
+        a.clearPreview();
+        CHECK_FALSE(a.isPreviewing());
+        CHECK(a.overallProcessed() == before);
+    }
+}
+
+TEST_CASE("phase view: a delay is a slope, a polarity flip is 180, noise is not drawn", "[meter]")
+{
+    const auto fs = 48000.0;
+    const auto d = 62; // 1.29 ms
+    const auto source = noise((int)(3.0 * fs), 7);
+    const auto sidechain = delayed(source, d);
+
+    CorrelationAnalyser a;
+    a.prepare(fs);
+    feed(a, source, source, sidechain);
+    const auto& hz = a.curveFrequencies();
+    int checked = 0;
+    for (size_t i = 0; i < hz.size(); ++i)
+        if (hz[i] > 40.0f && hz[i] < 300.0f)
+        {
+            INFO(hz[i] << " Hz");
+            REQUIRE_FALSE(std::isnan(a.phaseProcessed()[i]));
+            auto expected = std::fmod(360.0 * hz[i] * d / fs + 180.0, 360.0) - 180.0;
+            CHECK(a.phaseProcessed()[i] == Approx(expected).margin(8.0));
+            CHECK(a.phaseProcessedCoherence()[i] > 0.9f);
+            ++checked;
+        }
+    CHECK(checked > 20);
+
+    // Previewing the right delay flattens it to 0 right across the spectrum, high frequencies included.
+    a.setPreviewDelayMs(1000.0 * d / fs);
+    for (size_t i = 0; i < hz.size(); ++i)
+        if (! std::isnan(a.phaseProcessed()[i]))
+            CHECK(std::abs(a.phaseProcessed()[i]) < 5.0f);
+    CHECK_FALSE(std::isnan(a.phaseProcessed()[hz.size() - 20])); // near 15 kHz: only the preview keeps it coherent
+    a.clearPreview();
+
+    auto inverted = source;
+    for (auto& v : inverted)
+        v = -v;
+    CorrelationAnalyser b;
+    b.prepare(fs);
+    feed(b, source, source, inverted);
+    for (size_t i = 20; i < hz.size() - 20; i += 10)
+        CHECK(std::abs(b.phaseProcessed()[i]) > 170.0f);
+
+    CorrelationAnalyser c;
+    c.prepare(fs);
+    feed(c, source, source, noise((int)(3.0 * fs), 8));
+    int drawn = 0;
+    for (const auto v : c.phaseProcessed())
+        drawn += std::isnan(v) ? 0 : 1;
+    CHECK(drawn < (int)hz.size() / 4);
+}

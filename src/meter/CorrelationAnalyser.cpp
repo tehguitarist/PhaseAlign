@@ -47,13 +47,7 @@ void CorrelationAnalyser::prepare(double sampleRate)
     binLo = (int)std::ceil(minHz / binHz);
     binHi = std::min((int)std::floor(maxHz / binHz), numBins - 2);
 
-    const auto hopSeconds = hop / fs;
-    alpha.resize((size_t)numBins);
-    for (int k = 0; k < numBins; ++k)
-    {
-        const auto tau = std::max(tauFloorSeconds, tauCycles / std::max(k * binHz, 1.0e-3));
-        alpha[(size_t)k] = 1.0 - std::exp(-hopSeconds / tau);
-    }
+    setAlpha();
     for (auto* v : {&xyRe, &xyIm, &zyRe, &zyIm, &xx, &zz, &yy})
         v->assign((size_t)numBins, 0.0);
 
@@ -63,17 +57,27 @@ void CorrelationAnalyser::prepare(double sampleRate)
     curveHz.resize(curvePoints);
     curveLo.resize(curvePoints);
     curveHi.resize(curvePoints);
+    phaseLo.resize(curvePoints);
+    phaseHi.resize(curvePoints);
+    const auto phaseHalf = std::pow(2.0, phaseSmoothingOctaves / 2.0);
+    const auto windowFor = [&](double f, double halfWidth, std::vector<int>& los, std::vector<int>& his, int i)
+    {
+        auto lo = (int)std::ceil(f / halfWidth / binHz);
+        auto hi = (int)std::ceil(f * halfWidth / binHz) - 1;
+        if (hi < lo)
+            lo = hi = juce::roundToInt(f / binHz);
+        los[(size_t)i] = juce::jlimit(binLo, binHi, lo);
+        his[(size_t)i] = juce::jlimit(binLo, binHi, hi);
+    };
     for (int i = 0; i < curvePoints; ++i)
     {
         const auto f = minHz * std::pow(top / minHz, (double)i / (curvePoints - 1));
-        auto lo = (int)std::ceil(f / half / binHz);
-        auto hi = (int)std::ceil(f * half / binHz) - 1;
-        if (hi < lo)
-            lo = hi = juce::roundToInt(f / binHz);
         curveHz[(size_t)i] = (float)f;
-        curveLo[(size_t)i] = juce::jlimit(binLo, binHi, lo);
-        curveHi[(size_t)i] = juce::jlimit(binLo, binHi, hi);
+        windowFor(f, half, curveLo, curveHi, i);
+        windowFor(f, phaseHalf, phaseLo, phaseHi, i);
     }
+    previewRe.assign((size_t)numBins, 0.0);
+    previewIm.assign((size_t)numBins, 0.0);
 
     // The time view's scale: a pure delay (unit cross-spectrum in every band bin) peaks at exactly 1.
     lagHalf = juce::roundToInt(lagRangeMs * fs / 1000.0);
@@ -87,6 +91,51 @@ void CorrelationAnalyser::prepare(double sampleRate)
     reset();
 }
 
+void CorrelationAnalyser::setAlpha()
+{
+    const auto binHz = fs / fftSize, hopSeconds = hop / fs;
+    const auto floor = speed == Speed::slow ? tauFloorSeconds : fastTauFloorSeconds;
+    const auto cycles = speed == Speed::slow ? tauCycles : fastTauCycles;
+    alpha.resize((size_t)numBins);
+    for (int k = 0; k < numBins; ++k)
+    {
+        const auto tau = std::max(floor, cycles / std::max(k * binHz, 1.0e-3));
+        alpha[(size_t)k] = 1.0 - std::exp(-hopSeconds / tau);
+    }
+}
+
+void CorrelationAnalyser::setSpeed(Speed newSpeed)
+{
+    speed = newSpeed;
+    if (fft != nullptr)
+        setAlpha(); // the averages carry on from where they are
+}
+
+void CorrelationAnalyser::setPreviewDelayMs(double ms)
+{
+    previewActive = true;
+    previewMs = ms;
+    if (fft != nullptr)
+        updateResults();
+}
+
+void CorrelationAnalyser::clearPreview()
+{
+    if (! previewActive)
+        return;
+    previewActive = false;
+    if (fft != nullptr)
+        updateResults();
+}
+
+float CorrelationAnalyser::lagUnprocessedAt(double ms) const
+{
+    if (lagZ.empty())
+        return 0.0f;
+    const auto j = juce::jlimit(0, (int)lagZ.size() - 1, juce::roundToInt(ms * fs / 1000.0) + lagHalf);
+    return lagZ[(size_t)j];
+}
+
 void CorrelationAnalyser::reset()
 {
     for (int s = 0; s < 3; ++s)
@@ -96,6 +145,10 @@ void CorrelationAnalyser::reset()
     writePos = sinceFrame = filled = 0;
     curveX.assign((size_t)curvePoints, notMeasured);
     curveZ.assign((size_t)curvePoints, notMeasured);
+    phaseX.assign((size_t)curvePoints, notMeasured);
+    phaseZ.assign((size_t)curvePoints, notMeasured);
+    cohX.assign((size_t)curvePoints, 0.0f);
+    cohZ.assign((size_t)curvePoints, 0.0f);
     overallX = overallZ = notMeasured;
     lagX.assign((size_t)(2 * lagHalf + 1), 0.0f);
     lagZ.assign((size_t)(2 * lagHalf + 1), 0.0f);
@@ -174,6 +227,27 @@ double CorrelationAnalyser::windowLevelDb(double powerSum) const
 
 void CorrelationAnalyser::updateResults()
 {
+    // Processed results come from the output's cross-spectrum, or, while previewing, from the input's turned by a
+    // delay of previewMs: Z·Y* · e^(-jwt) is the cross-spectrum of the input delayed by t.
+    const std::vector<double>* pRe = &xyRe;
+    const std::vector<double>* pIm = &xyIm;
+    const std::vector<double>* pPow = &xx;
+    if (previewActive)
+    {
+        const auto samples = previewMs * fs / 1000.0;
+        for (int k = binLo; k <= binHi; ++k)
+        {
+            const auto w = 2.0 * juce::MathConstants<double>::pi * k / fftSize * samples;
+            const auto c = std::cos(w), s = std::sin(w);
+            const auto kk = (size_t)k;
+            previewRe[kk] = zyRe[kk] * c + zyIm[kk] * s;
+            previewIm[kk] = zyIm[kk] * c - zyRe[kk] * s;
+        }
+        pRe = &previewRe;
+        pIm = &previewIm;
+        pPow = &zz;
+    }
+
     // r over bins lo..hi, or NaN if either signal there is below the gate.
     const auto correlation = [this](const std::vector<double>& cross, const std::vector<double>& power, int lo, int hi)
     {
@@ -189,12 +263,38 @@ void CorrelationAnalyser::updateResults()
         return (float)juce::jlimit(-1.0, 1.0, sc / std::sqrt(sp * sy));
     };
 
+    // The angle of the cross-spectrum summed over bins lo..hi, and its coherence.
+    const auto phase = [this](const std::vector<double>& re, const std::vector<double>& im,
+                              const std::vector<double>& power, int lo, int hi, float& angle, float& coherence)
+    {
+        double sr = 0.0, si = 0.0, sp = 0.0, sy = 0.0;
+        for (int k = lo; k <= hi; ++k)
+        {
+            sr += re[(size_t)k];
+            si += im[(size_t)k];
+            sp += power[(size_t)k];
+            sy += yy[(size_t)k];
+        }
+        coherence = 0.0f;
+        angle = notMeasured;
+        if (windowLevelDb(std::min(sp, sy)) < gateDb)
+            return;
+        coherence = (float)juce::jlimit(0.0, 1.0, std::hypot(sr, si) / std::sqrt(sp * sy));
+        // Uncorrelated signals still read about 0.9 / sqrt(n) over n independent averages (a few frames of each bin
+        // in the window), so a window of only a bin or two needs more than a wide one to count as a real angle.
+        const auto floor = std::max((double)minPhaseCoherence, 1.2 / std::sqrt(6.0 * (hi - lo + 1)));
+        if (coherence >= floor)
+            angle = (float)(std::atan2(si, sr) * 180.0 / juce::MathConstants<double>::pi);
+    };
+
     for (size_t i = 0; i < (size_t)curvePoints; ++i)
     {
-        curveX[i] = correlation(xyRe, xx, curveLo[i], curveHi[i]);
+        curveX[i] = correlation(*pRe, *pPow, curveLo[i], curveHi[i]);
         curveZ[i] = correlation(zyRe, zz, curveLo[i], curveHi[i]);
+        phase(*pRe, *pIm, *pPow, phaseLo[i], phaseHi[i], phaseX[i], cohX[i]);
+        phase(zyRe, zyIm, zz, phaseLo[i], phaseHi[i], phaseZ[i], cohZ[i]);
     }
-    overallX = correlation(xyRe, xx, binLo, binHi);
+    overallX = correlation(*pRe, *pPow, binLo, binHi);
     overallZ = correlation(zyRe, zz, binLo, binHi);
 }
 

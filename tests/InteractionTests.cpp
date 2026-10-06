@@ -309,16 +309,20 @@ TEST_CASE("meter view: click FREQUENCY or TIME OFFSET on the screen's bottom row
     auto& screen = f.editor->getMeterScreen();
     REQUIRE(screen.getView() == pa::ui::MeterScreen::View::frequency);
 
-    // The labels sit either side of the plot centre on the bottom row; elsewhere clicks pass through.
-    const auto centreX = 0.5f * (pa::design::meterPlotLeft + pa::design::meterPlotRight);
-    const auto time = screen.toLocal(juce::Point<float>(centreX + 80.0f, pa::design::meterFreqTitleY));
-    const auto freq = screen.toLocal(juce::Point<float>(centreX - 80.0f, pa::design::meterFreqTitleY));
+    // The three labels sit side by side under the plot centre on the bottom row; elsewhere clicks pass through.
+    using View = pa::ui::MeterScreen::View;
+    const auto time = screen.viewLabelCentreForTesting(View::time);
+    const auto freq = screen.viewLabelCentreForTesting(View::frequency);
+    const auto phase = screen.viewLabelCentreForTesting(View::phase);
     CHECK(screen.hitTest(juce::roundToInt(time.x), juce::roundToInt(time.y)));
     CHECK_FALSE(screen.hitTest(screen.getWidth() / 2, screen.getHeight() / 3));
 
     click(screen, time);
     CHECK(f.proc.getUiState()[UiProps::meterView].toString() == "time");
     CHECK(screen.getView() == pa::ui::MeterScreen::View::time);
+    click(screen, phase);
+    CHECK(f.proc.getUiState()[UiProps::meterView].toString() == "phase");
+    CHECK(screen.getView() == pa::ui::MeterScreen::View::phase);
     click(screen, freq);
     CHECK(f.proc.getUiState()[UiProps::meterView].toString() == "frequency");
     CHECK(screen.getView() == pa::ui::MeterScreen::View::frequency);
@@ -326,4 +330,55 @@ TEST_CASE("meter view: click FREQUENCY or TIME OFFSET on the screen's bottom row
     // With the meter off there is nothing to click.
     f.proc.getUiState().setProperty(UiProps::meterOn, false, nullptr);
     CHECK_FALSE(screen.hitTest(juce::roundToInt(time.x), juce::roundToInt(time.y)));
+}
+
+TEST_CASE("meter speed: SLOW and FAST at the left of the bottom row, kept in the UI state", "[interaction]")
+{
+    Fixture f;
+    auto& screen = f.editor->getMeterScreen();
+    CHECK(screen.getSpeed() == pa::ui::MeterScreen::Speed::slow);
+    CHECK(f.proc.getUiState()[UiProps::meterSpeed].toString() == "slow");
+
+    const auto fast = screen.speedLabelCentreForTesting(pa::ui::MeterScreen::Speed::fast);
+    const auto slow = screen.speedLabelCentreForTesting(pa::ui::MeterScreen::Speed::slow);
+    click(screen, fast);
+    CHECK(f.proc.getUiState()[UiProps::meterSpeed].toString() == "fast");
+    CHECK(screen.getSpeed() == pa::ui::MeterScreen::Speed::fast);
+    CHECK(screen.getAnalyser().getSpeed() == pa::ui::MeterScreen::Speed::fast);
+    click(screen, slow);
+    CHECK(screen.getSpeed() == pa::ui::MeterScreen::Speed::slow);
+}
+
+TEST_CASE("meter hold: HOLD, or a stopped host, freezes the screen; a frozen screen previews a delay", "[interaction]")
+{
+    Fixture f;
+    auto& screen = f.editor->getMeterScreen();
+    CHECK_FALSE(screen.isFrozen());
+
+    // Not frozen: a preview is refused.
+    screen.setPreviewDelayMs(1.0);
+    CHECK_FALSE(screen.isPreviewing());
+
+    const auto hold = screen.holdLabelCentreForTesting();
+    click(screen, hold);
+    CHECK(screen.isHeld());
+    CHECK(screen.isFrozen());
+
+    screen.setPreviewDelayMs(1.04);
+    CHECK(screen.isPreviewing());
+    CHECK(screen.getAnalyser().previewDelayMs() == Approx(1.04).margin(0.001));
+    screen.setPreviewDelayMs(9.0); // clamped to the knob's reach
+    CHECK(screen.getAnalyser().previewDelayMs() == Approx(pa::params::maxDelayMs).margin(0.001));
+
+    click(screen, hold); // releasing HOLD drops the preview
+    CHECK_FALSE(screen.isFrozen());
+    CHECK_FALSE(screen.isPreviewing());
+
+    // The host's transport: stopped freezes, playing doesn't; unknown (standalone) doesn't.
+    f.proc.getMeterCapture().setTransport(false, false);
+    CHECK_FALSE(screen.isFrozen());
+    f.proc.getMeterCapture().setTransport(true, false);
+    CHECK(screen.isFrozen());
+    f.proc.getMeterCapture().setTransport(true, true);
+    CHECK_FALSE(screen.isFrozen());
 }

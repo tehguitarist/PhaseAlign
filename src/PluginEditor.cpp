@@ -225,7 +225,15 @@ PhaseAlignEditor::PhaseAlignEditor(PhaseAlignProcessor& p)
     meterScreen.onViewSelected = [this](pa::ui::MeterScreen::View v)
     {
         uiState.setProperty(PhaseAlignProcessor::UiProps::meterView,
-                            v == pa::ui::MeterScreen::View::time ? "time" : "frequency", nullptr);
+                            v == pa::ui::MeterScreen::View::time    ? "time"
+                            : v == pa::ui::MeterScreen::View::phase ? "phase"
+                                                                    : "frequency",
+                            nullptr);
+    };
+    meterScreen.onSpeedSelected = [this](pa::ui::MeterScreen::Speed speed)
+    {
+        uiState.setProperty(PhaseAlignProcessor::UiProps::meterSpeed,
+                            speed == pa::ui::MeterScreen::Speed::fast ? "fast" : "slow", nullptr);
     };
 
     designComponents = {&delayKnob,     &phaseKnob,    &unitSwitch,   &modeSwitch,  &meterButton,
@@ -305,7 +313,8 @@ void PhaseAlignEditor::valueTreePropertyChanged(juce::ValueTree&, const juce::Id
         unitSwitch.setIndex(unitPosition(delayUnit()));
         updateDelayReadout();
     }
-    else if (property == PhaseAlignProcessor::UiProps::meterOn || property == PhaseAlignProcessor::UiProps::meterView)
+    else if (property == PhaseAlignProcessor::UiProps::meterOn || property == PhaseAlignProcessor::UiProps::meterView ||
+             property == PhaseAlignProcessor::UiProps::meterSpeed)
     {
         updateMeter();
     }
@@ -424,9 +433,13 @@ void PhaseAlignEditor::updateMeter()
 {
     const auto on = (bool)uiState.getProperty(PhaseAlignProcessor::UiProps::meterOn);
     meterButton.setLit(on);
-    meterScreen.setView(uiState.getProperty(PhaseAlignProcessor::UiProps::meterView).toString() == "time"
-                            ? pa::ui::MeterScreen::View::time
-                            : pa::ui::MeterScreen::View::frequency);
+    const auto view = uiState.getProperty(PhaseAlignProcessor::UiProps::meterView).toString();
+    meterScreen.setView(view == "time"    ? pa::ui::MeterScreen::View::time
+                        : view == "phase" ? pa::ui::MeterScreen::View::phase
+                                          : pa::ui::MeterScreen::View::frequency);
+    meterScreen.setSpeed(uiState.getProperty(PhaseAlignProcessor::UiProps::meterSpeed).toString() == "fast"
+                             ? pa::ui::MeterScreen::Speed::fast
+                             : pa::ui::MeterScreen::Speed::slow);
     meterScreen.setMeterOn(on);
 }
 

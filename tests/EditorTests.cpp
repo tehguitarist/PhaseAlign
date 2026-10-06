@@ -415,6 +415,35 @@ TEST_CASE("meter on screen: reads +1 when aligned, and stops when off", "[.][des
     play(0.3);
     snapshot("meter_frequency_aligned.png");
 
+    // The phase view, HOLD and the delay preview, with the plugin not yet aligned (the delay set to 0).
+    setParam(proc, id::delayMs, 0.0f);
+    proc.getUiState().setProperty(UiProps::meterView, "phase", nullptr);
+    proc.getUiState().setProperty(UiProps::meterSpeed, "fast", nullptr);
+    play(2.0);
+    snapshot("meter_phase_unaligned.png");
+    proc.getUiState().setProperty(UiProps::meterView, "time", nullptr);
+    play(0.3);
+    screen.setHeld(true);
+    CHECK(screen.isFrozen());
+    snapshot("meter_time_held.png");
+    const auto frozenOverall = screen.getAnalyser().overallUnprocessed();
+    play(0.5); // audio carries on; the picture doesn't
+    CHECK(screen.getAnalyser().overallUnprocessed() == frozenOverall);
+    screen.setPreviewDelayMs(1000.0 * d / fs);
+    CHECK(screen.getAnalyser().overallProcessed() > 0.99f);
+    snapshot("meter_time_preview.png");
+    proc.getUiState().setProperty(UiProps::meterView, "frequency", nullptr);
+    mm->runDispatchLoopUntil(100);
+    snapshot("meter_frequency_preview.png");
+    proc.getUiState().setProperty(UiProps::meterView, "phase", nullptr);
+    mm->runDispatchLoopUntil(100);
+    snapshot("meter_phase_preview.png");
+    screen.setHeld(false);
+    CHECK_FALSE(screen.isPreviewing());
+    proc.getUiState().setProperty(UiProps::meterSpeed, "slow", nullptr);
+    setParam(proc, id::delayMs, (float)(1000.0 * d / fs));
+    play(0.5);
+
     // An offset beyond the knob's reach (4.5 ms) says so in the time view.
     lag = 216;
     proc.getUiState().setProperty(UiProps::meterView, "time", nullptr);

@@ -32,9 +32,14 @@ MeterScreen::MeterScreen(const SourceAssets& assetsIn, meter::MeterCapture& capt
     setOpaque(true);
     setInterceptsMouseClicks(true, false); // only the view labels: see hitTest
     setTooltip("Click to switch the view: FREQUENCY, the correlation with the sidechain per band; TIME OFFSET, how far "
-               "this track is from the sidechain. INPUT is this track before the plugin, OUTPUT after it.");
+               "this track is from the sidechain; PHASE, the angle between them per band (a slope is a delay, a flat "
+               "offset a rotation). SLOW or FAST sets the averaging. HOLD freezes the screen (it also freezes "
+               "while the host is stopped); frozen, drag across TIME OFFSET to preview a delay on every view. INPUT "
+               "is this track before the plugin, OUTPUT after it.");
     for (auto& s : scratch)
         s.resize((size_t)meter::MeterCapture::capacity);
+    if (capture.getSampleRate() > 0.0)
+        analyser.prepare(capture.getSampleRate());
 }
 
 MeterScreen::~MeterScreen()
@@ -60,12 +65,62 @@ void MeterScreen::setView(View newView)
     repaint();
 }
 
+void MeterScreen::setSpeed(Speed newSpeed)
+{
+    if (newSpeed == analyser.getSpeed())
+        return;
+    analyser.setSpeed(newSpeed);
+    repaint();
+}
+
+bool MeterScreen::isFrozen() const
+{
+    return held || (meterOn && capture.isTransportStopped());
+}
+
+void MeterScreen::setHeld(bool shouldHold)
+{
+    if (shouldHold == held)
+        return;
+    held = shouldHold;
+    freezeChanged();
+}
+
+void MeterScreen::freezeChanged()
+{
+    const auto frozen = isFrozen();
+    if (frozen == wasFrozen)
+        return;
+    wasFrozen = frozen;
+    if (frozen)
+    {
+        if (view == View::time)
+            analyser.computeLag();
+    }
+    else
+        analyser.clearPreview(); // a preview belongs to the frozen picture
+    repaint();
+}
+
+void MeterScreen::setPreviewDelayMs(double ms)
+{
+    if (! isFrozen())
+        return;
+    const auto reach = (double)params::maxDelayMs;
+    const auto sampleMs = 1000.0 / juce::jmax(1.0, analyser.getSampleRate());
+    const auto step = 0.1 * sampleMs; // the delay knob's step
+    analyser.setPreviewDelayMs(juce::jlimit(-reach, reach, std::round(ms / step) * step));
+    repaint();
+}
+
 void MeterScreen::updateTimer()
 {
     const auto shouldRun = meterOn && isShowing();
     if (shouldRun && ! isTimerRunning())
     {
         analyser.reset(); // fresh averages each time the meter starts
+        analyser.clearPreview();
+        wasFrozen = false;
         lastSamplesMs = nowMs();
         capture.setActive(true);
         startTimerHz(30);
@@ -91,6 +146,8 @@ bool MeterScreen::poll()
         return false;
 
     lastSamplesMs = nowMs();
+    if (isFrozen()) // drained and dropped: the picture stays as it was
+        return false;
     const auto frames = analyser.process(dest[meter::MeterCapture::input], dest[meter::MeterCapture::output],
                                          dest[meter::MeterCapture::sidechain], n);
     if (frames > 0 && view == View::time)
@@ -102,6 +159,8 @@ MeterScreen::State MeterScreen::currentState() const
 {
     if (! meterOn)
         return State::off;
+    if (isFrozen() && state != State::off) // a frozen picture stays up, whatever the audio is doing
+        return state;
     const auto noSignal = analyser.sidechainSilentSeconds() > noSignalSeconds ||
                           nowMs() - lastSamplesMs > noSignalSeconds * 1000.0; // no audio arriving at all
     return capture.hasSidechain() && ! noSignal ? State::metering : State::noSidechain;
@@ -114,6 +173,7 @@ void MeterScreen::timerCallback()
         updateTimer();
 
     const auto fresh = isTimerRunning() && poll();
+    freezeChanged(); // the host's transport can stop or start under us
     const auto newState = currentState();
     if (newState == state && ! (fresh && state == State::metering))
         return;
@@ -141,13 +201,65 @@ float MeterScreen::xForMs(double ms) const
     return left + (right - left) * (float)((ms + range) / (2.0 * range));
 }
 
-juce::Rectangle<float> MeterScreen::viewLabelArea(View v) const
+double MeterScreen::msForX(float x) const
 {
-    // The bottom row, either side of the plot centre: FREQUENCY to the left, TIME to the right.
-    const auto centre = 0.5f * (lx(design::meterPlotLeft) + lx(design::meterPlotRight));
+    const auto left = lx(design::meterPlotLeft), right = lx(design::meterPlotRight);
+    const auto range = meter::CorrelationAnalyser::lagRangeMs;
+    return ((double)(x - left) / (double)(right - left) * 2.0 - 1.0) * range;
+}
+
+namespace
+{
+const char* controlText(int control)
+{
+    static const char* const text[] = {"", "FREQUENCY (Hz)", "TIME OFFSET (ms)", "PHASE (deg)", "SLOW", "FAST", "HOLD"};
+    return text[control];
+}
+} // namespace
+
+juce::Rectangle<float> MeterScreen::controlArea(Control c) const
+{
+    // The bottom row: the three views centred under the plot, SLOW and FAST at its left end, HOLD at its right end.
     const auto s = getScale();
-    const auto row = juce::Rectangle<float>(0.0f, ly(design::meterFreqTitleY) - 14.0f * s, 260.0f * s, 26.0f * s);
-    return v == View::frequency ? row.withRightX(centre - 20.0f * s) : row.withX(centre + 20.0f * s);
+    const auto font = meterFont(assets, 13.0f * s).withExtraKerningFactor(0.2f);
+    const auto left = lx(design::meterPlotLeft), right = lx(design::meterPlotRight);
+    const auto centre = 0.5f * (left + right);
+    const auto rowY = ly(design::meterFreqTitleY) - 14.0f * s;
+    const auto pad = 14.0f * s, gap = 28.0f * s, height = 26.0f * s;
+    const auto width = [&](Control k) { return textWidth(font, controlText((int)k)) + 2.0f * pad; };
+    const auto box = [&](float x, Control k) { return juce::Rectangle<float>(x, rowY, width(k), height); };
+
+    const auto viewsWidth = width(Control::frequency) + width(Control::time) + width(Control::phase) + 2.0f * gap;
+    // Centred under the plot, but never over SLOW and FAST.
+    const auto speedRight = left - pad + width(Control::slow) + 0.5f * gap + width(Control::fast);
+    const auto viewsLeft = juce::jmax(centre - 0.5f * viewsWidth, speedRight + gap);
+    switch (c)
+    {
+        case Control::frequency: return box(viewsLeft, c);
+        case Control::time: return box(viewsLeft + width(Control::frequency) + gap, c);
+        case Control::phase: return box(viewsLeft + width(Control::frequency) + width(Control::time) + 2.0f * gap, c);
+        case Control::slow: return box(left - pad, c);
+        case Control::fast: return box(left - pad + width(Control::slow) + 0.5f * gap, c);
+        case Control::hold: return box(right + pad - width(c), c);
+        case Control::none: break;
+    }
+    return {};
+}
+
+MeterScreen::Control MeterScreen::controlAt(juce::Point<float> p) const
+{
+    for (const auto c : {Control::frequency, Control::time, Control::phase, Control::slow, Control::fast, Control::hold})
+        if (controlArea(c).contains(p))
+            return c;
+    return Control::none;
+}
+
+bool MeterScreen::scrubArea(juce::Point<float> p) const
+{
+    return isFrozen() && view == View::time && state == State::metering &&
+           juce::Rectangle<float>::leftTopRightBottom(lx(design::meterPlotLeft), ly(design::meterPlusOneY),
+                                                      lx(design::meterPlotRight), ly(design::meterMinusOneY))
+               .contains(p);
 }
 
 bool MeterScreen::hitTest(int x, int y)
@@ -155,23 +267,42 @@ bool MeterScreen::hitTest(int x, int y)
     if (state == State::off)
         return false;
     const auto p = juce::Point<int>(x, y).toFloat();
-    return viewLabelArea(View::frequency).contains(p) || viewLabelArea(View::time).contains(p);
+    return controlAt(p) != Control::none || scrubArea(p);
+}
+
+void MeterScreen::scrubTo(float x)
+{
+    setPreviewDelayMs(msForX(x));
 }
 
 void MeterScreen::mouseDown(const juce::MouseEvent& e)
 {
-    const auto clicked = viewLabelArea(View::time).contains(e.position) ? View::time : View::frequency;
-    if (onViewSelected)
-        onViewSelected(clicked);
-    else
-        setView(clicked);
+    switch (controlAt(e.position))
+    {
+        case Control::frequency: onViewSelected ? onViewSelected(View::frequency) : setView(View::frequency); return;
+        case Control::time: onViewSelected ? onViewSelected(View::time) : setView(View::time); return;
+        case Control::phase: onViewSelected ? onViewSelected(View::phase) : setView(View::phase); return;
+        case Control::slow: onSpeedSelected ? onSpeedSelected(Speed::slow) : setSpeed(Speed::slow); return;
+        case Control::fast: onSpeedSelected ? onSpeedSelected(Speed::fast) : setSpeed(Speed::fast); return;
+        case Control::hold: setHeld(! held); return;
+        case Control::none: break;
+    }
+    if (scrubArea(e.position))
+        scrubTo(e.position.x);
+}
+
+void MeterScreen::mouseDrag(const juce::MouseEvent& e)
+{
+    if (scrubArea(e.position))
+        scrubTo(e.position.x);
 }
 
 //==============================================================================
 void MeterScreen::paint(juce::Graphics& g)
 {
     ++paintCount;
-    const auto key = juce::String((int)state) + ":" + juce::String((int)view);
+    const auto key = juce::String((int)state) + ":" + juce::String((int)view) + ":" +
+                     juce::String((int)analyser.getSpeed()) + ":" + juce::String((int)isFrozen());
     layer.paint(g, getLocalBounds(), key,
                 [this](juce::Graphics& lg, float pixelScale) { paintStatic(lg, pixelScale); });
     if (state == State::metering)
@@ -233,7 +364,7 @@ void MeterScreen::paintGrid(juce::Graphics& g) const
 
     // Vertical grid and x labels for the view.
     g.setColour(design::meterGrid.withAlpha(0.7f));
-    if (view == View::frequency)
+    if (view != View::time)
     {
         for (const auto hz : gridHz)
             g.drawDashedLine({xForHz(hz), top, xForHz(hz), bottom}, dashes, 2, thin);
@@ -272,11 +403,14 @@ void MeterScreen::paintGrid(juce::Graphics& g) const
     g.drawLine(left, zero, right, zero, line);
 
     const auto axisFont = meterFont(assets, 20.0f * s);
+    // The phase view's labels are one character wider, so a size smaller to fit left of the plot.
+    const auto yFont = view == View::phase ? meterFont(assets, 16.0f * s) : axisFont;
     const auto yLabel = [&](const char* text, float atY, float atX, juce::Justification j)
-    { drawTextAt(g, axisFont, text, atX, atY + 10.0f * s, j); };
-    yLabel("+1", top, left - 16.0f * s, juce::Justification::right);
+    { drawTextAt(g, yFont, text, atX, atY + 10.0f * s, j); };
+    const auto isPhase = view == View::phase;
+    yLabel(isPhase ? "180" : "+1", top, left - 16.0f * s, juce::Justification::right);
     yLabel("0", zero, left - 16.0f * s, juce::Justification::right);
-    yLabel("-1", bottom, left - 16.0f * s, juce::Justification::right);
+    yLabel(isPhase ? "-180" : "-1", bottom, left - 16.0f * s, juce::Justification::right);
 
     // Legend, top right of the plot.
     const auto legendFont = meterFont(assets, 14.0f * s).withExtraKerningFactor(0.1f);
@@ -287,17 +421,36 @@ void MeterScreen::paintGrid(juce::Graphics& g) const
     g.setColour(design::phosphor.withAlpha(0.45f));
     drawTextAt(g, legendFont, "INPUT", right - processedWidth - 24.0f * s, legendY, juce::Justification::right);
 
-    // View selector: the selected label lit, the other dimmed (like the panel's switch labels).
+    // The bottom row: the selected view, speed and (while frozen) HOLD lit; the others dimmed, like the panel's labels.
     const auto viewFont = meterFont(assets, 13.0f * s).withExtraKerningFactor(0.2f);
     const auto titleY = ly(design::meterFreqTitleY) + 6.5f * s;
-    const auto freqArea = viewLabelArea(View::frequency), timeArea = viewLabelArea(View::time);
-    g.setColour(design::meterAxisText.withAlpha(view == View::frequency ? 0.95f : 0.3f));
-    drawTextAt(g, viewFont, "FREQUENCY (Hz)", freqArea.getRight(), titleY, juce::Justification::right);
-    g.setColour(design::meterAxisText.withAlpha(view == View::time ? 0.95f : 0.3f));
-    drawTextAt(g, viewFont, "TIME OFFSET (ms)", timeArea.getX(), titleY, juce::Justification::left);
+    const auto label = [&](Control c, bool lit, juce::Justification j)
+    {
+        const auto area = controlArea(c);
+        const auto pad = 14.0f * s;
+        g.setColour(design::meterAxisText.withAlpha(lit ? 0.95f : 0.3f));
+        const auto x = j == juce::Justification::left ? area.getX() + pad : area.getRight() - pad;
+        drawTextAt(g, viewFont, controlText((int)c), x, titleY, j);
+    };
+    label(Control::frequency, view == View::frequency, juce::Justification::left);
+    label(Control::time, view == View::time, juce::Justification::left);
+    label(Control::phase, view == View::phase, juce::Justification::left);
+    label(Control::slow, analyser.getSpeed() == Speed::slow, juce::Justification::left);
+    label(Control::fast, analyser.getSpeed() == Speed::fast, juce::Justification::left);
+    label(Control::hold, isFrozen(), juce::Justification::right);
     g.setColour(design::meterAxisText.withAlpha(0.3f));
-    g.drawLine(0.5f * (freqArea.getRight() + timeArea.getX()), titleY - 11.0f * s,
-               0.5f * (freqArea.getRight() + timeArea.getX()), titleY + 2.0f * s, thin);
+    for (const auto between : {std::pair{Control::frequency, Control::time}, std::pair{Control::time, Control::phase}})
+    {
+        const auto sepX = 0.5f * (controlArea(between.first).getRight() + controlArea(between.second).getX());
+        g.drawLine(sepX, titleY - 11.0f * s, sepX, titleY + 2.0f * s, thin);
+    }
+    if (isFrozen()) // a frame round HOLD while the picture is frozen
+    {
+        g.setColour(design::meterAxisText.withAlpha(0.6f));
+        const auto hold = controlArea(Control::hold);
+        g.drawRect(juce::Rectangle<float>(hold.getX() + 6.0f * s, titleY - 13.0f * s, hold.getWidth() - 12.0f * s, 19.0f * s),
+                   thin);
+    }
 
     // Separator and the overall column's axis.
     g.setColour(design::meterAxisText.withAlpha(0.9f));
@@ -309,9 +462,9 @@ void MeterScreen::paintGrid(juce::Graphics& g) const
     g.setColour(design::meterAxisText);
     g.drawLine(axisLeft, zero, axisRight, zero, line);
     const auto overallAxis = lx(design::meterOverallAxisX);
-    yLabel("+1", top, overallAxis, juce::Justification::horizontallyCentred);
-    yLabel("0", zero, overallAxis, juce::Justification::horizontallyCentred);
-    yLabel("-1", bottom, overallAxis, juce::Justification::horizontallyCentred);
+    drawTextAt(g, axisFont, "+1", overallAxis, top + 10.0f * s, juce::Justification::horizontallyCentred);
+    drawTextAt(g, axisFont, "0", overallAxis, zero + 10.0f * s, juce::Justification::horizontallyCentred);
+    drawTextAt(g, axisFont, "-1", overallAxis, bottom + 10.0f * s, juce::Justification::horizontallyCentred);
     g.setColour(design::meterAxisText.withAlpha(0.6f));
     drawTextAt(g, viewFont, "ALL", 0.5f * (lx(design::meterOverallLeft) + lx(design::meterOverallRight)), titleY,
                juce::Justification::horizontallyCentred);
@@ -326,6 +479,10 @@ void MeterScreen::paintLive(juce::Graphics& g) const
         paintTrace(g, xAt, analyser.curveUnprocessed(), false);
         paintTrace(g, xAt, analyser.curveProcessed(), true);
     }
+    else if (view == View::phase)
+    {
+        paintPhase(g);
+    }
     else
     {
         const auto xAt = [&](int i) { return xForMs(analyser.lagMsAt(i)); };
@@ -333,7 +490,87 @@ void MeterScreen::paintLive(juce::Graphics& g) const
         paintTrace(g, xAt, analyser.lagProcessed(), true);
         paintLagReadout(g);
     }
+    paintPreviewNote(g);
     paintOverall(g);
+}
+
+void MeterScreen::paintPhase(juce::Graphics& g) const
+{
+    // The angle of this track against the sidechain: a straight slope is a delay, a flat offset is a rotation. Each
+    // segment is as bright as the weaker of its two points' coherence, and the line breaks where the angle wraps.
+    const auto s = getScale();
+    const auto& hz = analyser.curveFrequencies();
+    const auto plot =
+        juce::Rectangle<float>::leftTopRightBottom(lx(design::meterPlotLeft), ly(design::meterPlusOneY) - 4.0f * s,
+                                                   lx(design::meterPlotRight), ly(design::meterMinusOneY) + 4.0f * s);
+    juce::Graphics::ScopedSaveState save(g);
+    g.reduceClipRegion(plot.getSmallestIntegerContainer());
+
+    const auto draw = [&](const std::vector<float>& angle, const std::vector<float>& coherence, bool processed)
+    {
+        const auto thickness = processed ? juce::jmax(1.0f, 2.2f * s) : juce::jmax(1.0f, 1.6f * s);
+        for (size_t i = 0; i + 1 < angle.size(); ++i)
+        {
+            const auto a = angle[i], b = angle[i + 1];
+            if (std::isnan(a) || std::isnan(b))
+            {
+                if (! std::isnan(a)) // a lone point
+                {
+                    g.setColour(design::phosphor.withAlpha(processed ? 0.9f : 0.4f));
+                    g.fillEllipse(juce::Rectangle<float>(thickness * 1.6f, thickness * 1.6f)
+                                      .withCentre({xForHz(hz[i]), yForPhase(a)}));
+                }
+                continue;
+            }
+            if (std::abs(a - b) > 180.0f)
+                continue; // wrapped
+            const auto c = juce::jlimit(0.0f, 1.0f, 0.3f + 0.7f * std::min(coherence[i], coherence[i + 1]));
+            g.setColour(design::phosphor.withAlpha((processed ? 1.0f : 0.42f) * c));
+            g.drawLine(xForHz(hz[i]), yForPhase(a), xForHz(hz[i + 1]), yForPhase(b), thickness);
+        }
+    };
+    draw(analyser.phaseUnprocessed(), analyser.phaseUnprocessedCoherence(), false);
+    draw(analyser.phaseProcessed(), analyser.phaseProcessedCoherence(), true);
+}
+
+void MeterScreen::paintPreviewNote(juce::Graphics& g) const
+{
+    const auto s = getScale();
+    const auto x = lx(design::meterPlotLeft) + 14.0f * s;
+    if (analyser.isPreviewing())
+    {
+        // The legend's OUTPUT becomes PREVIEW: that trace is the input as it would read with the delay set here.
+        const auto legendFont = meterFont(assets, 14.0f * s).withExtraKerningFactor(0.1f);
+        const auto right = lx(design::meterPlotRight), legendY = ly(design::meterPlusOneY) - 12.0f * s;
+        const auto cover = juce::Rectangle<float>(right + 4.0f * s - 300.0f * s, legendY - 17.0f * s, 300.0f * s, 24.0f * s);
+        g.setColour(design::screenBlack);
+        g.fillRect(cover);
+        g.setColour(design::phosphor);
+        drawTextAt(g, legendFont, "PREVIEW", right, legendY, juce::Justification::right);
+        g.setColour(design::phosphor.withAlpha(0.45f));
+        drawTextAt(g, legendFont, "INPUT", right - textWidth(legendFont, "PREVIEW") - 24.0f * s, legendY,
+                   juce::Justification::right);
+
+        const auto ms = std::abs(analyser.previewDelayMs()) < 0.0005 ? 0.0 : analyser.previewDelayMs();
+        const auto font = meterFont(assets, 16.0f * s, true);
+        // Below the time view's readouts, at the top left elsewhere.
+        const auto y = ly(design::meterPlusOneY) + (view == View::time ? 90.0f : 24.0f) * s;
+        g.setColour(design::phosphor);
+        drawTextAt(g, font, "PREVIEW  DELAY " + juce::String(ms >= 0.0 ? "+" : "") + juce::String(ms, 3) + " ms", x, y,
+                   juce::Justification::left);
+        if (view == View::time)
+        {
+            const auto px = xForMs(ms);
+            g.setColour(design::phosphor.withAlpha(0.8f));
+            g.drawLine(px, ly(design::meterPlusOneY), px, ly(design::meterMinusOneY), juce::jmax(1.0f, 1.5f * s));
+        }
+    }
+    else if (isFrozen() && view == View::time)
+    {
+        g.setColour(design::meterAxisText.withAlpha(0.5f));
+        drawTextAt(g, meterFont(assets, 12.0f * s), "DRAG TO PREVIEW A DELAY", x, ly(design::meterPlusOneY) + 90.0f * s,
+                   juce::Justification::left);
+    }
 }
 
 void MeterScreen::paintTrace(juce::Graphics& g, const std::function<float(int)>& xAt, const std::vector<float>& values,

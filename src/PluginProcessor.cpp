@@ -120,6 +120,10 @@ void PhaseAlignProcessor::runChain(juce::AudioBuffer<float>& buffer, const pa::d
     const auto sidechain = getBusBuffer(buffer, true, 1);
     const auto numChannels = main.getNumChannels();
     meterCapture.setSidechainPresent(sidechain.getNumChannels() > 0);
+    {
+        const auto position = getPlayHead() != nullptr ? getPlayHead()->getPosition() : juce::Optional<juce::AudioPlayHead::PositionInfo>();
+        meterCapture.setTransport(position.hasValue(), position.hasValue() && position->getIsPlaying());
+    }
     chain.setSettings(settings);
 
     if (! meterCapture.isActive())
@@ -185,7 +189,8 @@ juce::ValueTree PhaseAlignProcessor::defaultUiState()
     return juce::ValueTree(UiProps::type, {{UiProps::delayUnit, toString(pa::params::DelayUnit::ms)},
                                            {UiProps::meterOn, true},
                                            {UiProps::uiScale, defaultUiScale},
-                                           {UiProps::meterView, "frequency"}});
+                                           {UiProps::meterView, "frequency"},
+                                           {UiProps::meterSpeed, "slow"}});
 }
 
 void PhaseAlignProcessor::restoreUiState(const juce::ValueTree& loaded)
@@ -200,8 +205,10 @@ void PhaseAlignProcessor::restoreUiState(const juce::ValueTree& loaded)
                         toString(pa::params::delayUnitFromString(get(UiProps::delayUnit).toString())), nullptr);
     uiState.setProperty(UiProps::meterOn, (bool)get(UiProps::meterOn), nullptr);
     uiState.setProperty(UiProps::uiScale, juce::jlimit(minUiScale, maxUiScale, (double)get(UiProps::uiScale)), nullptr);
-    uiState.setProperty(UiProps::meterView, get(UiProps::meterView).toString() == "time" ? "time" : "frequency",
+    const auto view = get(UiProps::meterView).toString();
+    uiState.setProperty(UiProps::meterView, view == "time" || view == "phase" ? view : juce::String("frequency"),
                         nullptr);
+    uiState.setProperty(UiProps::meterSpeed, get(UiProps::meterSpeed).toString() == "fast" ? "fast" : "slow", nullptr);
 }
 
 void PhaseAlignProcessor::getStateInformation(juce::MemoryBlock& destData)
