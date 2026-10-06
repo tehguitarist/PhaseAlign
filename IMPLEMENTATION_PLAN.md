@@ -638,6 +638,26 @@ done and measured on a Windows runner or machine; with Constant at 155 to 214 ns
 VM it is worth doing, though no user-heard effect follows from it being over, and the worst callback is under half of its
 length.
 
+**Result of moving them (2026-10-06, branch `windows-convolver`, CI run 37436614308, windows-latest; the loops use
+`Simd.h` under `_MSC_VER` only, so macOS and Linux compile exactly what they did).** It was MSVC: ns per stereo frame,
+before (run 37420074764) then after:
+
+| Case (Windows CI) | Before | After |
+|---|---|---|
+| Constant at 60°, delay off, 48 kHz | 193 | **53.3** |
+| Constant at 60°, fractional delay, 44.1 / 48 kHz | 214 / 208 | **70.2 / 61.0** |
+| Constant at 60°, fractional delay, 96 / 192 kHz | 155 / 167 | **61.1 / 45.9** |
+| constant automation (all modes), 44.1 / 48 kHz | 149 / 137 | **62.7 / 53.3** |
+| convolver alone at 48 kHz, uniform 128 | 152 | **28.3** |
+
+Windows Constant is now well inside the 150 ns budget at every rate, about a third of what it was, and close to
+Linux's. The block layouts are now within a few ns of each other on Windows (48 kHz: 128 is 28.3, 64 / 512 is 26.9), so
+the `_M_X64` layout change is **not needed** and `blockSizesFor` stays as it is. Hi/Lo on Windows read 24 to 25 ns at
+44.1 and 48 kHz with delay off (40 ns with a fractional delay at 44.1 kHz; the 91.5 ns at 48 kHz in the earlier run was
+noise), all within budget; those figures were 44 / 41 before with no change to that code, which shows the runners'
+spread (about ±30%: Linux's Constant read 79 against 61 in the two runs, with nothing changed there). macOS: Constant
+42.1 against 38.8, likewise noise. pluginval passed on all three platforms.
+
 **pluginval on the CI runners (same run).** Strictness 10, in-process, on the VST3: **passed on Windows and Linux**
 (each ended `SUCCESS`, no failed tests), as on macOS. `continue-on-error` is dropped from their step in `ci.yml`.
 

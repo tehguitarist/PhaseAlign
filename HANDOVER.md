@@ -46,14 +46,11 @@ git history, before f1b4c30). Read CLAUDE.md first; plan sections are IMPLEMENTA
 
 ## Next: needs no input from the user
 
-1. **Windows Constant is over budget (CI run 37420074764; user, 2026-10-06: do this very last).** CI's numbers are in
-   plan 2.6 L: Windows Constant 155-214 ns against the 150 budget (macOS and Linux are within it); Windows Hi/Lo is
-   over 50 ns at 44.1 and 48 kHz (44.1 kHz accepted; the 48 kHz fractional-delay 91.5 ns looks like noise but isn't
-   covered by the acceptance). The Windows convolver costs 3-4x Linux's against 2-3x for the `Simd.h` code, which fits
-   MSVC not vectorising its float reductions. Move the convolver's head, multiply-add and fractional-kernel loops onto
-   `src/dsp/Simd.h` and measure on a Windows runner; fallback: 128/512 blocks below 80 kHz behind `_M_X64` (about 52 ns
-   off 193). `blockSizesFor` was left alone (Linux within noise; the M1 prefers the current layout). pluginval passes
-   on Windows and Linux at strictness 10, and `continue-on-error` is gone from that CI step.
+1. **Windows Constant: fixed on the branch `windows-convolver`, awaiting merge (CI run 37436614308).** MSVC wasn't
+   vectorising the convolver's loops; under `_MSC_VER` only they now use `Simd.h`. Windows Constant went from 193 to
+   53 ns at 48 kHz (all rates now 46-70 ns against the 150 budget; plan 2.6 L has the before and after). The `_M_X64`
+   block-layout fallback isn't needed. Windows Hi/Lo is within 50 ns too (the earlier 48 kHz fractional-delay outlier
+   was noise). pluginval passes on all three platforms and gates the Windows and Linux CI jobs.
 2. **Optional CPU:** the chain adds about 6 ns around the Hi/Lo stage that it didn't before (the delayed dry path, and
    more: plan 2.6 J), and Hi/Lo kept warm in Constant costs about 13 ns there. Neither is over budget.
 
