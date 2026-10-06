@@ -1,13 +1,12 @@
-# Handover: work that needs no input from the user
+# Handover: where things stand, and what's next
 
-Drafted 2026-10-06 at the end of the DSP and hardening pass (merged to master the same day). Read CLAUDE.md first; plan
-sections are IMPLEMENTATION_PLAN.md. Items are in order of value. Each says when it is done and where the user comes
-in, if at all.
+Updated 2026-10-06 at the end of the session that worked through the previous handover (its item-by-item briefs are in
+git history, before f1b4c30). Read CLAUDE.md first; plan sections are IMPLEMENTATION_PLAN.md.
 
 ## Ground rules (from the user)
 
-- `.venv` for all Python; clang-format on touched C++; ask before committing; never commit to master; don't push
-  unless asked.
+- `.venv` for all Python; clang-format on touched C++; ask before committing; work on a branch and merge to master only
+  when the user says; don't push unless asked.
 - The only mention of another product anywhere in the repo, comments and commit messages included, is the README's
   "Inspired by phase alignment tools like the Little Labs IBP". Grep what you push.
 - Don't change the Hi/Lo mapping (θ → θ₁, θ₂ and the reference frequencies, plan 2.3), the 4097-tap Hilbert or the
@@ -15,161 +14,57 @@ in, if at all.
 - The goldens must match within 1e-6. If a Python reference changes, change the C++ identically, regenerate with
   `prototype/golden.py`, and say why.
 - Anything the user would hear goes to them, with numbers, before it merges.
+- Keep CPU and latency as low as possible, but working matters more: do the efficient thing, not the easy expensive one
+  (user, 2026-10-06).
 - Budgets per stereo frame (`PhaseAlignDspTests "chain cost per stereo frame"`, Release): Hi/Lo < 50 ns, Constant
-  < 150 ns.
+  < 150 ns. **Hi/Lo at 44.1 kHz going over 50 ns on the Windows/Linux CI runners is accepted** (user, 2026-10-06).
+- macOS releases are separate arm64 and Intel builds, never universal (R14); local builds are arm64.
 
-## State at handover
+## State
 
-- master (local and origin) has a clean history: the pass's commits on top of dcbb048, with no measurement material
-  in any of them. The old local commits and branches were removed (user, 2026-10-06).
-- CI green on macOS, Linux and Windows (run 37396526948): ctest everywhere, auval and pluginval at strictness 10 on
-  macOS.
+- **master is 4 commits ahead of origin, not pushed** (d327bd5 de-cramping, 2b57341 PFFFT, 2db5ff6 docs, f1b4c30
+  release prep), plus this handover's commit if made. No other branches or worktrees. CI last ran green on dad5331;
+  nothing since has run in CI.
+- Licence: **GNU AGPLv3** (`LICENSE`); JUCE under its AGPLv3 option; notices in `THIRD_PARTY_NOTICES.md`.
 
-## 1. De-cramp Hi/Lo, so a setting sounds the same at every rate
+## Done in this session (details in the plan)
 
-**Status (2026-10-06): merged to master at the user's request (not pushed); the user's listening is still to come.** The approach below
-turned out to be impossible: at zero latency no all-pass can have less top-end lag than the first-order section with
-the same lag at the reference frequency (Foster's reactance theorem; plan 2.3). The user chose oversampling with a small
-latency (R13): 32 samples at 44.1 kHz, 18 at 48, 5 at 96, 0 at 192. Every rate is within 2.5° of analog to 20 kHz; the
-must-keeps hold; goldens regenerated (`HiLoOversampled`). A/B: `prototype/out/decramp/` (`prototype/decramp_ab.py`).
-What follows is the original brief, kept for the record.
+1. **Hi/Lo de-cramped (R13, plan 2.3, 2.6 J). Approved by ear (user, 2026-10-06).** Zero-latency de-cramping is
+   impossible (Foster's reactance theorem), so Hi/Lo runs oversampled between linear-phase halfbands: latency 32
+   samples at 44.1 kHz, 18 at 48, 5 at 96, 0 at 192, reported whenever Constant isn't selected. Within 2.5° of analog
+   to 20 kHz at every rate. Cost on the M1: 18–23 ns (was 4).
+2. **PFFFT** behind `RealFft` where vDSP isn't (plan 2.6 K): on the M1 it matches vDSP. Convolver layouts no longer
+   depend on the engine.
+3. **CI:** Ubuntu pinned to 24.04; pluginval on Windows/Linux as information only.
+4. **M4's Instruments check** done (`tools/meter_profile.py`, plan M4).
+5. **Release prep (plan M5):** both macOS architectures tested (arm64 natively, x86_64 under Rosetta); every installer
+   and release zip ships `installer/stage_docs.sh`'s readme and licences; `release.yml` reviewed; tooltips audited, with
+   their latencies computed from the DSP and pinned by a test.
+6. Decided (user, 2026-10-06): no trademark search (open source); macOS notarisation is covered (the Apple secrets
+   are set in the repo; `release.yml` signs and notarises both macOS builds and their .pkg); Windows and Linux ship
+   unsigned (no credentials, none needed).
 
-**Problem** (`prototype/hf_check.py` → `prototype/out/hf/report.md`, plan 2.3):
-- Each section is a bilinear first-order all-pass, exact at its reference frequency, so it is squeezed towards 180° at
-  Nyquist.
-- Against analog sections with the same lag at the reference, the worst setting (just past 0° or 90°) is off by 11° at
-  5–10 kHz and 80° at 16–20 kHz at 44.1 kHz; 58° at 48 kHz, 9° at 96 kHz, 2° at 192 kHz. A typical setting is off by
-  2° (Hi) / 8° (Lo) at 16–20 kHz at 44.1 kHz.
-- The same knob setting's top octave differs between 44.1 and 192 kHz sessions by up to 78°.
-- The level is exact everywhere (all-pass). The user said go ahead (2026-10-06).
+## Next: needs no input from the user
 
-**Target:** each section's lag within about 3° of the analog section to 16 kHz and about 10° to 20 kHz at 44.1 and
-48 kHz, for every θ.
+1. **After the next push** (the user's call): read CI's numbers for Windows and Linux into plan 2.6 (Constant with
+   PFFFT, the oversampled Hi/Lo) and re-tune `ConstantRotator::blockSizesFor` for x86 if CI's convolver benchmark says
+   so. Check that MSVC vectorises the convolver's register-blocked loops (head, multiply-add, fractional kernel); if not,
+   move them onto `src/dsp/Simd.h` as the halfbands did. Once Windows/Linux pluginval has passed, drop its
+   `continue-on-error`.
+2. **Optional CPU:** the chain adds about 6 ns around the Hi/Lo stage that it didn't before (the delayed dry path, and
+   more: plan 2.6 J), and Hi/Lo kept warm in Constant costs about 13 ns there. Neither is over budget.
 
-**Must keep (don't regress):**
-- Exact lag at the reference frequency (the readout, ≤ 0.001° today).
-- Lag non-decreasing in θ at every frequency.
-- A continuous 90° handover.
-- 0° = identity.
-- Flat level.
-- No bursts on coefficient moves (the PhaseTests broadband test: direct form I solved this for first-order sections, so
-  keep the state to past samples or use a normalised lattice).
-- Per-sample coefficient interpolation that stays stable. For a second-order all-pass the stable region in (a₁, a₂) is
-  a triangle, which is convex, so linear interpolation between two stable sets stays stable.
-- Zero latency; within budget.
+## Needs the user
 
-**Approach:** prototype in Python first; the C++ comes after the numbers are good.
-
-1. **Second-order all-pass per section, closed form per 32-sample cell.**
-   - A(z) = (a₂ + a₁z⁻¹ + z⁻²)/(1 + a₁z⁻¹ + a₂z⁻²). Its lag at ω is linear in (a₁, a₂) once written as
-     Im(e^(−jβ)·D(e^(jω))) = 0 with β = φ/2 − ω (verify the sign convention numerically).
-   - So matching the analog lag exactly at the reference frequency and at one high anchor (try 15–19 kHz, or choose
-     it to minimise the band error) is a 2×2 solve.
-   - Check stability, monotonicity and the error over the whole θ range at 44.1, 48, 88.2, 96 and 192 kHz.
-2. **Fallback:** minimax-fitted second- or third-order sections tabulated over θ per rate class, interpolated in a
-   stable parametrisation (pole radius and angle).
-3. **The hard part is near identity.** As θᵢ → 0 the analog section's phase vanishes everywhere, but a digital
-   second-order all-pass still has to reach 360° at Nyquist, so its poles go towards the unit circle near Nyquist
-   (sharp, ultrasonic). Measure what that does (ringing, numerics, the burst test). Options:
-   - accept it (ultrasonic);
-   - blend from the first-order section over the lowest few degrees;
-   - use the first-order section while its corner is above about 20 kHz, where it isn't cramped in the audible band.
-   - Don't trade away "0° = identity" without asking.
-
-**Steps:**
-1. `prototype/hilo.py`: a de-cramped variant behind a flag.
-2. `hf_check.py`: a de-cramped column, plus the monotonicity and readout checks.
-3. Port to `AllpassCascade` (both modes); regenerate the goldens; keep or extend PhaseTests: flat level, readout,
-   monotonic, all-pass during glides, the broadband no-burst test.
-4. Re-render P3 (`PhaseAlignDspTests "[p3]"`, then `prototype/p3_report.py`); benchmark.
-5. Render A/B material for the user: the same settings at 44.1 and 96 kHz, old vs de-cramped, on the P3 sources and
-   any real stems.
-
-**Done when:**
-- The target is met at every rate with every "must keep" holding.
-- Goldens and tests pass; within budget; plan 2.3 and the 2.6 table updated.
-- **Then the user listens**, and only after their OK does it merge.
-
-## 2. Constant on Windows and Linux: PFFFT
-
-**Status (2026-10-06): steps 1–3 built and merged to master (not pushed).** PFFFT is a submodule in
-`libs/pffft`, the engine behind `RealFft` wherever vDSP isn't; licence in `THIRD_PARTY_NOTICES.md`. On the M1 (NEON) it
-matches vDSP (plan 2.6, K). Left: CI's x86 numbers (with the next push, the user's call), for Constant and for the
-oversampled Hi/Lo (item 1 may go over 50 ns at 44.1 kHz there), and step 4.
-
-CI's numbers (plan 2.6, run 37396526948) put Constant over budget:
-- **Linux:** 119–160 ns, and 160 at 192 kHz, over 150.
-- **Windows:** 232–327 ns at every rate, and one 64-sample callback at 192 kHz took 1088 µs of 333.
-
-These are shared VMs, so pessimistic, but the gap is too big to ignore. Hi/Lo is fine everywhere.
-
-1. **Ask the user** before fetching PFFFT's source (BSD-style licence): it's a download. Put it under `libs/` and note
-   the licence where the other third-party notices go.
-2. Add it as `RealFft`'s engine on non-Apple platforms, keeping the packed split format. PFFFT's ordered real
-   transform is interleaved, so repack, or use its own `zconvolve_accumulate` in its internal order if that is
-   faster.
-3. Re-tune `ConstantRotator::blockSizesFor` for the new engine from CI's convolver benchmark. On Windows today the
-   three-level 128/1024/4096 layout beats uniform 128 at 96 kHz (279 vs 525 ns).
-4. Check MSVC vectorises the register-blocked loops (head, multiply-add, fractional kernel). If not, a small SSE/NEON
-   helper.
-
-**Done when:** Constant is under 150 ns and the worst 192 kHz callback is under about half its length on both CI
-runners. The goldens and every test still pass with each engine, and plan 2.6 has the numbers.
-
-## 3. CI hygiene
-
-**Status (2026-10-06): done, unverified until the next push.** `ubuntu-24.04` pinned in `ci.yml` (and `release.yml`'s
-Linux build); pluginval at strictness 10 on the VST3 added for Windows and Linux as information only
-(`continue-on-error`, logs uploaded per OS): make it required once it has passed there.
-
-- GitHub moves `ubuntu-latest` to Ubuntu 26 from 2026-10-19 (an annotation on the runs). Pin `ubuntu-24.04`, or run
-  once on the new image and fix what breaks (fonts for the editor tests under xvfb, package names in the apt step).
-- Optional: pluginval at strictness 10 on the VST3 on Linux and Windows too (`pluginval_Linux.zip`,
-  `pluginval_Windows.zip`). Linux needs xvfb.
-- **Done when:** CI is green on all three after the change.
-
-## 4. M4's Instruments check
-
-**Status (2026-10-06): done.** `tools/meter_profile.py`; results in plan 5 (M4): no meter samples when off, hidden or
-closed, hundreds when metering.
-
-Confirm, with a profiler rather than counters, that nothing of the meter runs when the meter is off, the editor is
-closed or the window is hidden: no `CorrelationAnalyser` and no `MeterScreen` paint/timer samples.
-
-- Use `xctrace record --template 'Time Profiler' --launch -- <binary> "[desktop]"`.
-- A small hidden test may be easier: open the editor, meter off, process audio for 10 s; then closed; then hidden.
-  Pass environment variables with `--env`.
-- **Done when:** the M4 box in plan 5 is ticked, with the evidence noted there.
-
-## 5. Release checklist items that need no credentials
-
-**Status (2026-10-06):** both macOS architectures checked (plan M5; releases stay separate arm64 and Intel builds, R14). Notices: every installer and release zip now ships
-`installer/stage_docs.sh`'s output: `Readme.txt` (the README's quick start, with the AGPLv3 source pointer) and
-`licenses/` (the project's AGPLv3, PFFFT's licence, both fonts' OFL, `THIRD_PARTY_NOTICES.md`), installed beside the
-plugins (not into the signed bundles): `/Library/Application Support/Phase Align` (and a readme page in the .pkg),
-`Program Files\Phase Align`, `/usr/share/doc/phasealign`. `release.yml` reviewed (plan M5).
-
-- **Both architectures** (separate releases, not universal: R14): build `-DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"` once to check, run the DSP tests natively and under
-  Rosetta (`arch -x86_64 <binary>`; Rosetta is installed), and `lipo -info` the AU and VST3.
-- **OFL font notices:** check each installer (`installer/macos`, `installer/windows`, `installer/linux`) ships
-  `assets/fonts/licenses/`, and add them where missing.
-- **Installer readme:** the README's quick-start, packaged into each installer. The host routing steps in it are still
-  to be checked by the user.
-- **`release.yml` review:** read it against the current tree (the tests are off there). Don't run it: it needs signing
-  secrets and publishes a draft GitHub release, so it's the user's call.
-
-## 6. Housekeeping (ask first)
-
-- AU in pluginval locally needs the AU installed in `/Library/Audio/Plug-Ins/Components`, which is the user's call.
-- The merge, the old branches and the stale worktrees were dealt with on 2026-10-06.
-
-## Not in this handover: needs the user
-
-- **Listening:** M2 in a DAW, P2 (is true rotation useful on real material), P3 fade tuning (the renders and report
-  are ready in `prototype/out/p3/`), and the de-cramp A/B.
+- **A push** (and so CI on everything since dad5331).
+- **`release.yml`:** it builds with the tests off, so a release could be cut from a commit whose CI failed. Run it only
+  on a green commit, or add a CI-status check to it (plan M5).
+- **The first release run**, which also checks the Windows and Linux installers' new docs step.
+- **Host checks:** latency re-alignment per host (now also Hi/Lo's small latency), the quick start's sidechain routing
+  steps (the installer readme keeps the README's "Draft" note until they're checked), no-sidechain detection in Logic,
+  Live and Reaper.
+- **Listening:** M2 in a DAW, P2 (is true rotation useful on real material), P3 fade tuning (`prototype/out/p3/`).
 - **Real multi-mic stems.**
 - **Design decisions:** what RANGE does in the DSP; extending Hi/Lo below their lowest corners; the meter views; the
   dimming alpha; the minimum editor size; ANALYSE (dead last).
-- **Host checks:** latency re-alignment per host, sidechain routing steps, no-sidechain detection in Logic, Live and
-  Reaper.
-- **Release:** a trademark search for the name; the JUCE licence tier; notarisation credentials.
+- AU in pluginval locally needs the AU installed in `/Library/Audio/Plug-Ins/Components`.

@@ -27,7 +27,7 @@ Items marked **[verify]** are things I believe are right but have not confirmed.
 | R9 | Assets ship at 2.5× the default size and are **cached pre-scaled to physical pixels** on resize | Sharpness comes from the cache, not only from the asset resolution (section 4.2) | Agrees |
 | R10 | **Delay −4 to +4 ms** (user, 2026-10-06; built 2026-10-06, branch `dsp-negative-delay`): delay on reports 4 ms of latency so the delay can be negative; delay off reports none (2.1a) | Align either track without moving clips | Yes (3.1, 3.4 "zero latency") |
 | R12 | **Delay in steps of 0.1 sample** (user, 2026-10-06; built on `dsp-negative-delay`), replacing whole samples (PLAN decision 12) | Whole samples leave up to 2.4 dB of dip at 20 kHz on a coherent pair at 44.1 kHz; 0.1 sample leaves 0.02 dB (2.1a) | Yes (2.1, decision 12, open question 7) |
-| R13 | **Hi/Lo runs oversampled** (4× below 85 kHz, 2× below 170 kHz) between linear-phase halfbands, and **reports a small latency whenever Constant isn't selected**: 32 samples at 44.1 kHz (0.73 ms), 18 at 48 kHz (0.38 ms), 5 at 88.2/96 kHz, none from 176.4 kHz (user, 2026-10-06; merged to master, the user's listening still to come) | De-cramping: within 2.5° of analog sections to 20 kHz at every rate (was up to 80° at 44.1 kHz), so a setting sounds the same at every rate. Impossible at zero latency (Foster's reactance theorem, 2.3) | Yes (3.4 and 4.8 "zero latency", decision 4 "oversampling dropped") |
+| R13 | **Hi/Lo runs oversampled** (4× below 85 kHz, 2× below 170 kHz) between linear-phase halfbands, and **reports a small latency whenever Constant isn't selected**: 32 samples at 44.1 kHz (0.73 ms), 18 at 48 kHz (0.38 ms), 5 at 88.2/96 kHz, none from 176.4 kHz (user, 2026-10-06; merged to master and approved by ear) | De-cramping: within 2.5° of analog sections to 20 kHz at every rate (was up to 80° at 44.1 kHz), so a setting sounds the same at every rate. Impossible at zero latency (Foster's reactance theorem, 2.3) | Yes (3.4 and 4.8 "zero latency", decision 4 "oversampling dropped") |
 | R14 | **macOS ships two separate builds, not a universal binary** (user, 2026-10-06): arm64, and x86_64 labelled "Intel" in the GitHub release (`release.yml`'s `macos` and `macos-intel` jobs). Local builds are arm64 only | Each download stays half the size; only a small minority need Intel, but it is still offered | Yes (10, "universal binary") |
 | R11 | **Dim a switched-off section** (user, 2026-10-06; not built yet): its knob, switch, readout values and buttons go semi-transparent but stay usable; the on/off toggles stay at full opacity (4.5) | Shows at a glance what's in the signal path | New |
 
@@ -513,8 +513,8 @@ along the taps instead, with lane reversals); a fused multiply-add on ARM; stati
 with the stereo pair in one register; the outer down-filter skipped while unheard. Moving the filters' history less
 often measured no gain and was dropped. The rest of the chain adds about 6 ns more than before around the stage (the
 delayed dry path, and more); not chased further. Within budget on the M1. **On the x86 CI runners Hi at 44.1 kHz may
-go over 50 ns** (they ran 3–4 times the M1's figures before; the SSE2 path has no fused multiply-add): CI's numbers
-decide whether the budget or the code moves.
+go over 50 ns** (they ran 3–4 times the M1's figures before; the SSE2 path has no fused multiply-add). **Accepted by
+the user (2026-10-06):** over 50 ns at 44.1 kHz on Windows/Linux is fine.
 
 **K. PFFFT as the engine where vDSP isn't available (2026-10-06, branch `pffft-engine`; `HANDOVER.md` item 2).**
 `libs/pffft` (submodule, BSD-style licence; `THIRD_PARTY_NOTICES.md`) replaces juce::dsp::FFT behind `RealFft`: its
@@ -842,11 +842,13 @@ Each item has a "done when" check. P* (Python) and U* (UI) work can run in paral
     (2) the zips lacked the notices (fixed above); (3) Windows and Linux binaries are unsigned (needs credentials);
     (4) `codesign --deep` for signing is deprecated by Apple (works; signing nested code first is the modern way).
     The separate arm64 and Intel jobs are as intended (R14). Its Linux build is pinned to Ubuntu 24.04 as in CI.
-  - Left: notarisation (credentials), the trademark search, the host checks.
+  - **Signing (user, 2026-10-06):** macOS notarisation is covered: the Apple secrets are set in the repo, and
+    `release.yml` signs and notarises both macOS builds and their .pkg (confirmed on the first release run). Windows
+    and Linux ship unsigned (no credentials; none needed).
+  - Left: the first release run, the host checks.
 - [ ] **Quick-start guide** (README section + installer readme). The essential point: the plugin can only *delay*, so it goes on the track that arrives **earlier** (usually the closer mic), with the later track as the sidechain. Also covers routing a sidechain in the major hosts, what the meter's two markers mean, and that Constant mode adds compensated latency.
-- [ ] Name check: search for existing products called "Phase Align" before publishing, since the name is baked into the panel art.
-  Web search (2026-10-06): no audio product of that name found; "phase alignment" is common as a description of other
-  products. Not a trademark search: check the trademark registers before publishing.
+- [x] Name check: web search (2026-10-06) found no audio product called "Phase Align"; "phase alignment" is common as a
+  description of other products. **No trademark search (user, 2026-10-06): open source.**
 - [ ] Quick-start guide: **drafted in README (2026-10-06)** with the −4..+4 ms delay (it can move a track either way, so
   "only delay" no longer applies); host routing steps to be checked in each host; the installer readme is generated
   from it (`installer/stage_docs.sh`), draft note included until the routing is checked.
@@ -870,5 +872,4 @@ Most of this plan is standard plugin engineering. The parts that could need iter
 ## 7. Still needed from you
 
 - **Real multi-mic stem pairs** for P2/P3 listening: kick in/out, snare top/bottom, bass DI/amp, guitar close/room.
-- Listening once the de-cramped Hi/Lo is built (`HANDOVER.md` item 1). Work that needs no input from the user is
-  in `HANDOVER.md`.
+- Work that needs no input from the user, and what is waiting on the user, is in `HANDOVER.md`.
