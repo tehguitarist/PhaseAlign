@@ -32,6 +32,17 @@ struct Shape
     friend bool operator!=(const Shape& a, const Shape& b) { return ! (a == b); }
 };
 
+// The four shapes in a fixed order, matching SHAPE_ORDER in prototype/hilo.py: low 90, low 180, high 90, high 180.
+inline constexpr int shapeCount = 4;
+inline constexpr int shapeIndex(const Shape& s)
+{
+    return (s.mode == Mode::hi ? 2 : 0) + (s.wide ? 1 : 0);
+}
+inline constexpr Shape shapeAt(int i)
+{
+    return {i >= 2 ? Mode::hi : Mode::lo, (i & 1) != 0};
+}
+
 struct References
 {
     double f1, f2; // section reference frequencies (Hz)

@@ -10,10 +10,12 @@
 
 // Hi/Lo phase modes (IMPLEMENTATION_PLAN 2.3): two first-order all-pass sections in series, double state. The knob's
 // panel angle and the range (90 or 180) set the target of phi, section 1's angle, which is smoothed linearly over
-// smoothMs and mapped to the sections' k by the current shape, (mode, range) (PhaseMapping.h). Changing the shape (mode
-// or range) glides log k from the old shape's mapping to the new one's over glideMs, so the signal stays all-pass
-// throughout (R3); switching back during a glide reverses it from where it is. Reference: prototype/hilo.py (HiLo),
-// golden-tested.
+// smoothMs and mapped to the sections' k by the shapes, (mode, range) (PhaseMapping.h). The glide is a weight on each
+// of the four shapes, summing to 1; each section's log k is the weighted sum of that shape's log k at the current phi.
+// Changing the shape (mode or range) moves the weights to the new shape alone, each on a linear ramp of glideMs from
+// where it is, so the signal stays all-pass throughout (R3) and a change that arrives mid-glide, back to the shape just
+// left or on to a third, continues from the current blend instead of jumping (a two-shape glide jumped to the
+// previous shape's k, which clicked: fixed 2026-10-06). Reference: prototype/hilo.py (HiLo), golden-tested.
 //
 // Coefficients are computed on a fixed grid of `cell` samples counted from reset(), so the output doesn't
 // depend on the host's block sizes: at the start of each cell phi and the glide move on by one cell, and each
@@ -54,10 +56,14 @@ class AllpassCascade
     // Jumps to the shape and angle, clears the state.
     void reset(Mode m, bool wide, double thetaDegrees)
     {
-        shape = previousShape = {m, wide};
+        shape = {m, wide};
         phi = target = mapping::knobAngle(thetaDegrees, wide);
         step = 0.0;
-        glide = 1.0;
+        for (int i = 0; i < mapping::shapeCount; ++i)
+        {
+            weight[(size_t)i] = weightTarget[(size_t)i] = i == mapping::shapeIndex(shape) ? 1.0 : 0.0;
+            weightStep[(size_t)i] = 0.0;
+        }
         untilUpdate = 0;
         for (auto& channel : state)
             channel.fill(0.0);
@@ -65,8 +71,8 @@ class AllpassCascade
     }
 
     // The panel angle (0 to 90, or 0 to 180 when wide) and the shape. A new target for phi restarts its linear ramp
-    // (a RANGE toggle at the same knob position keeps phi, so it only glides the shape); a new shape starts the glide,
-    // or reverses it when it is the one just left.
+    // (a RANGE toggle at the same knob position keeps phi, so it only glides the shape); a new shape moves the glide
+    // weights to it from wherever they are.
     void set(double thetaDegrees, Mode m, bool wide)
     {
         const auto newPhi = mapping::knobAngle(thetaDegrees, wide);
@@ -78,21 +84,16 @@ class AllpassCascade
         const mapping::Shape next{m, wide};
         if (next == shape)
             return;
-        if (glide < 1.0 && next == previousShape) // back again mid-glide: reverse from where it is
+        shape = next;
+        for (int i = 0; i < mapping::shapeCount; ++i)
         {
-            std::swap(shape, previousShape);
-            glide = 1.0 - glide;
-        }
-        else
-        {
-            previousShape = shape;
-            shape = next;
-            glide = 0.0;
+            weightTarget[(size_t)i] = i == mapping::shapeIndex(shape) ? 1.0 : 0.0;
+            weightStep[(size_t)i] = (weightTarget[(size_t)i] - weight[(size_t)i]) / glideSamples; // fixed-length ramps
         }
         stale = true;
     }
 
-    bool isSettled() const { return std::equal_to<double>()(phi, target) && glide >= 1.0; }
+    bool isSettled() const { return std::equal_to<double>()(phi, target) && weight == weightTarget; }
 
     // Section 1's angle now (the ramped phi).
     double getPhi() const { return phi; }
@@ -239,17 +240,20 @@ class AllpassCascade
 
     void computeG(double* g) const
     {
-        const auto [a1, a2] = mapping::angles(shape, phi);
-        auto [k1, k2] = mapping::kAngles(shape, a1, a2, sampleRate);
-        if (glide < 1.0)
+        double ln1 = 0.0, ln2 = 0.0;
+        for (int i = 0; i < mapping::shapeCount; ++i)
         {
-            const auto [p1, p2] = mapping::angles(previousShape, phi);
-            const auto [o1, o2] = mapping::kAngles(previousShape, p1, p2, sampleRate);
-            k1 = std::exp((1.0 - glide) * std::log(o1) + glide * std::log(k1));
-            k2 = std::exp((1.0 - glide) * std::log(o2) + glide * std::log(k2));
+            const auto w = weight[(size_t)i];
+            if (std::equal_to<double>()(w, 0.0))
+                continue;
+            const auto s = mapping::shapeAt(i);
+            const auto [a1, a2] = mapping::angles(s, phi);
+            const auto [k1, k2] = mapping::kAngles(s, a1, a2, sampleRate);
+            ln1 += w * std::log(k1);
+            ln2 += w * std::log(k2);
         }
-        g[0] = 1.0 / (1.0 + k1);
-        g[1] = 1.0 / (1.0 + k2);
+        g[0] = 1.0 / (1.0 + std::exp(ln1));
+        g[1] = 1.0 / (1.0 + std::exp(ln2));
     }
 
     // A decaying state would otherwise reach denormals in silence when the caller hasn't set flush-to-zero (offline
@@ -271,13 +275,19 @@ class AllpassCascade
             if ((step > 0.0) == (phi >= target))
                 phi = target;
         }
-        if (glide < 1.0)
-            glide = std::min(1.0, glide + cell / glideSamples);
+        for (size_t i = 0; i < weight.size(); ++i)
+            if (! std::equal_to<double>()(weight[i], weightTarget[i]))
+            {
+                weight[i] += weightStep[i] * cell;
+                if ((weightStep[i] > 0.0) == (weight[i] >= weightTarget[i]))
+                    weight[i] = weightTarget[i];
+            }
     }
 
     double sampleRate = 48000.0, smoothSamples = 1.0, glideSamples = 1.0;
-    mapping::Shape shape, previousShape;
-    double phi = 0.0, target = 0.0, step = 0.0, glide = 1.0;
+    mapping::Shape shape; // the shape the weights are moving to
+    std::array<double, mapping::shapeCount> weight{}, weightTarget{}, weightStep{};
+    double phi = 0.0, target = 0.0, step = 0.0;
     int cell = defaultCell, untilUpdate = 0;
     bool stale = true, interpolating = false;
     double g0[2] = {1.0, 1.0}, g1[2] = {1.0, 1.0};

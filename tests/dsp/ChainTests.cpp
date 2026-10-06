@@ -483,39 +483,43 @@ TEST_CASE("no sample step above the threshold under scripted automation", "[dsp]
     // amplitude. Each transition may add at most its ramp's slope times the largest jump it bridges.
     const auto freq = 100.0;
     const auto amplitude = 0.5f;
-    for (const auto fs : rates)
-    {
-        INFO("fs " << fs);
-        const auto length = (int)(3.0 * fs);
-        // A 10 ms fade-in: a path with latency (the delay, Constant) replays the signal's onset later, and an abrupt
-        // start would be a step there.
-        auto input = sine(2, length, freq, fs, amplitude);
-        const auto fadeIn = (int)(0.01 * fs);
-        for (auto& ch : input)
-            for (int i = 0; i < fadeIn; ++i)
-                ch[(size_t)i] *= (float)i / (float)fadeIn;
-        const auto out = run(fs, input, ChainSettings{}, automationScript(fs, length, 7));
+    // Several seeds: the random sequences differ between standard libraries, and seeds 13, 14, 22 and 29 are the ones
+    // that exposed a click when a change of mode or range arrived mid-glide (steps up to 8.8 times this limit).
+    for (const auto seed : {7u, 13u, 14u, 22u, 29u})
+        for (const auto fs : rates)
+        {
+            INFO("fs " << fs << ", seed " << seed);
+            const auto length = (int)(3.0 * fs);
+            // A 10 ms fade-in: a path with latency (the delay, Constant) replays the signal's onset later, and an
+            // abrupt start would be a step there.
+            auto input = sine(2, length, freq, fs, amplitude);
+            const auto fadeIn = (int)(0.01 * fs);
+            for (auto& ch : input)
+                for (int i = 0; i < fadeIn; ++i)
+                    ch[(size_t)i] *= (float)i / (float)fadeIn;
+            const auto out = run(fs, input, ChainSettings{}, automationScript(fs, length, seed));
 
-        const auto fade = (double)crossfadeSamples(fs);
-        const auto latencyFade = (double)latencyFadeSamples(fs);
-        const auto naturalStep = 2.0 * M_PI * freq / fs * amplitude;
-        // Three crossfades at once, plus the output fade around a latency change (the delay on or off), plus a moving
-        // phase: up to 180 degrees over Constant's 20 ms angle smoothing (Hi/Lo's is 30 ms).
-        const auto phaseRamp = amplitude * M_PI / (ConstantRotator::smoothMs * 1.0e-3 * fs);
-        const auto limit = 1.05 * naturalStep + 3.0 * (2.0 * amplitude) / fade + amplitude / latencyFade + phaseRamp;
-        // In the audible band: at 88.2 kHz and up, a corner sweeping down from near Nyquist (a phase knob passing 0 or
-        // 90 degrees) leaves a brief wobble far above 20 kHz that a raw sample-to-sample step would count.
-        auto measured = out;
-        if (fs >= 88200.0)
-            for (auto& ch : measured)
-                lowPass20k(ch, fs);
-        double worst = 0.0;
-        for (const auto& ch : measured)
-            for (size_t i = 1; i < ch.size(); ++i)
-                worst = std::max(worst, (double)std::abs(ch[i] - ch[i - 1]));
-        CHECK(worst <= limit);
-        CHECK(worst < 0.05); // and nowhere near a click (a hard switch steps by up to 1.0 here)
-    }
+            const auto fade = (double)crossfadeSamples(fs);
+            const auto latencyFade = (double)latencyFadeSamples(fs);
+            const auto naturalStep = 2.0 * M_PI * freq / fs * amplitude;
+            // Three crossfades at once, plus the output fade around a latency change (the delay on or off), plus a
+            // moving phase: up to 180 degrees over Constant's 20 ms angle smoothing (Hi/Lo's is 30 ms).
+            const auto phaseRamp = amplitude * M_PI / (ConstantRotator::smoothMs * 1.0e-3 * fs);
+            const auto limit =
+                1.05 * naturalStep + 3.0 * (2.0 * amplitude) / fade + amplitude / latencyFade + phaseRamp;
+            // In the audible band: at 88.2 kHz and up, a corner sweeping down from near Nyquist (a phase knob passing 0
+            // or 90 degrees) leaves a brief wobble far above 20 kHz that a raw sample-to-sample step would count.
+            auto measured = out;
+            if (fs >= 88200.0)
+                for (auto& ch : measured)
+                    lowPass20k(ch, fs);
+            double worst = 0.0;
+            for (const auto& ch : measured)
+                for (size_t i = 1; i < ch.size(); ++i)
+                    worst = std::max(worst, (double)std::abs(ch[i] - ch[i - 1]));
+            CHECK(worst <= limit);
+            CHECK(worst < 0.05); // and nowhere near a click (a hard switch steps by up to 1.0 here)
+        }
 }
 
 TEST_CASE("no NaN, infinity or denormal under fast automation", "[dsp]")
@@ -732,4 +736,59 @@ TEST_CASE("dump renders for comparing builds", "[.][dump]")
                 std::fwrite(ch.data(), sizeof(float), ch.size(), f);
             std::fclose(f);
         }
+}
+
+TEST_CASE("changes of mode and range that arrive mid-glide never step", "[dsp]")
+{
+    // A 100 Hz sine through the Hi/Lo stage with four changes of mode and range at random times 0.05 to 12 ms apart, so
+    // most arrive while the last glide is running, many to a shape other than the one just left. With a glide between
+    // only two shapes the third shape jumped to the previous one's coefficients, a step of 12 to 26 times the sine's
+    // own. Now each glide continues from the current blend, so the largest step stays close to the sine's.
+    const auto freq = 100.0, amplitude = 0.5;
+    for (const auto fs : {44100.0, 96000.0})
+    {
+        std::mt19937 rng(11);
+        double worstRatio = 0.0;
+        for (int trial = 0; trial < 40; ++trial)
+        {
+            const auto length = (int)(0.5 * fs);
+            std::vector<float> y((size_t)length);
+            for (int i = 0; i < length; ++i)
+                y[(size_t)i] = (float)(amplitude * std::sin(2.0 * M_PI * freq * i / fs));
+            HiLoStage stage;
+            stage.prepare(fs);
+            std::uniform_int_distribution<int> shapeDist(0, 3);
+            std::uniform_real_distribution<double> gapMs(0.05, 12.0), angle(0.0, 90.0);
+            const auto first = (int)(0.2 * fs);
+            stage.reset(HiLoStage::Mode::hi, false, 40.0);
+            int pos = 0;
+            const auto run = [&](int to)
+            {
+                for (; pos < to;)
+                {
+                    const auto n = std::min(to - pos, HiLoStage::maxBlock);
+                    float* io[1] = {y.data() + pos};
+                    stage.process(io, 1, n);
+                    pos += n;
+                }
+            };
+            run(first);
+            int at = first;
+            for (int change = 0; change < 4; ++change)
+            {
+                const auto shape = mapping::shapeAt(shapeDist(rng));
+                stage.set(angle(rng) * (shape.wide ? 2.0 : 1.0), shape.mode, shape.wide);
+                at += std::max(1, (int)(gapMs(rng) * fs / 1000.0));
+                run(at);
+            }
+            run(length);
+            const auto natural = 2.0 * M_PI * freq / fs * amplitude;
+            double worst = 0.0;
+            for (int i = first + 1; i < first + (int)(0.1 * fs); ++i)
+                worst = std::max(worst, (double)std::abs(y[(size_t)i] - y[(size_t)i - 1]));
+            worstRatio = std::max(worstRatio, worst / natural);
+        }
+        INFO("fs " << fs);
+        CHECK(worstRatio < 1.6);
+    }
 }

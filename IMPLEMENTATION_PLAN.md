@@ -258,9 +258,15 @@ own references, all taken from measurements of the reference unit (nothing inven
   The 90 range sounds exactly as it did before (identical A/B levels, `prototype/out/range/report.md`); only the 180
   range changed, where the two sections now share the whole knob travel from 0° instead of the second one only
   joining past 90°.
-- **Switching shape** (a RANGE press or a mode change) glides each section's k geometrically from the old shape's
-  value to the new one's over 30 ms (R3, the same glide as Hi↔Lo), reversing from where it is if switched back
-  mid-glide. The knob keeps its position through a RANGE press, so φ is unchanged.
+- **Switching shape** (a RANGE press or a mode change) glides each section's k geometrically to the new shape's value
+  over 30 ms (R3, the same glide as Hi↔Lo). The glide state is a weight on each of the four shapes (summing to 1);
+  a change sets the target to the new shape alone and moves every weight to its target on a linear ramp of 30 ms from
+  where it is, and each section's log k is the weighted sum of the shapes' log k at the current φ. So a change that
+  arrives mid-glide, back to the shape just left or on to a third, continues from the current blend. (The first build
+  of the redesign glided between just two shapes and jumped to the previous shape's k when a third arrived mid-glide:
+  CI caught it as a sample step of up to 8.8× the test's limit on Linux and Windows, 12–26× the sine's own step in
+  the reference; fixed 2026-10-06, with a regression test over random sequences and the CI seeds that exposed it
+  covered in the automation test.) The knob keeps its position through a RANGE press, so φ is unchanged.
 - **The panel angle (what the readout, scale label and host text show):** the shift at the first section's reference
   where that is exact, else φ. LOW and HIGH at RANGE 90 read 0–90 (the lag at 75.1 / 150.1 Hz); LOW at RANGE 180 reads
   0–180 exactly (the stacked pair's lag at 150.1 Hz); **HIGH at RANGE 180 shows φ, 0–90, marked with an asterisk**

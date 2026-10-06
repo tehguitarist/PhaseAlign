@@ -20,11 +20,13 @@ OUT = Path(__file__).resolve().parent.parent / "tests" / "golden"
 
 # Hi/Lo: (sample, theta or None, mode or None, wide or None). Covers a phi sweep in range 90, RANGE toggled to 180 and
 # back (once with the knob kept where it was, which clamps), a Hi→Lo glide reversed half way, a glide while phi moves,
-# and a mode and range change at once.
+# a mode and range change at once, and two more changes within a glide, to shapes other than the one just left (the
+# weights glide on from the current blend; a two-shape glide jumped there, 2026-10-06).
 HILO_SCRIPT = [(0, 0.0, "hi", False), (1024, 45.0, None, None), (2048, 90.0, None, None), (3072, 120.0, None, True),
                (4096, None, "lo", None), (4096 + 320, None, "hi", None), (5120, 170.0, None, None),
                (5632, None, None, False), (6144, 30.0, None, None), (6400, None, "lo", None),
-               (7168, 180.0, None, True), (7680, 100.0, "hi", False)]
+               (7168, 180.0, None, True), (7680, 100.0, "hi", False), (7744, 60.0, "lo", True),
+               (7808, None, "hi", True)]
 # Constant: (sample, theta). Through 90 and 180 (exact there), and back to 0.
 CONSTANT_SCRIPT = [(0, 0.0), (2048, 90.0), (6144, 180.0), (9216, 37.0), (12288, 0.0)]
 

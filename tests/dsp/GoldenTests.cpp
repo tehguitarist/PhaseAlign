@@ -88,7 +88,8 @@ TEST_CASE("golden: Hi/Lo matches prototype/hilo.py sample by sample", "[dsp][gol
     const std::vector<Event> events = {{1024, 45.0, -1, -1}, {2048, 90.0, -1, -1},       {3072, 120.0, -1, 1},
                                        {4096, -1.0, lo, -1}, {4096 + 320, -1.0, hi, -1}, {5120, 170.0, -1, -1},
                                        {5632, -1.0, -1, 0},  {6144, 30.0, -1, -1},       {6400, -1.0, lo, -1},
-                                       {7168, 180.0, -1, 1}, {7680, 100.0, hi, 0}};
+                                       {7168, 180.0, -1, 1}, {7680, 100.0, hi, 0},       {7744, 60.0, lo, 1},
+                                       {7808, -1.0, hi, 1}};
     for (const auto fs : {44100.0, 48000.0, 96000.0, 192000.0}) // oversampled 4x (both outer halfbands), 2x, not
         for (const auto block : {512, 37})
         {

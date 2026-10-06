@@ -20,8 +20,9 @@ sections on the lows, stacked):
   | LOW | one section at 75.1 Hz | two stacked sections at 150.1 Hz |
   | HIGH | one section at 150.1 Hz | 75.1 Hz and 1502 Hz |
 
-Toggling RANGE or the mode changes shape; the k of each section glides geometrically from the old shape's value to the
-new one's (R3), so there is no step. The panel angle: LOW 180 reads exactly 0-180 (the stacked pair's lag at 150.1 Hz);
+Toggling RANGE or the mode changes shape; the k of each section glides geometrically to the new shape's value (R3), from
+wherever it is when the change arrives (the glide state is a weight on each of the four shapes, so a change in the
+middle of a glide, to any shape, still never steps), so there is no step. The panel angle: LOW 180 reads exactly 0-180 (the stacked pair's lag at 150.1 Hz);
 HIGH 180 shows phi (0-90) with an asterisk, because its lag at 75.1 Hz only reaches about 96 degrees.
 
 More knob or a wider range never means less phase at any frequency (both thetas only grow).
@@ -44,6 +45,7 @@ class Mode:
     f2: float  # section 2 reference (Hz)
 
 
+SHAPE_ORDER = [("lo", False), ("lo", True), ("hi", False), ("hi", True)]
 SHAPES = {  # (mode, wide) -> section references
     ("lo", False): Mode(f1=75.1, f2=75.1),
     ("lo", True): Mode(f1=150.1, f2=150.1),
@@ -118,19 +120,26 @@ class HiLo:
 
     Coefficients run on a fixed grid of `sub` samples: at the start of each cell the ramp and the glide
     move on by one cell, and each section's G is interpolated linearly per sample from its value
-    before the move to its value after it, so a corner sweeping down from near Nyquist doesn't step. Switching back to
-    the previous mode during a glide reverses it from where it is.
+    before the move to its value after it, so a corner sweeping down from near Nyquist doesn't step.
+
+    The glide is a weight on each of the four shapes (summing to 1). A shape change sets the target weights to that
+    shape alone and moves every weight to its target on a linear ramp of fixed length (glide_ms) from where it is, and each
+    section's k is exp(sum of weight x ln k of that shape at the current phi). So a change that arrives mid-glide, back
+    to the previous shape or on to a third one, continues smoothly from the current blend (until 2026-10-06 the glide
+    was between just two shapes: a third shape mid-glide jumped to the previous shape's k, a click).
     """
 
     def __init__(self, fs, mode="hi", theta=0.0, wide=False, smooth_ms=30.0, glide_ms=30.0, sub=32):
         self.fs, self.sub = fs, sub
         self.panel = float(theta)
-        self.shape = self.prev_shape = (mode, bool(wide))
+        self.shape = (mode, bool(wide))
         self.phi = self.phi_target = knob_angles(self.panel, bool(wide))[0]
         self.phi_step = 0.0
         self.smooth_n = max(1, round(smooth_ms * 1e-3 * fs))
         self.glide_n = max(1, round(glide_ms * 1e-3 * fs))
-        self.glide = 1.0  # 0 → previous mode's k, 1 → current mode's k
+        self.w = [1.0 if sh == self.shape else 0.0 for sh in SHAPE_ORDER]  # glide weights, one per shape
+        self.w_target = list(self.w)
+        self.w_step = [0.0] * len(SHAPE_ORDER)
         self.x1 = None  # per section: last input and last output (direct form I)
         self.y1 = None
         self.until = 0  # samples left in the current cell
@@ -146,29 +155,32 @@ class HiLo:
                 self.phi_target = phi_t
                 self.phi_step = (phi_t - self.phi) / self.smooth_n  # a linear ramp of fixed length
         if shape != self.shape:
-            if self.glide < 1.0 and shape == self.prev_shape:  # back again mid-glide: reverse from where it is
-                self.prev_shape, self.shape, self.glide = self.shape, self.prev_shape, 1.0 - self.glide
-            else:
-                self.prev_shape, self.shape, self.glide = self.shape, shape, 0.0
+            self.shape = shape
+            self.w_target = [1.0 if sh == shape else 0.0 for sh in SHAPE_ORDER]
+            self.w_step = [(t - w) / self.glide_n for t, w in zip(self.w_target, self.w)]  # linear ramps of fixed length
 
     def _settled(self):
-        return self.phi == self.phi_target and self.glide >= 1.0
+        return self.phi == self.phi_target and self.w == self.w_target
 
     def _g(self):
-        k1, k2 = k_angles(self.shape, *angles(self.shape, self.phi), self.fs)
-        if self.glide < 1.0:
-            o1, o2 = k_angles(self.prev_shape, *angles(self.prev_shape, self.phi), self.fs)
-            k1 = math.exp((1.0 - self.glide) * math.log(o1) + self.glide * math.log(k1))
-            k2 = math.exp((1.0 - self.glide) * math.log(o2) + self.glide * math.log(k2))
-        return np.array([1.0 / (1.0 + k1), 1.0 / (1.0 + k2)])
+        ln1 = ln2 = 0.0
+        for wi, sh in zip(self.w, SHAPE_ORDER):
+            if wi != 0.0:
+                a1, a2 = k_angles(sh, *angles(sh, self.phi), self.fs)
+                ln1 += wi * math.log(a1)
+                ln2 += wi * math.log(a2)
+        return np.array([1.0 / (1.0 + math.exp(ln1)), 1.0 / (1.0 + math.exp(ln2))])
 
     def _advance(self):
         if self.phi != self.phi_target:
             self.phi += self.phi_step * self.sub
             if (self.phi_step > 0) == (self.phi >= self.phi_target):
                 self.phi = self.phi_target
-        if self.glide < 1.0:
-            self.glide = min(1.0, self.glide + self.sub / self.glide_n)
+        for i, (step, target) in enumerate(zip(self.w_step, self.w_target)):
+            if self.w[i] != target:
+                self.w[i] += step * self.sub
+                if (step > 0) == (self.w[i] >= target):
+                    self.w[i] = target
 
     def process(self, x):
         x = np.atleast_2d(np.asarray(x, dtype=np.float64))
