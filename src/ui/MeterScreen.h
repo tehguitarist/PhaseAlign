@@ -1,6 +1,7 @@
 #pragma once
 
 #include "meter/CorrelationAnalyser.h"
+#include "meter/HitCapture.h"
 #include "meter/MeterCapture.h"
 #include "meter/ScopeBuffer.h"
 #include "ui/DesignComponent.h"
@@ -26,6 +27,11 @@ namespace pa::ui
 // peak, triggered on the sidechain's loudest recent onset so a hit stays put. The mouse wheel zooms (0.5 to 200 ms
 // across). Frozen, dragging slides the input against the sidechain: the output trace becomes the PREVIEW, the input
 // as it would be with the delay knob at that distance.
+//
+// With CAPTURE on (the default) ALIGNMENT holds the last hit it detected (within 12 dB of the strongest recent one) and
+// shows the output the knobs would give for it, rendered from the captured input (`meter/HitCapture`), so the picture
+// sits still while the DELAY, polarity and phase are turned; a new hit replaces it after the knobs have been left alone
+// for two seconds. With CAPTURE off it follows the live audio.
 //
 // The view is chosen from a menu that opens upwards from the bottom row's middle label.
 //
@@ -76,6 +82,7 @@ class MeterScreen : public DesignComponent, private juce::Timer
     // The delay and polarity knobs, while frozen: the screen shows the result of those settings (delay 0 when the
     // delay is off), with the phase stage's response if given (the analysis views show it; ALIGNMENT's waveforms don't
     // and say so). Not frozen: ignored (the audio shows it itself).
+    // The settings are also kept while not frozen, for ALIGNMENT's captured hit.
     void setHeldSettings(double delayMs, bool inverted, meter::CorrelationAnalyser::PhaseResponse phase = {});
 
     State getState() const { return state; }
@@ -85,6 +92,11 @@ class MeterScreen : public DesignComponent, private juce::Timer
     juce::Point<float> viewSelectorCentreForTesting() const { return controlArea(Control::view).getCentre(); }
     double getScopeSpanMs() const { return scopeSpanMs; }
     void setScopeSpanMs(double);
+    void setCaptureMode(bool);
+    bool isCaptureMode() const { return captureMode; }
+    std::function<void(bool)> onCaptureSelected; // a click on the CAPTURE label
+    bool hasCapture() const { return hitCapture.valid(); }
+    const meter::HitCapture& getHitCapture() const { return hitCapture; }
     const meter::ScopeBuffer& getScopeBuffer() const { return scopeBuffer; }
     long long getScopeTrigger() const { return triggerIndex; }
     juce::Point<float> speedLabelCentreForTesting(Speed v) const
@@ -129,6 +141,9 @@ class MeterScreen : public DesignComponent, private juce::Timer
     juce::Rectangle<float> controlArea(Control) const;
     Control controlAt(juce::Point<float>) const;
     bool scrubArea(juce::Point<float>) const;
+    juce::Rectangle<float> captureToggleArea() const;
+    void captureHit(long long onsetIndex);
+    void startCapturing();
     void scrubTo(float x);
     void freezeChanged();
     void showViewMenu();
@@ -156,6 +171,10 @@ class MeterScreen : public DesignComponent, private juce::Timer
     std::vector<float> scratch[meter::MeterCapture::numStreams];
     double lastSamplesMs = 0.0;
     meter::ScopeBuffer scopeBuffer;
+    meter::HitCapture hitCapture;
+    meter::HitCapture::Settings knobs;
+    bool captureMode = true;
+    double lastKnobMs = -1.0e9;
     long long triggerIndex = -1;
     float triggerStrength = 0.0f;
     double scopeSpanMs = 20.0;

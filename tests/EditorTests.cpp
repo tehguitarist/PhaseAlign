@@ -458,23 +458,49 @@ TEST_CASE("meter on screen: reads +1 when aligned, and stops when off", "[.][des
     setParam(proc, id::delayMs, (float)(1000.0 * d / fs));
     play(0.5);
 
-    // The scope: a hit train, not yet aligned, then zoomed in, then with a slid preview, then aligned.
+    // ALIGNMENT with CAPTURE on: a hit train, not yet aligned; the view holds one hit; setting the delay moves its output
+    // at once, with no new audio; zoomed in; then CAPTURE off for the live view, with a slid preview.
     hits = true;
     setParam(proc, id::delayMs, 0.0f);
     proc.getUiState().setProperty(UiProps::meterView, "scope", nullptr);
     play(3.0);
-    CHECK(screen.getScopeTrigger() >= 0);
+    REQUIRE(screen.hasCapture());
+    const auto& held = screen.getHitCapture();
+    const auto onset = held.onsetIndex();
     snapshot("meter_scope_unaligned.png");
+    const auto heldOnset = held.onsetIndex();
+
+    setParam(proc, id::delayMs, (float)(1000.0 * d / fs));
+    mm->runDispatchLoopUntil(100); // no audio: the held hit's output follows the knob by itself
+    CHECK(held.onsetIndex() == heldOnset);
+    for (const auto offset : {-20, 0, 15, 40, 120})
+        CHECK(held.at(pa::meter::HitCapture::output, onset + offset) ==
+              Approx(held.at(pa::meter::HitCapture::input, onset + offset - d)).margin(2.0e-3));
+    snapshot("meter_scope_capture_adjusted.png");
     screen.setScopeSpanMs(6.0);
-    play(0.3);
     snapshot("meter_scope_zoom.png");
+
+    // A new hit doesn't replace it while a knob was touched in the last two seconds (the snapshots above took longer than
+    // that, so touch one now) ...
+    setParam(proc, id::delayMs, (float)(1000.0 * (d + 1) / fs));
+    setParam(proc, id::delayMs, (float)(1000.0 * d / fs));
+    play(0.8);
+    CHECK(held.onsetIndex() == heldOnset);
+    // ... but does once it has been left alone.
+    mm->runDispatchLoopUntil(2000);
+    play(1.0);
+    CHECK(held.onsetIndex() != heldOnset);
+
+    // CAPTURE off: the live view, held and slid.
+    screen.setCaptureMode(false);
+    setParam(proc, id::delayMs, 0.0f);
+    play(0.5);
     screen.setHeld(true);
     screen.setPreviewDelayMs(1000.0 * d / fs);
     snapshot("meter_scope_preview.png");
     screen.setHeld(false);
+    screen.setCaptureMode(true);
     setParam(proc, id::delayMs, (float)(1000.0 * d / fs));
-    play(1.5);
-    snapshot("meter_scope_aligned.png");
     screen.setScopeSpanMs(20.0);
     hits = false;
     proc.getUiState().setProperty(UiProps::meterView, "frequency", nullptr);

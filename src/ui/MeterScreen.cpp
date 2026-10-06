@@ -35,8 +35,8 @@ MeterScreen::MeterScreen(const SourceAssets& assetsIn, meter::MeterCapture& capt
     setTooltip("Click the middle label to choose the view: FREQUENCY, the correlation with the sidechain per "
                "frequency; TIME OFFSET, how far this track is from the sidechain, by waveform and by attack (for "
                "drums); PHASE, the angle between them (a slope is a delay, a flat offset a rotation); BANDS, the "
-               "correlation in six wide bands; ALIGNMENT, the waveforms on top of each other around a hit (wheel "
-               "to zoom). SLOW or FAST sets the averaging. HOLD freezes the screen (it also freezes while the host is "
+               "correlation in six wide bands; ALIGNMENT, the waveforms on top of each other around a captured hit (wheel "
+               "to zoom; CAPTURE holds the last hit, which the knobs then act on). SLOW or FAST sets the averaging. HOLD freezes the screen (it also freezes while the host is "
                "stopped); frozen, turn DELAY or the polarity button, drag across TIME OFFSET, or slide the input in ALIGNMENT, to preview a delay on every "
                "view. INPUT is this track before the plugin, OUTPUT after it.");
     for (auto& s : scratch)
@@ -81,7 +81,11 @@ void MeterScreen::setView(View newView)
     if (view == View::time)
         analyser.computeLag(isFrozen());
     if (view == View::scope)
+    {
         refreshTrigger(true);
+        if (captureMode)
+            startCapturing();
+    }
     repaint();
 }
 
@@ -200,12 +204,52 @@ void MeterScreen::freezeChanged()
 
 void MeterScreen::setHeldSettings(double delayMs, bool inverted, meter::CorrelationAnalyser::PhaseResponse phase)
 {
-    if (! isFrozen())
-        return;
     const auto reach = (double)params::maxDelayMs;
     const auto sampleMs = 1000.0 / juce::jmax(1.0, analyser.getSampleRate());
     const auto step = 0.1 * sampleMs;
-    analyser.setPreview(juce::jlimit(-reach, reach, std::round(delayMs / step) * step), inverted, std::move(phase));
+    const auto snapped = juce::jlimit(-reach, reach, std::round(delayMs / step) * step);
+
+    // Kept always: ALIGNMENT's captured hit is rendered through them.
+    knobs.delayMs = snapped;
+    knobs.inverted = inverted;
+    knobs.phase = phase;
+    lastKnobMs = nowMs();
+    if (hitCapture.valid())
+    {
+        hitCapture.render(knobs);
+        if (view == View::scope)
+            repaint();
+    }
+
+    if (! isFrozen())
+        return;
+    analyser.setPreview(snapped, inverted, std::move(phase));
+    repaint();
+}
+
+void MeterScreen::setCaptureMode(bool on)
+{
+    if (on == captureMode)
+        return;
+    captureMode = on;
+    if (on && view == View::scope)
+        startCapturing();
+    repaint();
+}
+
+// Starts looking for hits from now on, and takes the strongest one of the last few seconds at once, so the view has
+// something to hold without waiting for the next.
+void MeterScreen::startCapturing()
+{
+    meter::ScopeBuffer::Onset onset;
+    if (scopeBuffer.scanBack(3.0, meter::HitCapture::postSeconds, onset))
+        captureHit(onset.index);
+}
+
+void MeterScreen::captureHit(long long onsetIndex)
+{
+    hitCapture.capture(scopeBuffer, onsetIndex);
+    hitCapture.render(knobs);
     repaint();
 }
 
@@ -245,7 +289,10 @@ bool MeterScreen::poll()
     if (! juce::exactlyEqual(fs, analyser.getSampleRate()))
         analyser.prepare(fs);
     if (! juce::exactlyEqual(fs, scopeBuffer.getSampleRate()))
+    {
         scopeBuffer.prepare(fs);
+        hitCapture.clear();
+    }
 
     float* dest[meter::MeterCapture::numStreams];
     for (int s = 0; s < meter::MeterCapture::numStreams; ++s)
@@ -259,6 +306,15 @@ bool MeterScreen::poll()
         return false;
     scopeBuffer.push(dest[meter::MeterCapture::input], dest[meter::MeterCapture::output],
                      dest[meter::MeterCapture::sidechain], n);
+    if (view == View::scope && captureMode)
+    {
+        // A new hit replaces the held one, unless a knob was turned in the last two seconds (the picture shouldn't
+        // change under the hand that is lining it up).
+        scopeBuffer.scan();
+        meter::ScopeBuffer::Onset onset;
+        if (scopeBuffer.takeCompleted(meter::HitCapture::postSeconds, onset) && nowMs() - lastKnobMs >= 2000.0)
+            captureHit(onset.index);
+    }
     const auto frames = analyser.process(dest[meter::MeterCapture::input], dest[meter::MeterCapture::output],
                                          dest[meter::MeterCapture::sidechain], n);
     if (frames > 0 && view == View::time)
@@ -382,10 +438,20 @@ MeterScreen::Control MeterScreen::controlAt(juce::Point<float> p) const
 
 bool MeterScreen::scrubArea(juce::Point<float> p) const
 {
-    return isFrozen() && (view == View::time || view == View::scope) && state == State::metering &&
+    return isFrozen() && (view == View::time || (view == View::scope && ! (captureMode && hitCapture.valid()))) &&
+           state == State::metering &&
            juce::Rectangle<float>::leftTopRightBottom(lx(design::meterPlotLeft), ly(design::meterPlusOneY),
                                                       lx(design::meterPlotRight), ly(design::meterMinusOneY))
                .contains(p);
+}
+
+juce::Rectangle<float> MeterScreen::captureToggleArea() const
+{
+    // Top left of the plot, under the span: only in ALIGNMENT.
+    const auto s = getScale();
+    return view == View::scope ? juce::Rectangle<float>(lx(design::meterPlotLeft) + 8.0f * s, ly(design::meterPlusOneY) + 25.0f * s,
+                                                        150.0f * s, 22.0f * s)
+                               : juce::Rectangle<float>();
 }
 
 bool MeterScreen::hitTest(int x, int y)
@@ -393,7 +459,7 @@ bool MeterScreen::hitTest(int x, int y)
     if (state == State::off)
         return false;
     const auto p = juce::Point<int>(x, y).toFloat();
-    return controlAt(p) != Control::none || scrubArea(p);
+    return controlAt(p) != Control::none || captureToggleArea().contains(p) || scrubArea(p);
 }
 
 void MeterScreen::scrubTo(float x)
@@ -417,6 +483,11 @@ void MeterScreen::mouseDown(const juce::MouseEvent& e)
         case Control::fast: onSpeedSelected ? onSpeedSelected(Speed::fast) : setSpeed(Speed::fast); return;
         case Control::hold: setHeld(! held); return;
         case Control::none: break;
+    }
+    if (captureToggleArea().contains(e.position))
+    {
+        onCaptureSelected ? onCaptureSelected(! captureMode) : setCaptureMode(! captureMode);
+        return;
     }
     if (scrubArea(e.position))
     {
@@ -766,15 +837,21 @@ void MeterScreen::paintScope(juce::Graphics& g) const
 {
     // The three streams around the trigger, on top of each other, each scaled to its own peak: this is for comparing
     // shapes and lining up where the hit starts. The sidechain is the pale one, the input dim green, the output
-    // bright green (the preview, while there is one, in its place).
+    // bright green (the preview, while there is one, in its place). With CAPTURE on and a hit held, all three come from
+    // the held hit, and the bright one is the input as the knobs would make it (HitCapture::render).
     const auto s = getScale();
     const auto left = lx(design::meterPlotLeft), right = lx(design::meterPlotRight);
     const auto top = ly(design::meterPlusOneY), bottom = ly(design::meterMinusOneY);
-    const auto fs = scopeBuffer.getSampleRate();
+    const auto held = captureMode && hitCapture.valid();
+    const auto fs = held ? hitCapture.getSampleRate() : scopeBuffer.getSampleRate();
+    const auto trigger = held ? hitCapture.onsetIndex() : triggerIndex;
+    const auto lastSample = held ? hitCapture.lastIndex() : scopeBuffer.end() - 1;
+    const auto streamAt = [&](int stream, double i)
+    { return held ? hitCapture.interpolated(stream, i) : scopeBuffer.interpolated(stream, i); };
     const auto labelFont = meterFont(assets, 14.0f * s);
     const auto labelY = ly(design::meterFreqLabelY) + 7.0f * s;
 
-    if (triggerIndex < 0 || fs <= 0.0)
+    if (trigger < 0 || fs <= 0.0)
     {
         g.setColour(design::meterAxisText.withAlpha(0.5f));
         drawTextAt(g, meterFont(assets, 16.0f * s, true), "WAITING FOR A HIT ON THE SIDECHAIN",
@@ -784,7 +861,7 @@ void MeterScreen::paintScope(juce::Graphics& g) const
 
     const auto width = right - left;
     const auto spanSamples = scopeSpanMs * fs / 1000.0;
-    const auto firstSample = (double)triggerIndex - 0.25 * spanSamples; // the hit starts a quarter of the way in
+    const auto firstSample = (double)trigger - 0.25 * spanSamples; // the hit starts a quarter of the way in
     const auto xOf = [&](double sampleIndex) { return left + (float)((sampleIndex - firstSample) / spanSamples) * width; };
     const auto previewSamples = analyser.isPreviewing() ? analyser.previewDelayMs() * fs / 1000.0 : 0.0;
 
@@ -813,11 +890,8 @@ void MeterScreen::paintScope(juce::Graphics& g) const
                        juce::Justification::horizontallyCentred);
         }
         g.setColour(design::meterAxisText.withAlpha(0.9f)); // the trigger
-        const auto tx = xOf((double)triggerIndex);
+        const auto tx = xOf((double)trigger);
         g.drawLine(tx, top, tx, bottom, juce::jmax(1.0f, 1.5f * s));
-        g.setColour(design::meterAxisText.withAlpha(0.6f));
-        drawTextAt(g, meterFont(assets, 12.0f * s).withExtraKerningFactor(0.1f), "SPAN " + juce::String(scopeSpanMs, scopeSpanMs < 10.0 ? 1 : 0) + " MS",
-                   left + 14.0f * s, top + 20.0f * s, juce::Justification::left);
     }
 
     // One trace: `sampleAt(index)` for a (possibly fractional) index. Dense spans draw a min-to-max line per pixel,
@@ -826,7 +900,7 @@ void MeterScreen::paintScope(juce::Graphics& g) const
     {
         const auto pixels = std::max(1, (int)width);
         const auto perPixel = spanSamples / (double)pixels;
-        const auto lastIndex = scopeBuffer.end() - 1;
+        const auto lastIndex = lastSample;
 
         // Its own peak over the window.
         float peak = 1.0e-6f;
@@ -888,19 +962,45 @@ void MeterScreen::paintScope(juce::Graphics& g) const
     };
 
     const auto thickness = juce::jmax(1.0f, 1.6f * s);
-    drawTrace([&](double i) { return scopeBuffer.interpolated(2, i); }, design::meterAxisText.withAlpha(0.85f), thickness);
-    drawTrace([&](double i) { return scopeBuffer.interpolated(0, i); }, design::phosphor.withAlpha(0.45f), thickness);
-    if (analyser.isPreviewing()) // the input slid later by the preview delay
+    drawTrace([&](double i) { return streamAt(2, i); }, design::meterAxisText.withAlpha(0.85f), thickness);
+    drawTrace([&](double i) { return streamAt(0, i); }, design::phosphor.withAlpha(0.45f), thickness);
+    if (held) // the captured input as the knobs would make it
+        drawTrace([&](double i) { return streamAt(1, i); }, design::phosphor, juce::jmax(1.0f, 2.2f * s));
+    else if (analyser.isPreviewing()) // the input slid later by the preview delay
         drawTrace([&](double i) { return (analyser.isPreviewInverted() ? -1.0f : 1.0f) * scopeBuffer.interpolated(0, i - previewSamples); },
                   design::phosphor,
                   juce::jmax(1.0f, 2.2f * s));
     else
-        drawTrace([&](double i) { return scopeBuffer.interpolated(1, i); }, design::phosphor, juce::jmax(1.0f, 2.2f * s));
+        drawTrace([&](double i) { return streamAt(1, i); }, design::phosphor, juce::jmax(1.0f, 2.2f * s));
+
+    // The span, the CAPTURE toggle and what the bright trace is, over the traces on a dark patch.
+    {
+        const auto small = meterFont(assets, 12.0f * s).withExtraKerningFactor(0.1f);
+        const auto toggle = captureToggleArea();
+        const auto patchWidth = 262.0f * s;
+        g.setColour(design::screenBlack.withAlpha(0.8f));
+        g.fillRect(juce::Rectangle<float>(left + 6.0f * s, top + 6.0f * s, patchWidth, captureMode ? 62.0f * s : 40.0f * s));
+        g.setColour(design::meterAxisText.withAlpha(0.6f));
+        drawTextAt(g, small, "SPAN " + juce::String(scopeSpanMs, scopeSpanMs < 10.0 ? 1 : 0) + " MS", left + 14.0f * s,
+                   top + 20.0f * s, juce::Justification::left);
+        g.setColour(design::meterAxisText.withAlpha(captureMode ? 0.95f : 0.45f));
+        drawTextAt(g, small, captureMode ? "CAPTURE  ON" : "CAPTURE  OFF", toggle.getX() + 8.0f * s, top + 41.0f * s,
+                   juce::Justification::left);
+        g.setColour(design::meterAxisText.withAlpha(0.45f));
+        g.drawRect(juce::Rectangle<float>(toggle.getX(), toggle.getY(), textWidth(small, "CAPTURE  OFF") + 20.0f * s, toggle.getHeight()),
+                   juce::jmax(1.0f, 1.0f * s));
+        if (captureMode)
+        {
+            g.setColour(design::meterAxisText.withAlpha(0.6f));
+            drawTextAt(g, small, held ? "OUTPUT: THIS HIT THROUGH THE KNOBS" : "WAITING FOR A HIT TO CAPTURE",
+                       left + 14.0f * s, top + 62.0f * s, juce::Justification::left);
+        }
+    }
 
     // The sidechain's name goes with the legend (INPUT and OUTPUT are in the grid).
     const auto legendFont = meterFont(assets, 14.0f * s).withExtraKerningFactor(0.1f);
     const auto legendY = top - 12.0f * s;
-    const auto inputRight = right - textWidth(legendFont, analyser.isPreviewing() ? "PREVIEW" : "OUTPUT") - 24.0f * s;
+    const auto inputRight = right - textWidth(legendFont, analyser.isPreviewing() && ! held ? "PREVIEW" : "OUTPUT") - 24.0f * s;
     g.setColour(design::meterAxisText.withAlpha(0.85f));
     drawTextAt(g, legendFont, "SIDECHAIN", inputRight - textWidth(legendFont, "INPUT") - 24.0f * s, legendY,
                juce::Justification::right);
@@ -908,6 +1008,8 @@ void MeterScreen::paintScope(juce::Graphics& g) const
 
 void MeterScreen::paintPreviewNote(juce::Graphics& g) const
 {
+    if (view == View::scope && captureMode && hitCapture.valid())
+        return; // the held hit is the preview: the bright trace already is the knobs' result
     const auto s = getScale();
     const auto x = lx(design::meterPlotLeft) + 14.0f * s;
     if (analyser.isPreviewing())
@@ -935,7 +1037,7 @@ void MeterScreen::paintPreviewNote(juce::Graphics& g) const
         const auto font = meterFont(assets, 16.0f * s, true);
         // Below the time view's readouts, at the top left elsewhere.
         const auto y = view == View::bands ? ly(design::meterMinusOneY) - 14.0f * s
-                                           : ly(design::meterPlusOneY) + (view == View::time ? 112.0f : view == View::scope ? 44.0f : 24.0f) * s;
+                                           : ly(design::meterPlusOneY) + (view == View::time ? 112.0f : view == View::scope ? 66.0f : 24.0f) * s;
         const juce::String note = "PREVIEW  DELAY " + juce::String(ms >= 0.0 ? "+" : "") + juce::String(ms, 3) + " ms" +
                                   (analyser.isPreviewInverted() ? "  INVERTED" : "") +
                                   (analyser.previewHasPhase() && view == View::scope ? "  (PHASE NOT SHOWN HERE)" : "");
@@ -954,7 +1056,7 @@ void MeterScreen::paintPreviewNote(juce::Graphics& g) const
     else if (isFrozen() && view == View::scope)
     {
         g.setColour(design::meterAxisText.withAlpha(0.5f));
-        drawTextAt(g, meterFont(assets, 12.0f * s), "DRAG TO SLIDE THE INPUT", x, ly(design::meterPlusOneY) + 44.0f * s,
+        drawTextAt(g, meterFont(assets, 12.0f * s), "DRAG TO SLIDE THE INPUT", x, ly(design::meterPlusOneY) + 66.0f * s,
                    juce::Justification::left);
     }
     else if (isFrozen() && view == View::time)

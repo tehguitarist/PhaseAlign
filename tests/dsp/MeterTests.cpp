@@ -1,6 +1,7 @@
 #include "AllocationCounter.h"
 #include "meter/CorrelationAnalyser.h"
 #include "meter/MeterCapture.h"
+#include "meter/HitCapture.h"
 #include "meter/ScopeBuffer.h"
 #include "dsp/Chain.h"
 #include "dsp/PhaseResponse.h"
@@ -920,6 +921,89 @@ TEST_CASE("needs: only the current view's results are worked out, and switching 
     CHECK(a.attackInput().lagMs == Approx(1000.0 * d / fs).margin(0.05));
 }
 
+namespace
+{
+// A sidechain of quiet noise with hits at the given times and levels: a 2 ms rise, 200 Hz ringing over 30 ms.
+std::vector<float> hitTrain(int length, double fs, const std::vector<std::pair<double, float>>& hits)
+{
+    auto sc = noise(length, 81, 0.0005f);
+    for (const auto& [t, level] : hits)
+        for (int n = 0; n < (int)(0.03 * fs); ++n)
+            sc[(size_t)(t * fs) + (size_t)n] += level * std::min(1.0f, n / (0.002f * (float)fs)) *
+                                                  (float)std::exp(-n / (0.01 * fs)) * (float)std::sin(2.0 * M_PI * 200.0 * n / fs);
+    return sc;
+}
+} // namespace
+
+TEST_CASE("hit detector: finds each hit once, ignores a ghost note 20 dB down, and waits for the audio after it", "[meter]")
+{
+    const auto fs = 48000.0;
+    const auto length = (int)(6.0 * fs);
+    // Hits at 0.5, 1.0, 1.5 s; a ghost note (0.03 against 0.5) at 2.0 s; two hits 30 ms apart at 3.0 and 3.03 s (the
+    // second inside the refractory time); a hit at 5.8 s with less than 0.24 s of audio after it.
+    const auto sc = hitTrain(length, fs, {{0.5, 0.5f}, {1.0, 0.5f}, {1.5, 0.5f}, {2.0, 0.03f}, {3.0, 0.5f},
+                                          {3.03, 0.5f}, {5.8, 0.5f}});
+    const auto in = noise(length, 82), out = noise(length, 83);
+    pa::meter::ScopeBuffer b;
+    b.prepare(fs);
+    b.startScanning();
+    std::vector<double> found;
+    for (int pos = 0; pos < length; pos += 1600)
+    {
+        b.push(in.data() + pos, out.data() + pos, sc.data() + pos, 1600);
+        b.scan();
+        pa::meter::ScopeBuffer::Onset onset;
+        while (b.takeCompleted(0.24, onset))
+            found.push_back(onset.index / fs);
+    }
+    REQUIRE(found.size() == 4);
+    CHECK(found[0] == Approx(0.5).margin(0.006));
+    CHECK(found[1] == Approx(1.0).margin(0.006));
+    CHECK(found[2] == Approx(1.5).margin(0.006));
+    CHECK(found[3] == Approx(3.0).margin(0.006));
+}
+
+TEST_CASE("hit capture: renders the input through delay, polarity and phase exactly", "[meter]")
+{
+    const auto fs = 48000.0;
+    const auto length = (int)(3.0 * fs);
+    const auto sc = hitTrain(length, fs, {{1.0, 0.5f}});
+    const auto in = hitTrain(length, fs, {{0.998, 0.4f}});
+    const auto out = noise(length, 91);
+    pa::meter::ScopeBuffer b;
+    b.prepare(fs);
+    for (int pos = 0; pos < length; pos += 1600)
+        b.push(in.data() + pos, out.data() + pos, sc.data() + pos, std::min(1600, length - pos));
+    const auto onset = b.findOnset(3.0, 0.3);
+    REQUIRE(onset.index >= 0);
+
+    pa::meter::HitCapture capture;
+    capture.capture(b, onset.index);
+    REQUIRE(capture.valid());
+    CHECK(capture.at(pa::meter::HitCapture::input, onset.index) == b.at(0, onset.index));
+    CHECK(capture.at(pa::meter::HitCapture::sidechain, onset.index + 7) == b.at(2, onset.index + 7));
+
+    // Delay alone: the input shifted later by 62 samples (1.2917 ms), polarity off, no phase stage.
+    capture.render({62.0 * 1000.0 / fs, false, {}});
+    for (long long i = onset.index - 100; i < onset.index + 1500; i += 7)
+        CHECK(capture.at(pa::meter::HitCapture::output, i) ==
+              Approx(capture.at(pa::meter::HitCapture::input, i - 62)).margin(2.0e-4));
+    // Polarity flip with no delay: the negation.
+    capture.render({0.0, true, {}});
+    for (long long i = onset.index - 100; i < onset.index + 1500; i += 7)
+        CHECK(capture.at(pa::meter::HitCapture::output, i) ==
+              Approx(-capture.at(pa::meter::HitCapture::input, i)).margin(2.0e-4));
+    // A constant 90 degree lag: the Hilbert transform of the input, sign aside; its energy is the input's.
+    capture.render({0.0, false, [](double) { return std::polar(1.0, -M_PI / 2.0); }});
+    double inEnergy = 0.0, outEnergy = 0.0;
+    for (long long i = onset.index - 100; i < onset.index + 8000; ++i)
+    {
+        inEnergy += std::pow(capture.at(pa::meter::HitCapture::input, i), 2.0);
+        outEnergy += std::pow(capture.at(pa::meter::HitCapture::output, i), 2.0);
+    }
+    CHECK(outEnergy == Approx(inEnergy).epsilon(0.12)); // not the DC, which a 90 degree turn removes
+}
+
 // Hidden, Release: what the analyser costs per second of audio for each view's needs (plan R21). The averages the overall
 // bar needs always run; the rest is per view.
 TEST_CASE("analyser cost by view", "[.analysercost]")
@@ -958,5 +1042,134 @@ TEST_CASE("analyser cost by view", "[.analysercost]")
             std::printf("  %-42s %6.2f ms per second of audio (%.2f%% of a core)\n", c.name, 1000.0 * elapsed / seconds,
                         100.0 * elapsed / seconds);
         }
+    }
+}
+
+// Hidden: ALIGNMENT's capture on the user's own acoustic pairs (captures/). Every hit the detector reports is captured and
+// rendered through the pair's known offset (the delay that lines the input up with the sidechain); where the rendered
+// output starts is then compared with where the sidechain starts (first time its 0.5 ms envelope reaches 15% of its peak
+// over the first 15 ms, where a hit's click or pluck dominates the body).
+TEST_CASE("the user's pairs: captured hits line up once the delay is applied", "[.usercapture]")
+{
+    const auto load = [](const std::string& path)
+    {
+        std::vector<float> v;
+        if (auto* f = std::fopen(path.c_str(), "rb"))
+        {
+            std::fseek(f, 0, SEEK_END);
+            v.resize((size_t)std::ftell(f) / sizeof(float));
+            std::rewind(f);
+            REQUIRE(std::fread(v.data(), sizeof(float), v.size(), f) == v.size());
+            std::fclose(f);
+        }
+        return v;
+    };
+    struct Case
+    {
+        const char* name;
+        double delayMs; // the offset that aligns them
+        double toleranceMs;
+        int minHits, maxHits; // what the detector should find: the pair's real hits, give or take the odd extra
+    };
+    const auto fs = 48000.0;
+    // Real counts (from the waveforms): kick 61, snare 31, guitar 18, hats 32; the bass is strummed, so has many.
+    for (const auto& c : {Case{"kick", 1.23, 0.4, 52, 80}, Case{"snare", 1.0, 0.4, 28, 40}, Case{"bass", 0.0, 0.5, 60, 400},
+                          Case{"guitar", 0.0, 0.4, 12, 26}, Case{"hats", 0.0, 0.4, 28, 36}})
+    {
+        const auto a = load(std::string("captures/") + c.name + "_a.f32"), b = load(std::string("captures/") + c.name + "_b.f32");
+        REQUIRE_FALSE(a.empty());
+        const auto n = std::min(a.size(), b.size());
+        pa::meter::ScopeBuffer buffer;
+        buffer.prepare(fs);
+        buffer.startScanning();
+        pa::meter::HitCapture capture;
+
+        // First time the 0.5 ms envelope of a stream reaches 15% of its peak in [onset - 10 ms, onset + 15 ms].
+        const auto startOf = [&](int stream, long long onset)
+        {
+            const auto from = onset - (long long)(0.010 * fs), to = onset + (long long)(0.015 * fs);
+            const auto w = std::max(1, (int)std::lround(0.0005 * fs));
+            std::vector<float> env((size_t)(to - from));
+            double sum = 0.0;
+            for (long long i = from - w; i < from; ++i)
+                sum += std::abs(capture.at(stream, i));
+            float peak = 0.0f;
+            for (long long i = from; i < to; ++i)
+            {
+                sum += std::abs(capture.at(stream, i)) - std::abs(capture.at(stream, i - w));
+                env[(size_t)(i - from)] = (float)(sum / w);
+                peak = std::max(peak, env[(size_t)(i - from)]);
+            }
+            for (long long i = from; i < to; ++i)
+                if (env[(size_t)(i - from)] >= 0.15f * peak)
+                    return (i - from) * 1000.0 / fs;
+            return -1.0;
+        };
+
+        std::vector<double> errors;
+        int hits = 0;
+        for (size_t pos = 0; pos + 1600 <= n; pos += 1600)
+        {
+            buffer.push(a.data() + pos, a.data() + pos, b.data() + pos, 1600);
+            buffer.scan();
+            pa::meter::ScopeBuffer::Onset onset;
+            while (buffer.takeCompleted(pa::meter::HitCapture::postSeconds, onset))
+            {
+                ++hits;
+                capture.capture(buffer, onset.index);
+                const auto delaySamples = (int)std::lround(c.delayMs * fs / 1000.0);
+                capture.render({delaySamples * 1000.0 / fs, false, {}});
+                // The rendering is the input shifted later by the delay, exactly (checked where the hit has energy).
+                float peak = 1.0e-6f;
+                for (long long i = onset.index - 100; i < onset.index + 2000; ++i)
+                    peak = std::max(peak, std::abs(capture.at(pa::meter::HitCapture::input, i)));
+                for (long long i = onset.index - 100; i < onset.index + 2000; i += 13)
+                    REQUIRE(std::abs(capture.at(pa::meter::HitCapture::output, i) -
+                                     capture.at(pa::meter::HitCapture::input, i - delaySamples)) <= 0.005f * peak);
+                const auto out = startOf(pa::meter::HitCapture::output, onset.index);
+                const auto sc = startOf(pa::meter::HitCapture::sidechain, onset.index);
+                if (out >= 0.0 && sc >= 0.0)
+                    errors.push_back(out - sc);
+            }
+        }
+        std::sort(errors.begin(), errors.end(), [](double x, double y) { return std::abs(x) < std::abs(y); });
+        const auto median = errors.empty() ? 99.0 : std::abs(errors[errors.size() / 2]);
+        int within = 0;
+        for (const auto e : errors)
+            within += std::abs(e) <= c.toleranceMs;
+        std::printf("%-7s hits captured %3d   rendered output vs sidechain start: median |error| %.2f ms, %d of %d within %.1f ms\n",
+                    c.name, hits, median, within, (int)errors.size(), c.toleranceMs);
+        CHECK(hits >= c.minHits);
+        CHECK(hits <= c.maxHits);
+    }
+}
+
+
+TEST_CASE("hit detector: scanning back over what is in the buffer finds the latest complete hit at its true start", "[meter]")
+{
+    const auto fs = 48000.0;
+    const auto length = (int)(6.0 * fs);
+    std::vector<float> sc((size_t)length, 0.0f);
+    std::mt19937 rng(5);
+    std::uniform_real_distribution<float> u(-0.5f, 0.5f);
+    // Kick-like hits every 0.3 s from 0.1 s: a click, then a 120 Hz body that rises slowly and rings.
+    for (int start = 4800; start + 14400 < length; start += 14400)
+        for (int n = 0; n < 14400; ++n)
+            sc[(size_t)(start + n)] = (float)(0.7 * std::exp(-n / 2400.0) * std::sin(2.0 * M_PI * 120.0 * n / fs)) +
+                                      (n < 60 ? 0.4f * u(rng) * (float)(1.0 - n / 60.0) : 0.0f);
+    const auto in = noise(length, 3);
+    for (const int stop : {(int)(3.7 * fs), (int)(4.1 * fs), length})
+    {
+        pa::meter::ScopeBuffer b;
+        b.prepare(fs);
+        for (int pos = 0; pos < stop; pos += 1600)
+            b.push(in.data() + pos, in.data() + pos, sc.data() + pos, std::min(1600, stop - pos));
+        pa::meter::ScopeBuffer::Onset onset;
+        REQUIRE(b.scanBack(3.0, 0.24, onset));
+        const auto sinceStart = (onset.index - 4800) % 14400;
+        CHECK(std::abs((sinceStart > 7200 ? sinceStart - 14400 : sinceStart) * 1000.0 / fs) < 0.6); // ms from the true start
+        CHECK(onset.index + (long long)(0.24 * fs) <= b.total());                // with the audio after it
+        // And scanning carries on from there: the next hit is found as it completes.
+        b.push(in.data(), in.data(), sc.data(), 100);
     }
 }

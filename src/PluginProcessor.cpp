@@ -190,7 +190,8 @@ juce::ValueTree PhaseAlignProcessor::defaultUiState()
                                            {UiProps::meterOn, true},
                                            {UiProps::uiScale, defaultUiScale},
                                            {UiProps::meterView, "frequency"},
-                                           {UiProps::meterSpeed, "slow"}});
+                                           {UiProps::meterSpeed, "slow"},
+                                           {UiProps::alignCapture, true}});
 }
 
 void PhaseAlignProcessor::restoreUiState(const juce::ValueTree& loaded)
@@ -209,6 +210,7 @@ void PhaseAlignProcessor::restoreUiState(const juce::ValueTree& loaded)
     uiState.setProperty(UiProps::meterView, view == "time" || view == "phase" || view == "bands" || view == "scope" ? view : juce::String("frequency"),
                         nullptr);
     uiState.setProperty(UiProps::meterSpeed, get(UiProps::meterSpeed).toString() == "fast" ? "fast" : "slow", nullptr);
+    uiState.setProperty(UiProps::alignCapture, (bool)get(UiProps::alignCapture), nullptr);
 }
 
 void PhaseAlignProcessor::getStateInformation(juce::MemoryBlock& destData)

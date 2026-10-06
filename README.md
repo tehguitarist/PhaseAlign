@@ -233,12 +233,20 @@ mics the upper bars hover around 0 whatever you do (the comb averages away). The
 ### ALIGNMENT view
 
 The waveforms themselves, on top of each other around a hit: the **sidechain** (pale), this track's **INPUT** (dim green)
-and the **OUTPUT** (bright green), each scaled to its own peak, so you are comparing shapes, not levels. The view
-locks onto the loudest recent hit on the sidechain (the vertical line at 0), so it stays put however far you zoom in.
-Use the **mouse wheel** to zoom, from 0.5 ms to 200 ms across; zoomed in, you can see exactly where each waveform starts
-rising. Turn the **DELAY** knob and watch the OUTPUT move onto the sidechain; a polarity flip shows as one trace the
-mirror image of the other. With **HOLD** on, drag across the plot to slide the INPUT against the sidechain: the OUTPUT
-trace becomes the **PREVIEW**, the input as it would be with the delay knob at that distance (see below).
+and the **OUTPUT** (bright green), each scaled to its own peak, so you are comparing shapes, not levels. The vertical line
+at 0 marks where the hit starts on the sidechain. Use the **mouse wheel** to zoom, from 0.5 ms to 200 ms across; zoomed
+in, you can see exactly where each waveform starts rising.
+
+**CAPTURE** (on by default, the label at the top left of the plot) holds the last hit it detected, so the picture sits
+still while you work. The bright trace is then **this hit as your knobs would make it**: turn the **DELAY** knob, press
+the polarity button, or set the phase (knob, mode, RANGE, PHASE button), and it moves at once, with no new audio needed
+and no scrubbing to find a hit. A hit has to be within 12 dB of the strongest recent one to be captured, so a ghost note
+doesn't replace a good kick; and a new hit only replaces the held one after the knobs have been left alone for two
+seconds, so the picture doesn't change under your hand. **HOLD** pins the captured hit for as long as you like. With
+CAPTURE off, the view follows the live audio instead; there, with HOLD on, drag across the plot to slide the INPUT
+against the sidechain (the OUTPUT trace becomes the **PREVIEW**).
+
+If nothing on the sidechain counts as a hit (a pad, say), the view says it is waiting for one.
 
 ### Holding the screen and previewing a delay
 
@@ -247,8 +255,8 @@ While the screen is held (or the host is stopped), **turn the DELAY knob, press 
 OUTPUT trace becomes the **PREVIEW**, this track with those settings applied to the held picture. Turn the delay on or
 off, change it, flip the polarity, try HIGH, LOW or CONSTANT, and watch the correlation, the phase line and the bands
 line up. The phase turn is worked out from the stage's own response, so it agrees with what the plugin does to within a
-couple of degrees. The ALIGNMENT waveforms show the delay and polarity but not the phase turn (they say so); use the
-other views for that.
+couple of degrees. In ALIGNMENT's live view the waveforms show the delay and polarity but not the phase turn (they say so); with CAPTURE
+on they show all three.
 
 **HOLD** freezes the screen, and releasing it carries on. Frozen, drag across the TIME OFFSET view (or, in ALIGNMENT, slide the input): the OUTPUT trace
 becomes **PREVIEW**, what the track would read with the DELAY knob at the point you're dragging (in 0.1-sample steps, within

@@ -264,6 +264,8 @@ PhaseAlignEditor::PhaseAlignEditor(PhaseAlignProcessor& p)
                                                                     : "frequency",
                             nullptr);
     };
+    meterScreen.onCaptureSelected = [this](bool on)
+    { uiState.setProperty(PhaseAlignProcessor::UiProps::alignCapture, on, nullptr); };
     meterScreen.onSpeedSelected = [this](pa::ui::MeterScreen::Speed speed)
     {
         uiState.setProperty(PhaseAlignProcessor::UiProps::meterSpeed,
@@ -286,6 +288,7 @@ PhaseAlignEditor::PhaseAlignEditor(PhaseAlignProcessor& p)
     rangeAttachment.sendInitialUpdate();
     modeAttachment.sendInitialUpdate();
     updateDimming(); // also draws the phase readout
+    updateHeldPreview();
     unitSwitch.setIndex(unitPosition(delayUnit()));
     updateMeter();
 
@@ -348,7 +351,8 @@ void PhaseAlignEditor::valueTreePropertyChanged(juce::ValueTree&, const juce::Id
         updateDelayReadout();
     }
     else if (property == PhaseAlignProcessor::UiProps::meterOn || property == PhaseAlignProcessor::UiProps::meterView ||
-             property == PhaseAlignProcessor::UiProps::meterSpeed)
+             property == PhaseAlignProcessor::UiProps::meterSpeed ||
+             property == PhaseAlignProcessor::UiProps::alignCapture)
     {
         updateMeter();
     }
@@ -476,6 +480,7 @@ void PhaseAlignEditor::updateMeter()
     meterScreen.setSpeed(uiState.getProperty(PhaseAlignProcessor::UiProps::meterSpeed).toString() == "fast"
                              ? pa::ui::MeterScreen::Speed::fast
                              : pa::ui::MeterScreen::Speed::slow);
+    meterScreen.setCaptureMode((bool)uiState.getProperty(PhaseAlignProcessor::UiProps::alignCapture));
     meterScreen.setMeterOn(on);
 }
 

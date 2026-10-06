@@ -116,7 +116,11 @@ job, better.
       OFFSET, PHASE, BANDS, ALIGNMENT), the ATTACK reading in TIME OFFSET (three bands, tuned on the user's own
       kick/snare/bass/guitar/hats pairs in `captures/`; raw copies `captures/*_a.f32`, `*_b.f32`; hidden tests
       `[.userpairs]`), ALIGNMENT (waveform overlay, wheel zoom, slide-to-preview), and, while held, the DELAY, polarity
-      and phase knobs preview on the frozen picture (`dsp/PhaseResponse.h`). Pending: the user's DAW verdict.
+      and phase knobs preview on the frozen picture (`dsp/PhaseResponse.h`). 2026-10-07, later (branch `phase-preview`,
+      not merged): the phase knob previews too (R20 step 2); only the active view's work runs (R21: the attack features
+      cost ~90% of the old 2.8% of a core and now run only in TIME OFFSET); ALIGNMENT captures a hit and renders it through
+      the knobs (R22: `meter/ScopeBuffer` scan, `meter/HitCapture`; CAPTURE toggle, default on). Pending: the user's DAW
+      verdict.
    - The stem analysis and auto-suggest (ANALYSE) work is dead last. Real multi-mic stem pairs are still wanted for the
      P2/P3 listening.
    - Installing (when the user asks): `/Library/Audio/Plug-Ins/{Components,VST3}`, not ~/Library.
