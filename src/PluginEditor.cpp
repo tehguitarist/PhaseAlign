@@ -27,7 +27,9 @@ struct ToggleSpec
 };
 
 const ToggleSpec toggleSpecs[] = {
-    {id::delayOn, layout::delayButton, &layout::delayLed, "Delay on/off. The LED is lit while the delay is applied."},
+    {id::delayOn, layout::delayButton, &layout::delayLed,
+     "Delay on/off. The LED is lit while the delay is applied. On adds about 4.5 ms of latency, which the host "
+     "compensates, so the delay can move this track earlier as well as later."},
     {id::polarity, layout::phaseInvertButton, &layout::phaseInvertLed,
      "Polarity invert. The LED is lit while the polarity is inverted."},
     {id::phaseOn, layout::phaseButton, &layout::phaseLed,

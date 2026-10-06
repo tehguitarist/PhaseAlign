@@ -415,31 +415,31 @@ void MeterScreen::paintLagReadout(juce::Graphics& g) const
         if (! p.clear)
             return juce::String("--");
         const auto ms = std::abs(p.lagMs) < 0.0005 ? 0.0 : p.lagMs; // no "-0.000"
-        auto text = (ms > 0.0 ? "+" : "") + juce::String(ms, 3) + " ms";
+        // Beyond the view the reading is coarse (whole samples), so it gets one decimal.
+        auto text = (ms > 0.0 ? "+" : "") + juce::String(ms, p.coarse ? 1 : 3) + " ms";
         if (p.value < 0.0f)
             text << " INVERTED";
         return text;
     };
 
-    const auto in = analyser.lagPeakUnprocessed(), out = analyser.lagPeakProcessed();
+    const auto in = analyser.inputPeak(), out = analyser.lagPeakProcessed();
     g.setColour(design::phosphor.withAlpha(0.6f));
     drawTextAt(g, font, "INPUT   " + describe(in), x, y, juce::Justification::left);
     y += 22.0f * s;
     g.setColour(design::phosphor);
     drawTextAt(g, font, "OUTPUT  " + describe(out), x, y, juce::Justification::left);
 
-    // A peak the delay knob can't reach (plan 2.1a), by more than half its 0.1-sample step.
-    const auto halfStepMs = 0.05 * 1000.0 / analyser.getSampleRate();
-    if (in.clear && std::abs(in.lagMs) > params::maxDelayMs + halfStepMs)
+    // A peak the delay knob can't reach (plan 2.1a), by more than half its 0.1-sample step; up to 40 ms away.
+    if (analyser.inputOutOfReach(params::maxDelayMs))
     {
         y += 22.0f * s;
         g.setColour(design::meterAxisText.withAlpha(0.8f));
         drawTextAt(g, meterFont(assets, 12.0f * s), "TRANSIENTS OUT OF DELAY RANGE", x, y, juce::Justification::left);
     }
 
-    // Peak markers on the zero line.
+    // Peak markers on the zero line (not for a coarse peak: it is beyond the view).
     for (const auto* p : {&in, &out})
-        if (p->clear)
+        if (p->clear && ! p->coarse)
         {
             const auto px = xForMs(p->lagMs);
             const auto py = yForR(p->value);

@@ -27,7 +27,8 @@ class CorrelationAnalyser
     static constexpr double minHz = 20.0, maxHz = 20000.0;
     static constexpr int curvePoints = 256; // log-spaced, minHz to maxHz (or just below Nyquist)
     static constexpr double curveSmoothingOctaves = 1.0 / 6.0;
-    static constexpr double lagRangeMs = 5.0; // the time view shows -5 to +5 ms
+    static constexpr double lagRangeMs = 5.0;      // the time view shows -5 to +5 ms
+    static constexpr double wideLagRangeMs = 40.0; // and a coarse search beyond it, well inside the frame
 
     // FFT size: 8192 at 44.1/48 kHz, scaled with the rate (5.9 Hz bins at 48 kHz).
     static int fftSizeFor(double sampleRate);
@@ -54,7 +55,8 @@ class CorrelationAnalyser
     {
         double lagMs = 0.0;
         float value = 0.0f;
-        bool clear = false; // strong and well above everything else in the range
+        bool clear = false;  // strong and well above everything else in the range
+        bool coarse = false; // from the wide search: to the nearest sample, beyond the time view
     };
     void computeLag();
     double lagMsAt(int index) const { return (index - lagHalf) * 1000.0 / fs; }
@@ -62,6 +64,14 @@ class CorrelationAnalyser
     const std::vector<float>& lagUnprocessed() const { return lagZ; }
     Peak lagPeakProcessed() const { return peakX; }
     Peak lagPeakUnprocessed() const { return peakZ; }
+
+    // The input's peak for the readout: the refined one in the time view's range, or, when the strongest clear peak
+    // within +-wideLagRangeMs lies beyond that range, that one (coarse).
+    Peak inputPeak() const;
+
+    // Whether the input's clear peak is beyond what a delay of +-maxMs can reach (by more than half of its 0.1-sample
+    // step): the screen then says TRANSIENTS OUT OF DELAY RANGE (plan 2.1a).
+    bool inputOutOfReach(double maxMs) const;
 
     // Seconds of sidechain (by its own samples) spent below the gate since it was last above it.
     double sidechainSilentSeconds() const { return silentSeconds; }
@@ -71,11 +81,12 @@ class CorrelationAnalyser
   private:
     void analyseFrame();
     void updateResults();
-    void lagFunction(const std::vector<double>& re, const std::vector<double>& im, std::vector<float>& out, Peak& peak);
+    void lagFunction(const std::vector<double>& re, const std::vector<double>& im, std::vector<float>& out, Peak& peak,
+                     Peak* wide = nullptr);
     double windowLevelDb(double powerSum) const; // mean-square level, in dBFS, of a sum of |X|² over bins
 
     double fs = 0.0;
-    int fftSize = 0, hop = 0, numBins = 0, lagHalf = 0, binLo = 0, binHi = 0;
+    int fftSize = 0, hop = 0, numBins = 0, lagHalf = 0, wideHalf = 0, binLo = 0, binHi = 0;
     std::unique_ptr<juce::dsp::FFT> fft;
     std::vector<float> window, work[3], fftData;
     std::vector<float> history[3];
@@ -90,7 +101,7 @@ class CorrelationAnalyser
     float overallX = 0.0f, overallZ = 0.0f;
 
     std::vector<float> lagX, lagZ;
-    Peak peakX, peakZ;
+    Peak peakX, peakZ, wideZ;
     double silentSeconds = 0.0;
 };
 } // namespace pa::meter

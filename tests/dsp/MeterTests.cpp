@@ -303,3 +303,40 @@ TEST_CASE("the time view reads a fractional offset to within 0.01 sample", "[met
             CHECK(peak.lagMs * fs / 1000.0 == Approx(offset).margin(0.01));
         }
 }
+
+TEST_CASE("offsets beyond the time view are found coarsely and read as out of the delay's reach", "[meter]")
+{
+    // Positive: the sidechain is later; negative: the track is (it needs a negative delay).
+    for (const auto fs : {44100.0, 48000.0, 96000.0})
+        for (const auto ms : {3.9, -3.9, 4.5, -4.5, 7.0, -12.0, 25.0, -38.0})
+        {
+            INFO("fs " << fs << ", " << ms << " ms");
+            const auto d = (int)std::lround(std::abs(ms) * fs / 1000.0);
+            const auto length = (int)(3.0 * fs);
+            const auto source = noise(length, 7);
+            const auto late = delayed(source, d);
+            const auto& track = ms > 0.0 ? source : late;
+            const auto& sidechain = ms > 0.0 ? late : source;
+
+            CorrelationAnalyser a;
+            a.prepare(fs);
+            feed(a, track, track, sidechain);
+            a.computeLag();
+            const auto peak = a.inputPeak();
+            const auto expected = (ms > 0.0 ? 1.0 : -1.0) * 1000.0 * d / fs;
+            CHECK(peak.clear);
+            CHECK(peak.coarse == (std::abs(ms) > CorrelationAnalyser::lagRangeMs));
+            CHECK(peak.lagMs == Approx(expected).margin(peak.coarse ? 1000.0 / fs : 0.02));
+            CHECK(a.inputOutOfReach(4.0) == (std::abs(ms) > 4.0));
+        }
+
+    // Nothing correlated (independent noise): no clear peak anywhere, so nothing is said to be out of reach.
+    const auto fs = 48000.0;
+    CorrelationAnalyser a;
+    a.prepare(fs);
+    const auto x = noise((int)(3.0 * fs), 8), y = noise((int)(3.0 * fs), 9);
+    feed(a, x, x, y);
+    a.computeLag();
+    CHECK_FALSE(a.inputPeak().clear);
+    CHECK_FALSE(a.inputOutOfReach(4.0));
+}

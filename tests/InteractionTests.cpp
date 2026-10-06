@@ -228,7 +228,8 @@ TEST_CASE("buttons: latching toggles, METER and ANALYSE", "[interaction]")
     click(*buttons[1], centre);
     CHECK(f.param(id::polarity) == 0.0f);
     click(*buttons[0], centre);
-    CHECK(f.param(id::delayOn) == 1.0f); // off by default
+    CHECK(f.param(id::delayOn) == 1.0f);                           // off by default
+    CHECK(buttons[0]->getTooltip().contains("4.5 ms of latency")); // the compensated latency it adds (plan 4.4)
     click(*buttons[2], centre);
     CHECK(f.param(id::phaseOn) == 0.0f);
 

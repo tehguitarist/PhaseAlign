@@ -77,6 +77,7 @@ void CorrelationAnalyser::prepare(double sampleRate)
 
     // The time view's scale: a pure delay (unit cross-spectrum in every band bin) peaks at exactly 1.
     lagHalf = juce::roundToInt(lagRangeMs * fs / 1000.0);
+    wideHalf = std::min(juce::roundToInt(wideLagRangeMs * fs / 1000.0), fftSize / 4);
     std::fill(fftData.begin(), fftData.end(), 0.0f);
     for (int k = binLo; k <= binHi; ++k)
         fftData[(size_t)(2 * k)] = 1.0f;
@@ -98,7 +99,7 @@ void CorrelationAnalyser::reset()
     overallX = overallZ = notMeasured;
     lagX.assign((size_t)(2 * lagHalf + 1), 0.0f);
     lagZ.assign((size_t)(2 * lagHalf + 1), 0.0f);
-    peakX = peakZ = {};
+    peakX = peakZ = wideZ = {};
     silentSeconds = 0.0;
 }
 
@@ -202,11 +203,23 @@ void CorrelationAnalyser::computeLag()
     if (fft == nullptr)
         return;
     lagFunction(xyRe, xyIm, lagX, peakX);
-    lagFunction(zyRe, zyIm, lagZ, peakZ);
+    lagFunction(zyRe, zyIm, lagZ, peakZ, &wideZ);
+}
+
+CorrelationAnalyser::Peak CorrelationAnalyser::inputPeak() const
+{
+    return wideZ.clear && std::abs(wideZ.lagMs) > lagRangeMs ? wideZ : peakZ;
+}
+
+bool CorrelationAnalyser::inputOutOfReach(double maxMs) const
+{
+    const auto peak = inputPeak();
+    const auto halfStepMs = 0.05 * 1000.0 / fs;
+    return peak.clear && std::abs(peak.lagMs) > maxMs + halfStepMs;
 }
 
 void CorrelationAnalyser::lagFunction(const std::vector<double>& re, const std::vector<double>& im,
-                                      std::vector<float>& out, Peak& peak)
+                                      std::vector<float>& out, Peak& peak, Peak* wide)
 {
     // PHAT: conj(X·Y*) = X*·Y at unit magnitude, so a sidechain that is later by d peaks at +d.
     std::fill(fftData.begin(), fftData.end(), 0.0f);
@@ -221,6 +234,26 @@ void CorrelationAnalyser::lagFunction(const std::vector<double>& re, const std::
         }
     }
     fft->performRealOnlyInverseTransform(fftData.data());
+
+    // The coarse wide search: the strongest lag within +-wideHalf samples, whole samples only, with the same test for
+    // being clear. Beyond the time view's range, it is what says the delay can't reach (plan 2.1a).
+    const auto apart = juce::roundToInt(0.1e-3 * fs);
+    if (wide != nullptr)
+    {
+        const auto at = [this](int lag) { return (float)(fftData[(size_t)((lag + fftSize) % fftSize)] / lagNorm); };
+        int bestLag = 0;
+        for (int lag = -wideHalf; lag <= wideHalf; ++lag)
+            if (std::abs(at(lag)) > std::abs(at(bestLag)))
+                bestLag = lag;
+        float runnerUp = 0.0f;
+        for (int lag = -wideHalf; lag <= wideHalf; ++lag)
+            if (std::abs(lag - bestLag) > apart)
+                runnerUp = std::max(runnerUp, std::abs(at(lag)));
+        wide->lagMs = bestLag * 1000.0 / fs;
+        wide->value = at(bestLag);
+        wide->clear = std::abs(wide->value) >= 0.3f && runnerUp <= 0.5f * std::abs(wide->value);
+        wide->coarse = true;
+    }
 
     int best = 0;
     for (int j = 0; j <= 2 * lagHalf; ++j)
@@ -270,7 +303,6 @@ void CorrelationAnalyser::lagFunction(const std::vector<double>& re, const std::
     }
     offset = t - centre;
 
-    const auto apart = juce::roundToInt(0.1e-3 * fs);
     float next = 0.0f;
     for (int j = 0; j <= 2 * lagHalf; ++j)
         if (std::abs(j - best) > apart)

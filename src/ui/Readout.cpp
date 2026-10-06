@@ -54,13 +54,23 @@ void Readout::paint(juce::Graphics& g)
                     const auto suffixFont = labelFont(suffixCap * s);
                     const auto baseline = r.getCentreY() + 0.5f * design::readoutDigitHeight * s;
                     const auto suffixGap = 4.0f * s;
-                    auto suffixRight = r.getRight() - 10.0f * s;
+                    const auto inset = 10.0f * s;
+                    auto suffixRight = r.getRight() - inset;
                     auto digitsRight = suffixRight - textWidth(suffixFont, suffix) - suffixGap;
                     if (anchorX.has_value())
                     {
                         // DSEG7 digits share one advance (its point has none), so this holds for any value.
                         digitsRight = *anchorX * s - (float)getX() + 1.5f * textWidth(digitFont, "8");
                         suffixRight = digitsRight + suffixGap + textWidth(suffixFont, suffix);
+                    }
+                    else if (const auto left = digitsRight - textWidth(digitFont, ghost); left < r.getX() + inset)
+                    {
+                        // The widest ghost with the widest suffix ("-888.8 samp") would put the sign against the
+                        // screen's left edge: centre the whole group instead, so both margins are equal. Everything
+                        // narrower keeps the right-aligned position.
+                        const auto shift = 0.5f * (r.getX() + r.getRight() - left - suffixRight);
+                        digitsRight += shift;
+                        suffixRight += shift;
                     }
 
                     lg.setColour(design::readoutGreen.withAlpha(design::readoutGhostAlpha));
