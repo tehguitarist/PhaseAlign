@@ -141,9 +141,19 @@ PhaseAlignEditor::PhaseAlignEditor(PhaseAlignProcessor& p)
       delayReadout(images.source(), layout::delayDisplay.bounds(), pa::design::delayReadoutInterior),
       phaseReadout(images.source(), layout::phaseDisplay.bounds(), pa::design::phaseReadoutInterior),
       meterScreen(images.source(), p.getMeterCapture()), rangeLabel(layout::upperRangeLabel.bounds()),
-      delayReadoutAttachment(parameter(id::delayMs), [this](float) { updateDelayReadout(); }),
+      delayReadoutAttachment(parameter(id::delayMs),
+                             [this](float)
+                             {
+                                 updateDelayReadout();
+                                 updateHeldPreview();
+                             }),
       phaseReadoutAttachment(parameter(id::phase), [this](float) { updatePhaseReadout(); }),
-      polarityReadoutAttachment(parameter(id::polarity), [this](float) { updatePhaseReadout(); }),
+      polarityReadoutAttachment(parameter(id::polarity),
+                                [this](float)
+                                {
+                                    updatePhaseReadout();
+                                    updateHeldPreview();
+                                }),
       rangeAttachment(parameter(id::phaseRange), [this](float) { updateRangeUi(); }),
       modeAttachment(parameter(id::phaseMode),
                      [this](float v)
@@ -151,7 +161,12 @@ PhaseAlignEditor::PhaseAlignEditor(PhaseAlignProcessor& p)
                          modeSwitch.setIndex(juce::roundToInt(v));
                          updateRangeUi();
                      }),
-      delayOnAttachment(parameter(id::delayOn), [this](float) { updateDimming(); }),
+      delayOnAttachment(parameter(id::delayOn),
+                        [this](float)
+                        {
+                            updateDimming();
+                            updateHeldPreview();
+                        }),
       phaseOnAttachment(parameter(id::phaseOn), [this](float) { updateDimming(); })
 {
     setLookAndFeel(&lookAndFeel);
@@ -445,6 +460,15 @@ void PhaseAlignEditor::updateMeter()
                              ? pa::ui::MeterScreen::Speed::fast
                              : pa::ui::MeterScreen::Speed::slow);
     meterScreen.setMeterOn(on);
+}
+
+// While the meter is frozen, turning the delay or the polarity shows what they would do (plan R20): the screen applies
+// them to the held picture. The delay counts as 0 when it is off.
+void PhaseAlignEditor::updateHeldPreview()
+{
+    const auto delayOn = parameter(id::delayOn).getValue() >= 0.5f;
+    const auto ms = delayOn ? (double)parameter(id::delayMs).convertFrom0to1(parameter(id::delayMs).getValue()) : 0.0;
+    meterScreen.setHeldSettings(ms, parameter(id::polarity).getValue() >= 0.5f);
 }
 
 void PhaseAlignEditor::updateDimming()

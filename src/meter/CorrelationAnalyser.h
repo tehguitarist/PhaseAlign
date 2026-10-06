@@ -74,7 +74,9 @@ class CorrelationAnalyser
     // to `ms` with the phase stage off, worked out from the input's averaged cross-spectrum by turning every bin by
     // its own delay phase. Replaces the processed curve, phase and overall values until cleared; touches nothing
     // else. Exact for the pure delay the plugin applies.
-    void setPreviewDelayMs(double ms);
+    void setPreviewDelayMs(double ms); // keeps the polarity as it is
+    void setPreview(double ms, bool inverted); // delay and polarity flip together (the knobs, while held)
+    bool isPreviewInverted() const { return previewInverted; }
     void clearPreview();
     bool isPreviewing() const { return previewActive; }
     double previewDelayMs() const { return previewMs; }
@@ -185,7 +187,7 @@ class CorrelationAnalyser
     std::vector<double> lagWeight, lagFloor; // per bin: the weight and the coherence below which it is zero
 
     Speed speed = Speed::slow;
-    bool previewActive = false;
+    bool previewActive = false, previewInverted = false;
     double previewMs = 0.0;
     std::vector<double> previewRe, previewIm;
 

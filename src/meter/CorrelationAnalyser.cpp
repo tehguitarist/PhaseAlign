@@ -181,11 +181,18 @@ void CorrelationAnalyser::setPreviewDelayMs(double ms)
         updateResults();
 }
 
+void CorrelationAnalyser::setPreview(double ms, bool inverted)
+{
+    previewInverted = inverted;
+    setPreviewDelayMs(ms);
+}
+
 void CorrelationAnalyser::clearPreview()
 {
     if (! previewActive)
         return;
     previewActive = false;
+    previewInverted = false;
     if (fft != nullptr)
         updateResults();
 }
@@ -386,8 +393,9 @@ void CorrelationAnalyser::updateResults()
             const auto w = 2.0 * juce::MathConstants<double>::pi * k / fftSize * samples;
             const auto c = std::cos(w), s = std::sin(w);
             const auto kk = (size_t)k;
-            previewRe[kk] = zyRe[kk] * c + zyIm[kk] * s;
-            previewIm[kk] = zyIm[kk] * c - zyRe[kk] * s;
+            const auto sign = previewInverted ? -1.0 : 1.0; // a polarity flip is a turn of 180 degrees
+            previewRe[kk] = sign * (zyRe[kk] * c + zyIm[kk] * s);
+            previewIm[kk] = sign * (zyIm[kk] * c - zyRe[kk] * s);
         }
         pRe = &previewRe;
         pIm = &previewIm;

@@ -62,6 +62,7 @@ class PhaseAlignEditor : public juce::AudioProcessorEditor,
     double polarityOffset() const { return parameter(pa::params::id::polarity).getValue() >= 0.5f ? 180.0 : 0.0; }
     juce::RangedAudioParameter& parameter(const char* id) const;
     void updateDelayReadout();
+    void updateHeldPreview();
     void updatePhaseReadout();
     // The scale label, its asterisk, and the tooltips that describe the current mode and range.
     void updateRangeUi();

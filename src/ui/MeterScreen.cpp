@@ -35,9 +35,9 @@ MeterScreen::MeterScreen(const SourceAssets& assetsIn, meter::MeterCapture& capt
     setTooltip("Click the middle label to choose the view: FREQUENCY, the correlation with the sidechain per "
                "frequency; TIME OFFSET, how far this track is from the sidechain, by waveform and by attack (for "
                "drums); PHASE, the angle between them (a slope is a delay, a flat offset a rotation); BANDS, the "
-               "correlation in six wide bands; SCOPE, the waveforms on top of each other around a hit (wheel to "
-               "zoom). SLOW or FAST sets the averaging. HOLD freezes the screen (it also freezes while the host is "
-               "stopped); frozen, drag across TIME OFFSET, or slide the input in SCOPE, to preview a delay on every "
+               "correlation in six wide bands; ALIGNMENT, the waveforms on top of each other around a hit (wheel "
+               "to zoom). SLOW or FAST sets the averaging. HOLD freezes the screen (it also freezes while the host is "
+               "stopped); frozen, turn DELAY or the polarity button, drag across TIME OFFSET, or slide the input in ALIGNMENT, to preview a delay on every "
                "view. INPUT is this track before the plugin, OUTPUT after it.");
     for (auto& s : scratch)
         s.resize((size_t)meter::MeterCapture::capacity);
@@ -133,7 +133,7 @@ void MeterScreen::showViewMenu()
     menu.setLookAndFeel(menuLookAndFeel.get());
     const std::pair<View, const char*> items[] = {{View::frequency, "FREQUENCY"}, {View::time, "TIME OFFSET"},
                                                   {View::phase, "PHASE"},         {View::bands, "BANDS"},
-                                                  {View::scope, "SCOPE"}};
+                                                  {View::scope, "ALIGNMENT"}};
     for (const auto& [v, name] : items)
         menu.addItem((int)v + 1, name, true, v == view);
     const auto area = localAreaToGlobal(controlArea(Control::view)).getSmallestIntegerContainer();
@@ -183,6 +183,17 @@ void MeterScreen::freezeChanged()
     }
     else
         analyser.clearPreview(); // a preview belongs to the frozen picture
+    repaint();
+}
+
+void MeterScreen::setHeldSettings(double delayMs, bool inverted)
+{
+    if (! isFrozen())
+        return;
+    const auto reach = (double)params::maxDelayMs;
+    const auto sampleMs = 1000.0 / juce::jmax(1.0, analyser.getSampleRate());
+    const auto step = 0.1 * sampleMs;
+    analyser.setPreview(juce::jlimit(-reach, reach, std::round(delayMs / step) * step), inverted);
     repaint();
 }
 
@@ -314,7 +325,7 @@ const char* viewName(MeterScreen::View v)
         case MeterScreen::View::time: return "TIME OFFSET";
         case MeterScreen::View::phase: return "PHASE";
         case MeterScreen::View::bands: return "BANDS";
-        case MeterScreen::View::scope: return "SCOPE";
+        case MeterScreen::View::scope: return "ALIGNMENT";
     }
     return "";
 }
@@ -576,17 +587,21 @@ void MeterScreen::paintGrid(juce::Graphics& g) const
     label(Control::fast, analyser.getSpeed() == Speed::fast, juce::Justification::left);
     label(Control::hold, isFrozen(), juce::Justification::right);
 
-    // The view selector: the current view's name, with a triangle pointing up (the menu opens upwards), in a thin frame.
+    // The view selector: the current view's name, with a triangle pointing up (the menu opens upwards), in a frame with
+    // the same clearance as HOLD's: 8 above the capitals and below the baseline, 14 either side (the box is as wide as
+    // the longest name, so it doesn't change size as the view does).
     {
         const auto area = controlArea(Control::view);
         g.setColour(design::meterAxisText.withAlpha(0.95f));
         drawTextAt(g, viewFont, viewName(view), area.getX() + 14.0f * s, titleY, juce::Justification::left);
         juce::Path triangle;
-        const auto cx = area.getRight() - 18.0f * s, cy = titleY - 5.0f * s;
+        const auto cx = area.getRight() - 20.0f * s, cy = titleY - 6.5f * s;
         triangle.addTriangle(cx - 6.0f * s, cy + 3.5f * s, cx + 6.0f * s, cy + 3.5f * s, cx, cy - 4.0f * s);
         g.fillPath(triangle);
-        g.setColour(design::meterAxisText.withAlpha(0.35f));
-        g.drawRect(juce::Rectangle<float>(area.getX(), titleY - 17.0f * s, area.getWidth(), 26.0f * s), thin);
+        g.setColour(design::meterAxisText.withAlpha(0.45f));
+        g.drawRect(juce::Rectangle<float>::leftTopRightBottom(area.getX(), titleY - 13.0f * s - 8.0f * s, area.getRight(),
+                                                              titleY + 8.0f * s),
+                   thin);
     }
     if (isFrozen()) // a frame round HOLD while the picture is frozen
     {
@@ -864,7 +879,8 @@ void MeterScreen::paintScope(juce::Graphics& g) const
     drawTrace([&](double i) { return scopeBuffer.interpolated(2, i); }, design::meterAxisText.withAlpha(0.85f), thickness);
     drawTrace([&](double i) { return scopeBuffer.interpolated(0, i); }, design::phosphor.withAlpha(0.45f), thickness);
     if (analyser.isPreviewing()) // the input slid later by the preview delay
-        drawTrace([&](double i) { return scopeBuffer.interpolated(0, i - previewSamples); }, design::phosphor,
+        drawTrace([&](double i) { return (analyser.isPreviewInverted() ? -1.0f : 1.0f) * scopeBuffer.interpolated(0, i - previewSamples); },
+                  design::phosphor,
                   juce::jmax(1.0f, 2.2f * s));
     else
         drawTrace([&](double i) { return scopeBuffer.interpolated(1, i); }, design::phosphor, juce::jmax(1.0f, 2.2f * s));
@@ -908,7 +924,8 @@ void MeterScreen::paintPreviewNote(juce::Graphics& g) const
         // Below the time view's readouts, at the top left elsewhere.
         const auto y = view == View::bands ? ly(design::meterMinusOneY) - 14.0f * s
                                            : ly(design::meterPlusOneY) + (view == View::time ? 112.0f : view == View::scope ? 44.0f : 24.0f) * s;
-        const juce::String note = "PREVIEW  DELAY " + juce::String(ms >= 0.0 ? "+" : "") + juce::String(ms, 3) + " ms";
+        const juce::String note = "PREVIEW  DELAY " + juce::String(ms >= 0.0 ? "+" : "") + juce::String(ms, 3) + " ms" +
+                                  (analyser.isPreviewInverted() ? "  INVERTED" : "");
         g.setColour(design::screenBlack.withAlpha(0.85f));
         g.fillRect(juce::Rectangle<float>(textWidth(font, note) + 16.0f * s, 22.0f * s).withX(x - 8.0f * s).withY(y - 16.0f * s));
         g.setColour(design::phosphor);

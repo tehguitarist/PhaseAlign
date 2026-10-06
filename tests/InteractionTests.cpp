@@ -400,3 +400,35 @@ TEST_CASE("meter hold: HOLD, or a stopped host, freezes the screen; a frozen scr
     f.proc.getMeterCapture().setTransport(true, true);
     CHECK_FALSE(screen.isFrozen());
 }
+
+TEST_CASE("meter hold: while frozen, the delay and polarity knobs preview their result", "[interaction]")
+{
+    Fixture f;
+    auto& screen = f.editor->getMeterScreen();
+    const auto setParam = [&](const char* paramId, float v)
+    {
+        auto* p = f.proc.getValueTreeState().getParameter(paramId);
+        p->setValueNotifyingHost(p->convertTo0to1(v));
+    };
+
+    // Not frozen: the audio shows it, the screen doesn't preview.
+    setParam(id::delayMs, 1.0f);
+    CHECK_FALSE(screen.isPreviewing());
+
+    screen.setHeld(true);
+    setParam(id::delayMs, 1.2f); // delay is off: counts as 0
+    CHECK(screen.isPreviewing());
+    CHECK(screen.getAnalyser().previewDelayMs() == Approx(0.0).margin(1e-9));
+    setParam(id::delayOn, 1.0f);
+    CHECK(screen.getAnalyser().previewDelayMs() == Approx(1.2).margin(0.03)); // 0.1-sample steps at 48 kHz
+    setParam(id::polarity, 1.0f);
+    CHECK(screen.getAnalyser().isPreviewInverted());
+    setParam(id::delayMs, -2.0f);
+    CHECK(screen.getAnalyser().previewDelayMs() == Approx(-2.0).margin(0.03));
+    CHECK(screen.getAnalyser().isPreviewInverted());
+
+    screen.setHeld(false); // letting go drops it
+    CHECK_FALSE(screen.isPreviewing());
+    setParam(id::delayMs, 0.5f);
+    CHECK_FALSE(screen.isPreviewing());
+}

@@ -716,3 +716,28 @@ TEST_CASE("scope buffer: holds the last 4 s, and finds the loudest onset of the 
     // Interpolation between samples.
     CHECK(b.interpolated(0, (double)length - 10.5) == Approx(0.5f * (in[(size_t)length - 11] + in[(size_t)length - 10])));
 }
+
+TEST_CASE("preview with polarity: a delayed, inverted sidechain reads +1 with both set, -1 with the delay alone", "[meter]")
+{
+    const auto fs = 48000.0;
+    const auto d = 62;
+    const auto source = noise((int)(3.0 * fs), 31);
+    auto sidechain = delayed(source, d);
+    for (auto& v : sidechain)
+        v = -v;
+
+    CorrelationAnalyser a;
+    a.prepare(fs);
+    feed(a, source, source, sidechain);
+    a.setPreview(1000.0 * d / fs, true);
+    CHECK(a.isPreviewInverted());
+    CHECK(a.overallProcessed() > 0.999f);
+    CHECK(minMeasured(a.curveProcessed()) > 0.99);
+    a.setPreview(1000.0 * d / fs, false);
+    CHECK(a.overallProcessed() < -0.999f);
+    // The phase view: 180 degrees across the band with the delay alone.
+    for (size_t i = 20; i < a.curveFrequencies().size() - 20; i += 10)
+        CHECK(std::abs(a.phaseProcessed()[i]) > 170.0f);
+    a.clearPreview();
+    CHECK_FALSE(a.isPreviewInverted());
+}

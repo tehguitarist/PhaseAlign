@@ -22,7 +22,7 @@ namespace pa::ui
 // sidechain against frequency (R17). All show processed (bright) and unprocessed (dim), and the overall
 // processed/unprocessed pair on the right.
 //
-// SCOPE (R19): this track, the sidechain and the output as waveforms on top of each other, each scaled to its own
+// ALIGNMENT (R19; `scope` in the code): this track, the sidechain and the output as waveforms on top of each other, each scaled to its own
 // peak, triggered on the sidechain's loudest recent onset so a hit stays put. The mouse wheel zooms (0.5 to 200 ms
 // across). Frozen, dragging slides the input against the sidechain: the output trace becomes the PREVIEW, the input
 // as it would be with the delay knob at that distance.
@@ -73,6 +73,9 @@ class MeterScreen : public DesignComponent, private juce::Timer
     bool isFrozen() const;
     bool isPreviewing() const { return analyser.isPreviewing(); }
     void setPreviewDelayMs(double ms); // frozen only; clamped to the delay knob's reach, snapped to 0.1 sample
+    // The delay and polarity knobs, while frozen: the screen shows the result of those settings (delay 0 when the
+    // delay is off), phase stage left out. Not frozen: ignored (the audio shows it itself).
+    void setHeldSettings(double delayMs, bool inverted);
 
     State getState() const { return state; }
     bool isTimerRunningForTesting() const { return isTimerRunning(); }
