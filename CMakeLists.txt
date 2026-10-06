@@ -9,7 +9,7 @@ set(CMAKE_OSX_DEPLOYMENT_TARGET "10.13" CACHE STRING "Minimum macOS deployment v
 
 option(PA_BUILD_TESTS "Build the unit tests (tests/, Catch2 v3)" ON)
 option(PA_STANDALONE "Also build a Standalone app, for checking the UI without a host" OFF)
-option(PA_GENERIC_FFT_TESTS "Build PhaseAlignDspTests with the generic FFT on macOS too (no vDSP), to benchmark it" OFF)
+option(PA_GENERIC_FFT_TESTS "Build PhaseAlignDspTests with PFFFT on macOS too (no vDSP), to benchmark it" OFF)
 
 # -Wextra is a GCC/Clang flag; MSVC's cl.exe misparses it as the /W switch (error D8021).
 if (MSVC)
@@ -19,6 +19,15 @@ else()
 endif()
 
 add_subdirectory(libs/JUCE)
+
+# PFFFT (libs/pffft, a submodule; BSD-style licence in libs/pffft/LICENSE.txt): the real FFT where vDSP isn't available
+# (src/dsp/RealFft.h). Only its single-precision core is built; NEON on ARM, SSE on x86 (the headers pick).
+add_library(pa_pffft STATIC libs/pffft/src/pffft.c libs/pffft/src/pffft_common.c)
+target_include_directories(pa_pffft
+    PUBLIC libs/pffft/include
+    PRIVATE libs/pffft/src libs/pffft/include/pffft)
+target_compile_definitions(pa_pffft PUBLIC PFFFT_STATIC_DEFINE PRIVATE _USE_MATH_DEFINES PFFFT_ENABLE_NEON)
+set_target_properties(pa_pffft PROPERTIES POSITION_INDEPENDENT_CODE ON C_VISIBILITY_PRESET hidden)
 
 # UI artwork (built from ui/ by tools/build_assets.sh) and fonts. Resources are looked up by file name
 # (src/ui/Assets.cpp), so new files only need to land in these folders.
@@ -73,6 +82,7 @@ target_compile_definitions(PhaseAlign
 target_link_libraries(PhaseAlign
     PRIVATE
         PhaseAlignAssets
+        pa_pffft
         juce::juce_audio_utils
         juce::juce_dsp
     PUBLIC
@@ -120,6 +130,7 @@ if (PA_BUILD_TESTS)
     )
     target_link_libraries(PhaseAlignTests PRIVATE
         PhaseAlignAssets
+        pa_pffft
         juce::juce_audio_utils
         juce::juce_dsp
         juce::juce_recommended_config_flags
@@ -156,6 +167,7 @@ if (PA_BUILD_TESTS)
         JUCE_STANDALONE_APPLICATION=1
     )
     target_link_libraries(PhaseAlignDspTests PRIVATE
+        pa_pffft
         juce::juce_dsp
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags
@@ -164,7 +176,7 @@ if (PA_BUILD_TESTS)
     target_compile_options(PhaseAlignDspTests PRIVATE ${PA_WARNING_FLAGS})
     add_test(NAME PhaseAlignDspTests COMMAND PhaseAlignDspTests)
 
-    # The DSP runner without vDSP on macOS: the FFT engine Windows and Linux use, to benchmark it on this machine. Only
+    # The DSP runner without vDSP on macOS: the FFT engine Windows and Linux use (PFFFT), to benchmark it here. Only
     # juce_dsp loses vDSP (juce_audio_basics needs it on macOS), so this build directory is for benchmarks only.
     if (PA_GENERIC_FFT_TESTS)
         target_compile_definitions(PhaseAlignDspTests PRIVATE PA_REAL_FFT_NO_VDSP=1)

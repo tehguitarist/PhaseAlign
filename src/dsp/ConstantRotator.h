@@ -30,13 +30,11 @@ class ConstantRotator
 
     // The convolver's blocks: the head applied directly, then each FFT level's block (PartitionedConvolver.h). Measured
     // fastest (plan 2.6): uniform 128 at 44.1/48 kHz. Where the kernel is twice as long or more, a second level of
-    // larger blocks for its tail costs less than more 128-sample partitions: 2048 from 88.2 kHz with vDSP; with the
-    // generic FFT (Windows, Linux), whose large transforms cost more, 1024 and only from 176.4 kHz.
+    // larger blocks for its tail costs less than more 128-sample partitions: 2048 from 88.2 kHz. The same with vDSP and
+    // with PFFFT (measured on the M1; to check against CI's x86 runners).
     static std::vector<int> blockSizesFor(double sampleRate)
     {
-        if (RealFft::isNative)
-            return sampleRate >= 80000.0 ? std::vector<int>{128, 2048} : std::vector<int>{128};
-        return sampleRate >= 160000.0 ? std::vector<int>{128, 1024} : std::vector<int>{128};
+        return sampleRate >= 80000.0 ? std::vector<int>{128, 2048} : std::vector<int>{128};
     }
 
     static int latencyFor(double sampleRate) { return (HilbertFir::tapsFor(sampleRate) - 1) / 2 - 1; }

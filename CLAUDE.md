@@ -95,6 +95,8 @@ job, better.
       `prototype/decramp_ab.py` → `prototype/out/decramp/`. Cost: plan 2.6 (J); the user wants CPU and latency kept as
       low as possible, but working first. Benchmarks: `PhaseAlignDspTests "chain cost per
       stereo frame"` (Release); `[dump]` writes renders for comparing two builds bit for bit.
+   7. **PFFFT engine: built on branch `pffft-engine` (2026-10-06), not merged.** `libs/pffft` (submodule) behind
+      `RealFft` where vDSP isn't; within a few ns of vDSP on the M1. Waiting on CI's x86 numbers (HANDOVER item 2).
    - The stem analysis and auto-suggest (ANALYSE) work is dead last. Real multi-mic stem pairs are still wanted for the
      P2/P3 listening.
    - Installing (when the user asks): `/Library/Audio/Plug-Ins/{Components,VST3}`, not ~/Library.

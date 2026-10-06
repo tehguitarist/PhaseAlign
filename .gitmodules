@@ -1,3 +1,6 @@
 [submodule "libs/JUCE"]
 	path = libs/JUCE
 	url = https://github.com/juce-framework/JUCE
+[submodule "libs/pffft"]
+	path = libs/pffft
+	url = https://github.com/marton78/pffft.git

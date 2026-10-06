@@ -92,6 +92,10 @@ What follows is the original brief, kept for the record.
 
 ## 2. Constant on Windows and Linux: PFFFT
 
+**Status (2026-10-06): steps 1–3 built on branch `pffft-engine` (from master), not merged.** PFFFT is a submodule in
+`libs/pffft`, the engine behind `RealFft` wherever vDSP isn't; licence in `THIRD_PARTY_NOTICES.md`. On the M1 (NEON) it
+matches vDSP (plan 2.6, K). Left: CI's x86 numbers (needs a push or a manual dispatch, the user's call) and step 4.
+
 CI's numbers (plan 2.6, run 37396526948) put Constant over budget:
 - **Linux:** 119–160 ns, and 160 at 192 kHz, over 150.
 - **Windows:** 232–327 ns at every rate, and one 64-sample callback at 192 kHz took 1088 µs of 333.

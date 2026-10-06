@@ -515,6 +515,24 @@ delayed dry path, and more); not chased further. Within budget on the M1. **On t
 go over 50 ns** (they ran 3–4 times the M1's figures before; the SSE2 path has no fused multiply-add): CI's numbers
 decide whether the budget or the code moves.
 
+**K. PFFFT as the engine where vDSP isn't available (2026-10-06, branch `pffft-engine`; `HANDOVER.md` item 2).**
+`libs/pffft` (submodule, BSD-style licence; `THIRD_PARTY_NOTICES.md`) replaces juce::dsp::FFT behind `RealFft`: its
+ordered real transform is the packed split format interleaved, so one pass splits or joins it; 16-byte alignment is met
+by its own buffers where the caller's aren't aligned. Measured on the M1 with `-DPA_GENERIC_FFT_TESTS=ON` (PFFFT on
+NEON), master's generic engine and the branch back to back (ns per stereo frame):
+
+| Case | old generic | PFFFT | vDSP (for reference) |
+|---|---|---|---|
+| Constant at 60°, fractional delay, 44.1 / 48 kHz | 65.2 / 62.5 | 36.0 / 32.9 | 32.8 / 30.3 |
+| Constant at 60°, fractional delay, 96 / 192 kHz | 83.2 / 103.4 | 34.1 / 40.0 | 33.8 / 38.8 |
+| Constant at 0° (spectra only), 48 kHz | 24.7 | 9.5 | 9.0 |
+| worst 64-sample callback, Constant, 192 kHz (µs, of 333) | 63–82 | 42 | 35–46 |
+
+The convolver's layouts were re-measured with PFFFT and the best are vDSP's (uniform 128 below 80 kHz, 128 + 2048
+above: 27.7 / 33.6 ns for the convolver alone at 96 / 192 kHz), so `ConstantRotator::blockSizesFor` no longer depends on
+the engine. **Still to do: CI's x86 numbers** (SSE, and whether MSVC vectorises the register-blocked loops), which decide
+whether the layouts need an x86 variant.
+
 **Candidates looked at and not built:**
 - Polyphase split of the Hilbert (every other tap is zero): in the frequency domain it is the same work as doubling the
   block. Per sample, uniform 128 is 31 complex multiply-adds plus 64 head taps; polyphase at 64 decimated is 31.5 + 64,
@@ -524,7 +542,7 @@ decide whether the budget or the code moves.
 - Packing stereo into one complex FFT: a complex FFT of n points costs about two real ones, and the multiply-add covers
   the same number of bins, so no gain is expected.
 - PFFFT: on the M1 the generic engine was within budget after G and H (103 ns at 192 kHz), but CI's x86 numbers
-  above say Windows and Linux need it.
+  above say Windows and Linux need it. Built since (K).
 
 **Latency.**
 - Constant's L = D − 1 follows from the tap count. Nothing else in the path adds samples. The delay's Lmax + H is the

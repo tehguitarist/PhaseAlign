@@ -1,18 +1,17 @@
 #pragma once
 
-#include <juce_dsp/juce_dsp.h>
-
 #include <algorithm>
 #include <cmath>
-#include <complex>
+#include <cstdint>
 #include <memory>
 #include <vector>
 
-// Define PA_REAL_FFT_NO_VDSP to use the generic engine on Apple too (to measure it there).
-#if (JUCE_MAC || JUCE_IOS) && ! defined(PA_REAL_FFT_NO_VDSP)
+// Define PA_REAL_FFT_NO_VDSP to use the other engine (PFFFT) on Apple too (to measure it there).
+#if (defined(__APPLE__)) && ! defined(PA_REAL_FFT_NO_VDSP)
 #include <Accelerate/Accelerate.h>
 #define PA_REAL_FFT_VDSP 1
 #else
+#include <pffft/pffft.h>
 #define PA_REAL_FFT_VDSP 0
 #endif
 
@@ -23,9 +22,10 @@
 // multiplied separately).
 //
 // Engines: vDSP on Apple (directly, in the packed split format it uses natively; JUCE's wrapper adds a strided layout
-// and two extra passes). Elsewhere, juce::dsp::FFT's complex transform of n/2 points with the usual split into even and
-// odd samples and one twiddle pass (what vDSP does inside): JUCE's own real transform is a complex one of n points,
-// about twice the work. A faster engine for Windows/Linux would go here behind the same interface (plan 2.6).
+// and two extra passes). Elsewhere PFFFT (libs/pffft, BSD-style licence; SSE on x86, NEON on ARM): its ordered real
+// transform is the same packing interleaved, so one pass splits or joins it. PFFFT wants 16-byte aligned buffers, so
+// unaligned input or output goes through its own (n >= 32, a power of two here). Until 2026-10-06 the other engine was
+// juce::dsp::FFT's complex transform of n/2 points plus a twiddle pass, about 2-3 times slower on CI's x86 runners.
 //
 // prepare() allocates; forward() and inverse() don't.
 namespace pa::dsp
@@ -33,9 +33,6 @@ namespace pa::dsp
 class RealFft
 {
   public:
-    // True for vDSP; false for the generic engine (juce::dsp::FFT, much slower for large transforms).
-    static constexpr bool isNative = PA_REAL_FFT_VDSP != 0;
-
     void prepare(int orderIn)
     {
         order = orderIn;
@@ -43,13 +40,9 @@ class RealFft
 #if PA_REAL_FFT_VDSP
         setup.reset(vDSP_create_fftsetup((vDSP_Length)order, kFFTRadix2));
 #else
-        const auto m = n / 2;
-        fft = std::make_unique<juce::dsp::FFT>(order - 1);
-        z.assign((size_t)m, {});
-        spectrum.assign((size_t)m, {});
-        twiddle.resize((size_t)m);
-        for (int k = 0; k < m; ++k)
-            twiddle[(size_t)k] = std::polar(1.0f, (float)(-2.0 * juce::MathConstants<double>::pi * k / n));
+        setup.reset(pffft_new_setup(n, PFFFT_REAL));
+        buffer.reset(static_cast<float*>(pffft_aligned_malloc((size_t)n * sizeof(float))));
+        work.reset(static_cast<float*>(pffft_aligned_malloc((size_t)n * sizeof(float))));
 #endif
         // The engine's scales, measured: forward's gain on a unit impulse, and inverse(forward(x)) / x.
         std::vector<float> x((size_t)n, 0.0f), re((size_t)(n / 2)), im((size_t)(n / 2)), back((size_t)n);
@@ -72,21 +65,12 @@ class RealFft
         vDSP_ctoz(reinterpret_cast<const DSPComplex*>(in), 2, &split, 1, (vDSP_Length)(n / 2));
         vDSP_fft_zrip(setup.get(), &split, 1, (vDSP_Length)order, kFFTDirection_Forward);
 #else
-        // z = even + j odd; Z = DFT(z); X[k] = E[k] + w^k O[k] with E[k] = (Z[k] + Z*[m-k]) / 2 and
-        // O[k] = (Z[k] - Z*[m-k]) / 2j.
-        const auto m = n / 2;
-        for (int k = 0; k < m; ++k)
-            z[(size_t)k] = {in[2 * k], in[2 * k + 1]};
-        fft->perform(z.data(), spectrum.data(), false);
-        re[0] = spectrum[0].real() + spectrum[0].imag(); // DC
-        im[0] = spectrum[0].real() - spectrum[0].imag(); // Nyquist
-        for (int k = 1; k < m; ++k)
+        float* b = buffer.get();
+        pffft_transform_ordered(setup.get(), aligned(in) ? in : copyIn(in), b, work.get(), PFFFT_FORWARD);
+        for (int k = 0; k < n / 2; ++k) // b[0] = DC, b[1] = Nyquist: the packing re[0], im[0] already
         {
-            const auto a = spectrum[(size_t)k], b = std::conj(spectrum[(size_t)(m - k)]);
-            const auto even = 0.5f * (a + b), odd = Complex(0.0f, -0.5f) * (a - b);
-            const auto x = even + twiddle[(size_t)k] * odd;
-            re[k] = x.real();
-            im[k] = x.imag();
+            re[k] = b[2 * k];
+            im[k] = b[2 * k + 1];
         }
 #endif
     }
@@ -99,24 +83,18 @@ class RealFft
         vDSP_fft_zrip(setup.get(), &split, 1, (vDSP_Length)order, kFFTDirection_Inverse);
         vDSP_ztoc(&split, 1, reinterpret_cast<DSPComplex*>(out), 2, (vDSP_Length)(n / 2));
 #else
-        // The forward steps backwards: E[k] = (X[k] + X*[m-k]) / 2, O[k] = (X[k] - X*[m-k]) w^-k / 2, Z = E + j O,
-        // z = IDFT(Z) = even + j odd.
-        const auto m = n / 2;
-        const auto bin = [&](int k)
+        float* b = buffer.get();
+        for (int k = 0; k < n / 2; ++k)
         {
-            return k == 0 ? Complex(re[0], 0.0f) : k == m ? Complex(im[0], 0.0f) : Complex(re[k], im[k]);
-        };
-        for (int k = 0; k < m; ++k)
-        {
-            const auto a = bin(k), b = std::conj(bin(m - k));
-            const auto even = 0.5f * (a + b), odd = 0.5f * (a - b) * std::conj(twiddle[(size_t)k]);
-            spectrum[(size_t)k] = even + Complex(0.0f, 1.0f) * odd;
+            b[2 * k] = re[k];
+            b[2 * k + 1] = im[k];
         }
-        fft->perform(spectrum.data(), z.data(), true);
-        for (int k = 0; k < m; ++k)
+        if (aligned(out))
+            pffft_transform_ordered(setup.get(), b, out, work.get(), PFFFT_BACKWARD);
+        else
         {
-            out[2 * k] = z[(size_t)k].real();
-            out[2 * k + 1] = z[(size_t)k].imag();
+            pffft_transform_ordered(setup.get(), b, b, work.get(), PFFFT_BACKWARD);
+            std::copy(b, b + n, out);
         }
 #endif
     }
@@ -131,9 +109,25 @@ class RealFft
     };
     std::unique_ptr<OpaqueFFTSetup, SetupDeleter> setup;
 #else
-    using Complex = juce::dsp::Complex<float>;
-    std::unique_ptr<juce::dsp::FFT> fft;
-    std::vector<Complex> z, spectrum, twiddle;
+    static bool aligned(const float* p) { return (reinterpret_cast<std::uintptr_t>(p) & 15u) == 0; }
+
+    // Unaligned input: into the buffer, which the transform then reads and overwrites in place.
+    const float* copyIn(const float* in)
+    {
+        std::copy(in, in + n, buffer.get());
+        return buffer.get();
+    }
+
+    struct SetupDeleter
+    {
+        void operator()(PFFFT_Setup* s) const { pffft_destroy_setup(s); }
+    };
+    struct AlignedDeleter
+    {
+        void operator()(float* p) const { pffft_aligned_free(p); }
+    };
+    std::unique_ptr<PFFFT_Setup, SetupDeleter> setup;
+    std::unique_ptr<float, AlignedDeleter> buffer, work; // n floats each, 16-byte aligned
 #endif
 };
 } // namespace pa::dsp
