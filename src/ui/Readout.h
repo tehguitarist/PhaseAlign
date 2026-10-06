@@ -17,6 +17,7 @@ class Readout : public DesignComponent
     // digits: the value ("1.23"); ghost: the unlit segments behind it ("8.88"); suffix: the unit.
     void setValue(const juce::String& digits, const juce::String& ghost, const juce::String& suffix);
     const juce::String& getDigits() const { return digits; }
+    const juce::String& getSuffix() const { return suffix; }
 
     // Places the digits so the centre of the second digit from the right sits at designX, growing to the left,
     // with the suffix after them. Without an anchor, the digits are right-aligned against the suffix, which is

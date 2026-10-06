@@ -229,6 +229,7 @@ std::vector<Scenario> scenarios()
         Scenario s{"hilo_glides", base, {}, 5.0};
         s.initial.phaseOn = true;
         s.initial.phaseDegrees = 120.0;
+        s.initial.phaseWide = true;
         auto lo = false;
         for (double t = 0.5; t < 2.0; t += 0.3)
             s.events.push_back({at(t), (lo = ! lo) ? "Lo" : "Hi",
@@ -244,6 +245,7 @@ std::vector<Scenario> scenarios()
     { // The phase knob swept 0 -> 180 -> 0 in Hi, then Lo, then Constant, updated every callback.
         Scenario s{"phase_sweeps", base, {}, 7.0};
         s.initial.phaseOn = true;
+        s.initial.phaseWide = true;
         const std::pair<double, PhaseMode> runs[] = {
             {0.5, PhaseMode::high}, {2.5, PhaseMode::low}, {4.5, PhaseMode::constant}};
         for (const auto& [start, mode] : runs)
@@ -297,13 +299,14 @@ std::vector<Scenario> scenarios()
         std::uniform_int_distribution<int> gapDist(1, (int)(0.03 * fs));
         std::uniform_real_distribution<double> angleDist(0.0, 180.0);
         std::uniform_int_distribution<int> modeDist(0, 2);
-        std::bernoulli_distribution coin(0.3), rare(0.1);
+        std::bernoulli_distribution coin(0.3), rare(0.1), wideCoin(0.2);
         for (int t = at(0.5); t < at(7.5); t += gapDist(rng))
         {
             const auto d = delayDist(rng);
             const auto a = angleDist(rng);
             const auto flip = coin(rng), delay = coin(rng), phase = coin(rng);
             const auto mode = rare(rng) ? modeDist(rng) : -1;
+            const auto wide = wideCoin(rng);
             s.events.push_back({t, "random", [=](auto& c)
                                 {
                                     c.delayTenths = d;
@@ -311,6 +314,7 @@ std::vector<Scenario> scenarios()
                                     c.polarityInverted ^= flip;
                                     c.delayOn ^= delay;
                                     c.phaseOn ^= phase;
+                                    c.phaseWide ^= wide;
                                     if (mode >= 0)
                                         c.phaseMode = (PhaseMode)mode;
                                 }});

@@ -112,7 +112,7 @@ PhaseAlignEditor::PhaseAlignEditor(PhaseAlignProcessor& p)
       phaseKnob(images, layout::phaseKnob.bounds(), parameter(id::phase),
                 [this](double position, int direction)
                 {
-                    const auto range = phaseRange();
+                    const auto range = shownRange();
                     return pa::params::stepPhaseDeg(position * range, direction, range) / range;
                 }),
       unitSwitch(images, layout::delaySwitch.bounds(), pa::ui::ToggleSwitch3::LabelSide::right,
@@ -120,11 +120,12 @@ PhaseAlignEditor::PhaseAlignEditor(PhaseAlignProcessor& p)
                    {"SAMPLES", "Show the delay in samples at the current sample rate."},
                    {"CENTIMETERS", "Show the delay as a distance in centimetres (sound at 343 m/s)."}}}),
       modeSwitch(images, layout::phaseSwitch.bounds(), pa::ui::ToggleSwitch3::LabelSide::left,
-                 {{{"HIGH", juce::String::fromUTF8("High: an all-pass rotation that turns the highs further than the "
-                                                   "lows; the knob's angle is the shift at 150 Hz. ") +
+                 {{{"HIGH", "High: an all-pass rotation, the wide one. At RANGE 90 a single section around 150 Hz; at "
+                            "RANGE 180 two sections, one on the lows (around 75 Hz) and one on the highs (around "
+                            "1.5 kHz). " +
                                 hiLoLatencyText},
-                   {"LOW", juce::String::fromUTF8("Low: the same, an octave lower; the knob's angle is the shift at "
-                                                  "75 Hz (past 90\xc2\xb0, the extra turn is centred near 1.5 kHz). ") +
+                   {"LOW", "Low: an all-pass rotation, the narrow one. At RANGE 90 a single section around 75 Hz; at "
+                           "RANGE 180 two stacked sections around 150 Hz. " +
                                hiLoLatencyText},
                    {"CONSTANT",
                     "Constant: the same rotation at every frequency, from about 20 Hz up. " + constantLatencyText}}}),
@@ -141,13 +142,13 @@ PhaseAlignEditor::PhaseAlignEditor(PhaseAlignProcessor& p)
       delayReadoutAttachment(parameter(id::delayMs), [this](float) { updateDelayReadout(); }),
       phaseReadoutAttachment(parameter(id::phase), [this](float) { updatePhaseReadout(); }),
       polarityReadoutAttachment(parameter(id::polarity), [this](float) { updatePhaseReadout(); }),
-      rangeAttachment(parameter(id::phaseRange),
-                      [this](float)
-                      {
-                          rangeLabel.setDegrees(juce::roundToInt(phaseRange()));
-                          updatePhaseReadout();
-                      }),
-      modeAttachment(parameter(id::phaseMode), [this](float v) { modeSwitch.setIndex(juce::roundToInt(v)); }),
+      rangeAttachment(parameter(id::phaseRange), [this](float) { updateRangeUi(); }),
+      modeAttachment(parameter(id::phaseMode),
+                     [this](float v)
+                     {
+                         modeSwitch.setIndex(juce::roundToInt(v));
+                         updateRangeUi();
+                     }),
       delayOnAttachment(parameter(id::delayOn), [this](float) { updateDimming(); }),
       phaseOnAttachment(parameter(id::phaseOn), [this](float) { updateDimming(); })
 {
@@ -160,20 +161,12 @@ PhaseAlignEditor::PhaseAlignEditor(PhaseAlignProcessor& p)
                                                 "earlier. Shift-drag for fine control; mouse wheel or arrow keys "
                                                 "nudge by one sample, 0.1 sample with Shift. ") +
                          knobHint);
-    phaseKnob.setTooltip(juce::String::fromUTF8("Phase rotation: 0 to 90\xc2\xb0 or 0 to 180\xc2\xb0, set by RANGE. "
-                                                "Shift-drag for fine control; mouse wheel or arrow keys nudge by "
-                                                "0.5\xc2\xb0. ") +
-                         knobHint);
     delayKnob.onEditRequest = [this] { delayReadout.showEditor(); };
     phaseKnob.onEditRequest = [this] { phaseReadout.showEditor(); };
 
     delayReadout.setTooltip("The delay knob's setting (applied while DELAY is on), in the unit chosen with the switch: "
                             "how far this track moves, net of the latency. Double-click to type a value; add ms, samp "
                             "or cm to type it in another unit.");
-    phaseReadout.setTooltip(
-        "The rotation applied, in degrees: the knob's angle, plus 180 while the polarity is "
-        "inverted (just 180 while PHASE is off). In High it is the shift at 150 Hz, in Low the shift "
-        "at 75 Hz (past 90, 90 plus the extra turn near 1.5 kHz). Double-click to type a value.");
     phaseReadout.setAnchor(pa::design::phaseReadoutInterior.getCentreX());
     delayReadout.onTextEntered = [this](const juce::String& text)
     {
@@ -183,7 +176,7 @@ PhaseAlignEditor::PhaseAlignEditor(PhaseAlignProcessor& p)
     phaseReadout.onTextEntered = [this](const juce::String& text)
     {
         // The typed value is what the display shows, so take the inversion's 180 back off first.
-        const auto range = phaseRange();
+        const auto range = shownRange();
         if (const auto shown = pa::params::parsePhase(text, pa::params::maxShownPhaseDeg))
             phaseReadoutAttachment.setValueAsCompleteGesture(
                 (float)(juce::jlimit(0.0, range, *shown - polarityOffset()) / range));
@@ -255,7 +248,7 @@ PhaseAlignEditor::PhaseAlignEditor(PhaseAlignProcessor& p)
     uiState.addListener(this);
     audioProcessor.addChangeListener(this);
 
-    // Size: 75% to 200% of the 977x612 reference (opening at 80%), aspect locked, restored from the ui state. The saved
+    // Size: 60% to 200% of the 977x612 reference (opening at 80%), aspect locked, restored from the ui state. The saved
     // scale is read first: setting the limits clamps (and so resizes and saves) whatever size the editor has then.
     using pa::design::defaultHeight, pa::design::defaultWidth;
     const auto scale = juce::jlimit(
@@ -349,10 +342,69 @@ void PhaseAlignEditor::updatePhaseReadout()
     // dimmed.
     const auto phaseOn = parameter(id::phaseOn).getValue() >= 0.5f;
     const auto inverted = polarityOffset() > 0.0;
-    const auto knobDeg = (double)parameter(id::phase).getValue() * phaseRange(); // phase is 0 to 1
+    const auto knobDeg = (double)parameter(id::phase).getValue() * shownRange(); // phase is 0 to 1
     const auto deg = phaseOn ? knobDeg + polarityOffset() : (inverted ? 180.0 : knobDeg);
+    // The asterisk marks High at RANGE 180, where the number is the first section's angle; polarity alone is exact.
+    const auto approximate = shownRangeIsApproximate() && (phaseOn || ! inverted);
     phaseReadout.setDimmed(! phaseOn && ! inverted);
-    phaseReadout.setValue(pa::params::formatPhase(deg), "888.8", juce::String::fromUTF8("\xc2\xb0"));
+    phaseReadout.setValue(pa::params::formatPhase(deg), "888.8",
+                          juce::String::fromUTF8(approximate ? "\xc2\xb0*" : "\xc2\xb0"));
+}
+
+void PhaseAlignEditor::updateRangeUi()
+{
+    const auto wide = range180();
+    const auto mode = phaseModeNow();
+    const auto high = mode == pa::params::PhaseMode::high;
+    const auto low = mode == pa::params::PhaseMode::low;
+    const auto shown = juce::roundToInt(shownRange());
+    const auto approximate = shownRangeIsApproximate();
+    const auto deg = juce::String::fromUTF8("\xc2\xb0");
+
+    rangeLabel.setDegrees(shown);
+    rangeLabel.setAsterisk(approximate);
+
+    // What the section does at each range, for the RANGE button's tooltip.
+    const auto at90 = juce::String::fromUTF8("0 to 90\xc2\xb0, one section (finer control)");
+    const auto at180 = high
+                           ? juce::String::fromUTF8("two sections, one on the lows (around 75 Hz) and one on the highs "
+                                                    "(around 1.5 kHz). The display shows the first section's angle, "
+                                                    "0 to 90\xc2\xb0*; the second section adds its own turn higher up")
+                       : low ? juce::String::fromUTF8("0 to 180\xc2\xb0, two stacked sections around 150 Hz")
+                             : juce::String::fromUTF8("0 to 180\xc2\xb0 of rotation");
+    if (rangeButton != nullptr)
+        rangeButton->setTooltip("RANGE " + juce::String(wide ? 180 : 90) + deg + ": " + (wide ? at180 : at90) +
+                                ". Press for " + juce::String(wide ? 90 : 180) + deg +
+                                ". The knob keeps its position when you press it.");
+
+    phaseKnob.setTooltip("Phase rotation: 0 to " + juce::String(shown) + deg + (approximate ? "*" : "") + " at RANGE " +
+                         juce::String(wide ? 180 : 90) + deg + "." +
+                         (approximate ? juce::String::fromUTF8(" In High at RANGE 180 the number is the first "
+                                                               "section's angle; the second section adds more turn "
+                                                               "higher up.")
+                                      : juce::String()) +
+                         juce::String::fromUTF8(" Shift-drag for fine control; mouse wheel or arrow keys nudge by "
+                                                "0.5\xc2\xb0. ") +
+                         knobHint);
+
+    juce::String meaning;
+    if (mode == pa::params::PhaseMode::constant)
+        meaning = "In Constant it is the rotation at every frequency.";
+    else if (high && wide)
+        meaning =
+            juce::String::fromUTF8("In High at RANGE 180 (marked *) it is the first section's angle, 0 to 90\xc2\xb0; "
+                                   "a second section around 1.5 kHz adds more turn above it.");
+    else if (high)
+        meaning = "In High at RANGE 90 it is the shift at 150 Hz.";
+    else if (wide)
+        meaning = "In Low at RANGE 180 it is the shift at 150 Hz (two stacked sections).";
+    else
+        meaning = "In Low at RANGE 90 it is the shift at 75 Hz.";
+    phaseReadout.setTooltip(juce::String::fromUTF8("The rotation applied, in degrees: the knob's angle, plus 180 while "
+                                                   "the polarity is inverted (just 180 while PHASE is off). ") +
+                            meaning + " Double-click to type a value.");
+
+    updatePhaseReadout();
 }
 
 void PhaseAlignEditor::updateMeter()

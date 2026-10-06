@@ -31,10 +31,10 @@ class PhaseAlignProcessor : public juce::AudioProcessor,
         static inline const juce::Identifier type{"ui"};
         static inline const juce::Identifier delayUnit{"delayUnit"}; // "ms" / "samples" / "cm"
         static inline const juce::Identifier meterOn{"meterOn"};     // bool
-        static inline const juce::Identifier uiScale{"uiScale"};     // 0.75 to 2, 1 = 977x612; opens at 0.8
+        static inline const juce::Identifier uiScale{"uiScale"};     // 0.6 to 2, 1 = 977x612; opens at 0.8
         static inline const juce::Identifier meterView{"meterView"}; // "frequency" / "time"
     };
-    static constexpr double minUiScale = 0.75, maxUiScale = 2.0;
+    static constexpr double minUiScale = 0.6, maxUiScale = 2.0;
     static constexpr double defaultUiScale = 0.8; // 782x490 (user, 2026-10-06)
 
     PhaseAlignProcessor();
@@ -80,6 +80,9 @@ class PhaseAlignProcessor : public juce::AudioProcessor,
 
     // 90 or 180: what the phase knob's full travel means (any thread).
     double getPhaseRangeDegrees() const;
+    // What the phase knob's number means now (params::shownRangeDegrees): the host's parameter text and the panel
+    // agree.
+    double getShownPhaseRangeDegrees() const;
 
     // The correlation meter's feed. The editor's meter screen turns it on while it is showing and the meter is on.
     pa::meter::MeterCapture& getMeterCapture() { return meterCapture; }

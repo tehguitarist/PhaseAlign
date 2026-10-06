@@ -174,7 +174,7 @@ std::vector<Change> automationScript(double fs, int length, unsigned seed)
     std::uniform_int_distribution<int> gapDist(1, (int)(0.03 * fs));
     std::uniform_real_distribution<double> angleDist(0.0, 180.0);
     std::uniform_int_distribution<int> modeDist(0, 2);
-    std::bernoulli_distribution coin(0.3), rare(0.1);
+    std::bernoulli_distribution coin(0.3), rare(0.1), wideCoin(0.2);
 
     std::vector<Change> changes;
     ChainSettings s;
@@ -190,6 +190,8 @@ std::vector<Change> automationScript(double fs, int length, unsigned seed)
             s.phaseOn = ! s.phaseOn;
         if (rare(rng))
             s.phaseMode = (PhaseMode)modeDist(rng);
+        if (wideCoin(rng))
+            s.phaseWide = ! s.phaseWide;
         changes.push_back({at, s});
     }
     return changes;

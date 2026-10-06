@@ -65,10 +65,35 @@ TEST_CASE("parameter text round-trips through the host's text entry", "[params]"
     CHECK(phase->getValueForText("45") == Approx(0.5f));
     CHECK(phase->getValueForText("120") == Approx(1.0f)); // clamped to the range
 
+    // At RANGE 180 the number depends on the mode: High shows the first section's angle (0-90, marked with an
+    // asterisk on the panel), Low and Constant read the full 0-180.
     range->setValueNotifyingHost(1.0f);
     CHECK(range->getText(1.0f, 32) == deg("180\xc2\xb0"));
-    CHECK(phase->getText(0.5f, 32) == deg("90.0\xc2\xb0"));
-    CHECK(phase->getValueForText("45") == Approx(0.25f));
+    CHECK(phase->getText(0.5f, 32) == deg("45.0\xc2\xb0")); // High
+    CHECK(phase->getValueForText("45") == Approx(0.5f));
+
+    auto* mode = proc.getValueTreeState().getParameter(id::phaseMode);
+    for (const auto index : {1, 2}) // Low, Constant
+    {
+        mode->setValueNotifyingHost(mode->convertTo0to1((float)index));
+        CHECK(phase->getText(0.5f, 32) == deg("90.0\xc2\xb0"));
+        CHECK(phase->getValueForText("45") == Approx(0.25f));
+    }
+}
+
+TEST_CASE("what the phase knob's number means, by mode and range", "[params]")
+{
+    CHECK(shownRangeDegrees(false, PhaseMode::high) == 90.0);
+    CHECK(shownRangeDegrees(false, PhaseMode::low) == 90.0);
+    CHECK(shownRangeDegrees(false, PhaseMode::constant) == 90.0);
+    CHECK(shownRangeDegrees(true, PhaseMode::high) == 90.0); // the first section's angle
+    CHECK(shownRangeDegrees(true, PhaseMode::low) == 180.0);
+    CHECK(shownRangeDegrees(true, PhaseMode::constant) == 180.0);
+
+    // Only High at RANGE 180 is approximate.
+    for (const auto wide : {false, true})
+        for (const auto mode : {PhaseMode::high, PhaseMode::low, PhaseMode::constant})
+            CHECK(shownRangeIsApproximate(wide, mode) == (wide && mode == PhaseMode::high));
 }
 
 TEST_CASE("the delay is rounded to 0.1 sample and shown as the effective value", "[params]")

@@ -259,7 +259,8 @@ TEST_CASE("dimmed controls stay fully usable", "[dimming]")
         auto& range = f.rangeButton();
         click(range, range.getLocalBounds().getCentre().toFloat());
         CHECK(f.get(id::phaseRange) == 1.0f);
-        CHECK(f.rangeLabel().getDegrees() == 180);
+        CHECK(f.rangeLabel().getDegrees() == 90); // High shows the first section's angle at RANGE 180
+        CHECK(f.rangeLabel().hasAsterisk());
     }
 
     f.expect(true, true); // using them doesn't un-dim them

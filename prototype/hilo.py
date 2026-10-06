@@ -1,19 +1,30 @@
-"""P1: Hi/Lo phase modes (IMPLEMENTATION_PLAN 2.3), with the P5 knob mapping.
+"""P1: Hi/Lo phase modes (IMPLEMENTATION_PLAN 2.3), with the range-aware knob mapping (2026-10-06).
 
     .venv/bin/python prototype/hilo.py        # P1 checks and plots → prototype/out/p1/
 
 Two first-order all-pass sections in series, each parametrised by k = 1/tan(pi*fc/fs). The phase lag of one
 section at f is 2*atan(k*tan(pi*f/fs)); k -> 0 is identity.
 
-The knob angle theta (0-180°) is split into theta1 (section 1's lag at f1) and theta2 (section 2's lag at f2), so
-k_i = tan(theta_i/2) / tan(pi*f_i/fs). The mapping is defined in Hz, so it is the same at every sample rate.
+The knob's travel sets phi, the angle of section 1 (its lag at its reference f1), from 0 to 90 degrees. The RANGE
+button (`wide`) selects the 90 range (one section, theta = phi) or the 180 range (two sections, theta2 = phi, so the
+panel angle theta = 2 phi runs 0-180). k_i = tan(theta_i / 2) / tan(pi * f_i / fs), so the mapping is in Hz and is the
+same at every sample rate.
 
-The mapping on one 0-180° knob:
-  * theta 0-90: one section, its corner swept down to f1 (150.1 Hz Hi, 75.1 Hz Lo) at 90°, from identity at 0°.
-  * Hi, theta 90-180: glides from "section 1 at f1" into two ganged sections at the same corner (HI_BLEND_END
-    onwards). The readout is the true lag at 150.1 Hz.
-  * Lo, theta 90-180: holds section 1 at f1 and sweeps section 2 down to f2 = 20 x 75.1 Hz, so more angle never means
-    less phase at any frequency.
+Each (mode, range) combination is its own "shape" with its own section references, taken from the captures of the
+reference unit (75.1 Hz, 150.1 Hz and 20 x 75.1 = 1502 Hz; nothing invented). The modes are named as the manual
+describes the 180 range: HIGH is the wide setting (one section on the lows, one on the highs), LOW the narrow one (both
+sections on the lows, stacked):
+
+  | | 90 range | 180 range |
+  |---|---|---|
+  | LOW | one section at 75.1 Hz | two stacked sections at 150.1 Hz |
+  | HIGH | one section at 150.1 Hz | 75.1 Hz and 1502 Hz |
+
+Toggling RANGE or the mode changes shape; the k of each section glides geometrically from the old shape's value to the
+new one's (R3), so there is no step. The panel angle: LOW 180 reads exactly 0-180 (the stacked pair's lag at 150.1 Hz);
+HIGH 180 shows phi (0-90) with an asterisk, because its lag at 75.1 Hz only reaches about 96 degrees.
+
+More knob or a wider range never means less phase at any frequency (both thetas only grow).
 """
 
 import math
@@ -29,54 +40,61 @@ K_MIN = math.tan(math.radians(0.125)) / math.tan(math.pi * 20000 / 44100)
 
 @dataclass(frozen=True)
 class Mode:
-    f1: float               # section 1 reference: theta1 is its lag here (Hz)
-    f2: float               # section 2 reference (Hz)
-    blend_end: float | None  # Hi only: theta where the split reaches the ganged pair (theta1 = theta2)
+    f1: float  # section 1 reference: theta1 is its lag here (Hz)
+    f2: float  # section 2 reference (Hz)
 
 
-HI_BLEND_END = 125.0  # smallest round value that keeps the lag non-decreasing in theta at every frequency (P1 check 3)
-MODES = {
-    "hi": Mode(f1=150.1, f2=150.1, blend_end=HI_BLEND_END),
-    "lo": Mode(f1=75.1, f2=20.0 * 75.1, blend_end=None),
+SHAPES = {  # (mode, wide) -> section references
+    ("lo", False): Mode(f1=75.1, f2=75.1),
+    ("lo", True): Mode(f1=150.1, f2=150.1),
+    ("hi", False): Mode(f1=150.1, f2=150.1),
+    ("hi", True): Mode(f1=75.1, f2=20.0 * 75.1),
 }
 
 
-def split(mode, theta):
+def knob_angles(theta, wide):
+    """Panel angle theta (0-90 in the 90 range, 0-180 in the 180 range) -> (phi, w): section 1's angle and the
+    weight of section 2 (the targets the processor ramps)."""
+    theta = min(max(theta, 0.0), 180.0 if wide else 90.0)
+    return (theta / 2.0, 1.0) if wide else (theta, 0.0)
+
+
+def split(mode, theta, wide):
     """theta (degrees) -> (theta1, theta2): section 1's lag at f1 and section 2's lag at f2."""
-    m = MODES[mode]
-    theta = min(max(theta, 0.0), 180.0)
-    if theta <= 90.0:
-        return theta, 0.0
-    if m.blend_end is None:
-        return 90.0, theta - 90.0
-    s = min((theta - 90.0) / (m.blend_end - 90.0), 1.0)
-    s = s * s * (3.0 - 2.0 * s)
-    t1 = 90.0 - s * (90.0 - theta / 2.0)
-    return t1, theta - t1
+    phi, w = knob_angles(theta, wide)
+    return phi, w * phi
 
 
-def k_pair(mode, theta, fs):
-    m = MODES[mode]
-    t1, t2 = split(mode, theta)
+def angles(shape, phi):
+    """A shape's section angles at phi: section 2 carries the same angle in the 180 range and none in the 90 range."""
+    return phi, (phi if shape[1] else 0.0)
+
+
+def k_angles(shape, t1, t2, fs):
+    m = SHAPES[shape]
     return (max(math.tan(math.radians(t1) / 2) / math.tan(math.pi * m.f1 / fs), K_MIN),
             max(math.tan(math.radians(t2) / 2) / math.tan(math.pi * m.f2 / fs), K_MIN))
+
+
+def k_pair(mode, theta, fs, wide):
+    return k_angles((mode, wide), *split(mode, theta, wide), fs)
 
 
 def section_lag(k, f, fs):
     return 2 * np.degrees(np.arctan(k * np.tan(np.pi * np.asarray(f) / fs)))
 
 
-def lag(mode, theta, f, fs):
+def lag(mode, theta, f, fs, wide):
     """Phase lag in degrees of the TPT cascade at frequencies f."""
-    k1, k2 = k_pair(mode, theta, fs)
+    k1, k2 = k_pair(mode, theta, fs, wide)
     return section_lag(k1, f, fs) + section_lag(k2, f, fs)
 
 
-def analog_lag(mode, theta, f):
+def analog_lag(mode, theta, f, wide):
     """The same mapping as an analog cascade (what the digital one approaches at high rates)."""
-    m = MODES[mode]
+    m = SHAPES[(mode, wide)]
     out = np.zeros_like(np.asarray(f, dtype=float))
-    for t, fr in zip(split(mode, theta), (m.f1, m.f2)):
+    for t, fr in zip(split(mode, theta, wide), (m.f1, m.f2)):
         out += 2 * np.degrees(np.arctan(math.tan(math.radians(t) / 2) * np.asarray(f) / fr))
     return out
 
@@ -94,17 +112,22 @@ class HiLo:
     TPT structure, whose state at k = kMin holds a near-lossless Nyquist resonance that came out as a burst when the
     knob left 0 or 90 degrees; the transfer function is the same, so static settings are unchanged.
 
-    Coefficients run on a fixed grid of `sub` samples: at the start of each cell the angle (a linear ramp of fixed
-    length) and the glide move on by one cell, and each section's G is interpolated linearly per sample from its value
+    The panel angle theta and the range (`wide`) set the target of phi (section 1's angle), which moves on a linear
+    ramp of fixed length; the shape (mode, wide) glides as described above, so a knob move, a mode switch or a RANGE
+    toggle never steps (and the knob keeps its position through a RANGE toggle: phi is unchanged).
+
+    Coefficients run on a fixed grid of `sub` samples: at the start of each cell the ramp and the glide
+    move on by one cell, and each section's G is interpolated linearly per sample from its value
     before the move to its value after it, so a corner sweeping down from near Nyquist doesn't step. Switching back to
     the previous mode during a glide reverses it from where it is.
     """
 
-    def __init__(self, fs, mode="hi", theta=0.0, smooth_ms=30.0, glide_ms=30.0, sub=32):
+    def __init__(self, fs, mode="hi", theta=0.0, wide=False, smooth_ms=30.0, glide_ms=30.0, sub=32):
         self.fs, self.sub = fs, sub
-        self.mode, self.prev_mode = mode, mode
-        self.theta = self.target = float(theta)
-        self.step = 0.0
+        self.panel = float(theta)
+        self.shape = self.prev_shape = (mode, bool(wide))
+        self.phi = self.phi_target = knob_angles(self.panel, bool(wide))[0]
+        self.phi_step = 0.0
         self.smooth_n = max(1, round(smooth_ms * 1e-3 * fs))
         self.glide_n = max(1, round(glide_ms * 1e-3 * fs))
         self.glide = 1.0  # 0 → previous mode's k, 1 → current mode's k
@@ -113,32 +136,37 @@ class HiLo:
         self.until = 0  # samples left in the current cell
         self.g0 = self.g1 = None
 
-    def set(self, theta=None, mode=None):
-        if theta is not None and float(theta) != self.target:
-            self.target = float(theta)
-            self.step = (self.target - self.theta) / self.smooth_n  # linear ramp of fixed length
-        if mode is not None and mode != self.mode:
-            if self.glide < 1.0 and mode == self.prev_mode:  # back again mid-glide: reverse from where it is
-                self.prev_mode, self.mode, self.glide = self.mode, self.prev_mode, 1.0 - self.glide
+    def set(self, theta=None, mode=None, wide=None):
+        if theta is not None:
+            self.panel = float(theta)
+        shape = (self.shape[0] if mode is None else mode, self.shape[1] if wide is None else bool(wide))
+        if theta is not None or shape != self.shape:
+            phi_t = knob_angles(self.panel, shape[1])[0]
+            if phi_t != self.phi_target:
+                self.phi_target = phi_t
+                self.phi_step = (phi_t - self.phi) / self.smooth_n  # a linear ramp of fixed length
+        if shape != self.shape:
+            if self.glide < 1.0 and shape == self.prev_shape:  # back again mid-glide: reverse from where it is
+                self.prev_shape, self.shape, self.glide = self.shape, self.prev_shape, 1.0 - self.glide
             else:
-                self.prev_mode, self.mode, self.glide = self.mode, mode, 0.0
+                self.prev_shape, self.shape, self.glide = self.shape, shape, 0.0
 
     def _settled(self):
-        return self.theta == self.target and self.glide >= 1.0
+        return self.phi == self.phi_target and self.glide >= 1.0
 
     def _g(self):
-        k1, k2 = k_pair(self.mode, self.theta, self.fs)
+        k1, k2 = k_angles(self.shape, *angles(self.shape, self.phi), self.fs)
         if self.glide < 1.0:
-            o1, o2 = k_pair(self.prev_mode, self.theta, self.fs)
+            o1, o2 = k_angles(self.prev_shape, *angles(self.prev_shape, self.phi), self.fs)
             k1 = math.exp((1.0 - self.glide) * math.log(o1) + self.glide * math.log(k1))
             k2 = math.exp((1.0 - self.glide) * math.log(o2) + self.glide * math.log(k2))
         return np.array([1.0 / (1.0 + k1), 1.0 / (1.0 + k2)])
 
     def _advance(self):
-        if self.theta != self.target:
-            self.theta += self.step * self.sub
-            if (self.step > 0) == (self.theta >= self.target):
-                self.theta = self.target
+        if self.phi != self.phi_target:
+            self.phi += self.phi_step * self.sub
+            if (self.phi_step > 0) == (self.phi >= self.phi_target):
+                self.phi = self.phi_target
         if self.glide < 1.0:
             self.glide = min(1.0, self.glide + self.sub / self.glide_n)
 
@@ -194,27 +222,27 @@ class HiLoOversampled:
     latency of `latency` base samples. The coefficient grid stays 32 base samples long (32 M at the oversampled rate),
     so the angle and glide move as they did before. The reference for src/dsp/HiLoStage.h (golden-tested)."""
 
-    def __init__(self, fs, mode="hi", theta=0.0):
+    def __init__(self, fs, mode="hi", theta=0.0, wide=False):
         from oversampling import Oversampler
 
         self.os = Oversampler(fs)
         self.factor, self.latency = self.os.factor, self.os.latency
-        self.core = HiLo(fs * self.factor, mode, theta, sub=32 * self.factor)
+        self.core = HiLo(fs * self.factor, mode, theta, wide, sub=32 * self.factor)
 
-    def set(self, theta=None, mode=None):
-        self.core.set(theta=theta, mode=mode)
+    def set(self, theta=None, mode=None, wide=None):
+        self.core.set(theta=theta, mode=mode, wide=wide)
 
     def process(self, x):
         x = np.atleast_2d(np.asarray(x, dtype=np.float64))
         return self.os.down(self.core.process(self.os.up(x)))
 
 
-def lag_oversampled(mode, theta, f, fs):
+def lag_oversampled(mode, theta, f, fs, wide):
     """Lag in degrees of HiLoOversampled at f, without its latency: the sections' at the oversampled rate (the
     halfbands are linear phase, so they add only the delay)."""
     from oversampling import plan
 
-    return lag(mode, theta, f, fs * plan(fs)[0])
+    return lag(mode, theta, f, fs * plan(fs)[0], wide)
 
 
 # ----------------------------------------------------------------------------------------------------------------
@@ -222,6 +250,123 @@ def lag_oversampled(mode, theta, f, fs):
 # ----------------------------------------------------------------------------------------------------------------
 
 RATES = (44100, 48000, 96000, 192000)
+
+
+MODE_NAMES = ("hi", "lo")
+
+
+def checks(out, plt):
+    """P1 checks; returns report lines."""
+    rep = ["Section references (Hz), by mode and range: " + "; ".join(
+        f"{n.upper()} {'180' if w else '90'}: {SHAPES[(n, w)].f1} and {SHAPES[(n, w)].f2:.0f}"
+        for n in MODE_NAMES for w in (False, True)) + f". K_MIN = {K_MIN:.3g}.\n"]
+    ranges = (("90", False, np.arange(0, 91, 15)), ("180", True, np.arange(0, 181, 30)))
+
+    # 1. Phase vs frequency at every rate.
+    for mode in MODE_NAMES:
+        for rname, wide, thetas in ranges:
+            fig, axes = plt.subplots(2, 2, figsize=(12, 8), sharey=True)
+            for ax, fs in zip(axes.flat, RATES):
+                f = np.geomspace(10, 0.499 * fs, 500)
+                for t in thetas:
+                    ax.semilogx(f, lag(mode, t, f, fs, wide), lw=1.2, label=f"{t}°")
+                    ax.semilogx(f, analog_lag(mode, t, f, wide), "k:", lw=0.5)
+                ax.axvline(20000, color="k", lw=0.5)
+                ax.set_title(f"{mode} range {rname} @ {fs} Hz (dotted: analog)")
+                ax.grid(True, which="both", alpha=0.3)
+            axes[0, 0].legend(fontsize=6, ncol=2)
+            for ax in axes[:, 0]:
+                ax.set_ylabel("phase lag (°)")
+            fig.tight_layout()
+            fig.savefig(out / f"phase_{mode}_{rname}.png", dpi=110)
+            plt.close(fig)
+
+    # 2. Entering from 0°: the steepest change in lag per 0.1° of panel angle (the top octave moves fast there).
+    rep.append("### Steepest lag change per 0.1° of panel angle, 10 Hz–20 kHz\n")
+    rep.append("| mode | range | rate | θ 0–2° | whole travel |")
+    rep.append("|---|---|---|---|---|")
+
+    def steepest(mode, wide, f, fs, t0, t1):
+        return max(np.max(np.abs(lag(mode, t + 0.1, f, fs, wide) - lag(mode, t, f, fs, wide)))
+                   for t in np.arange(t0, t1, 0.1))
+
+    for mode in MODE_NAMES:
+        for rname, wide, thetas in ranges:
+            for fs in RATES:
+                f = np.geomspace(10, 20000, 800)
+                top = float(thetas[-1])
+                rep.append(f"| {mode} | {rname} | {fs} | {steepest(mode, wide, f, fs, 0.0, 2.0):.1f}° | "
+                           f"{steepest(mode, wide, f, fs, 0.0, top - 0.1):.1f}° |")
+
+    # 3. Readout: the true lag at the first reference against the panel angle.
+    rep.append("\n### Readout: true lag at the first section's reference vs the panel angle\n")
+    rep.append("| mode | range | at θ = max | worst error over travel, all rates |")
+    rep.append("|---|---|---|---|")
+    for mode in MODE_NAMES:
+        for rname, wide, thetas in ranges:
+            m = SHAPES[(mode, wide)]
+            worst, atmax = 0.0, 0.0
+            for fs in RATES:
+                for t in np.arange(0, float(thetas[-1]) + 0.01, 0.5):
+                    e = abs(lag(mode, t, np.array([m.f1]), fs, wide)[0] - t)
+                    worst = max(worst, float(e))
+                atmax = float(lag(mode, float(thetas[-1]), np.array([m.f1]), 48000, wide)[0])
+            rep.append(f"| {mode} | {rname} | {atmax:.1f}° | {worst:.1f}° |")
+    rep.append("\nWhere the error is large the panel shows the first section's angle phi (with an asterisk), "
+               "not the lag at the first reference; the stacked pair reads exactly.")
+
+    # 4. Monotonic: more knob, or the wider range, never means less phase at any frequency.
+    rep.append("\n### Monotonic\n")
+    fa = np.geomspace(1, 1e6, 3000)
+    for mode in MODE_NAMES:
+        for rname, wide, thetas in ranges:
+            P = np.array([analog_lag(mode, t, fa, wide) for t in np.arange(0, float(thetas[-1]) + 0.001, 0.05)])
+            rep.append(f"- {mode} range {rname}: smallest lag change per 0.05° step over 1 Hz–1 MHz (analog, so it "
+                       f"holds at every rate): {np.min(np.diff(P, axis=0)):+.5f}°")
+        # Each range is its own shape; the 180 range is not guaranteed to have more lag at every frequency than the 90
+        # range at the same knob position (LOW 180's stacked pair sits at 150 Hz, LOW 90's single section at 75 Hz).
+        d = min(np.min(analog_lag(mode, 2 * kn, fa, True) - analog_lag(mode, kn, fa, False)) for kn in (10, 45, 90))
+        rep.append(f"- {mode}: same knob position, range 180 minus range 90, smallest over 1 Hz–1 MHz: {d:+.2f}° "
+                   f"(a shape change, smoothed by the glide)")
+
+    # 5. The sample processor equals the closed form (static), and glides and range toggles stay all-pass.
+    rep.append("\n### Sample processor\n")
+    fs = 48000
+    for mode, t, wide in (("hi", 37.0, False), ("hi", 140.0, True), ("lo", 110.0, True), ("lo", 60.0, False)):
+        p = HiLo(fs, mode, t, wide)
+        n = 1 << 16
+        imp = np.zeros(n)
+        imp[0] = 1.0
+        h = p.process(imp)[0]
+        H = np.fft.rfft(h)
+        f = np.fft.rfftfreq(n, 1 / fs)
+        sel = (f > 10) & (f < 0.45 * fs)
+        meas = -np.degrees(np.unwrap(np.angle(H)))[sel]
+        rep.append(f"- {mode} θ={t:.0f}° range {'180' if wide else '90'}: impulse response vs closed form: max phase "
+                   f"error {np.max(np.abs(meas - lag(mode, t, f[sel], fs, wide))):.2e}°, magnitude "
+                   f"{np.max(np.abs(20 * np.log10(np.abs(H[sel])))):.2e} dB")
+    rng = np.random.default_rng(0)
+    x = rng.standard_normal(fs)
+
+    def power(y, x_):
+        return np.sqrt(np.mean(y ** 2) / np.mean(x_ ** 2))
+
+    p = HiLo(fs, "hi", 120.0, True)
+    p.process(x[: fs // 2])
+    p.set(mode="lo")
+    y = p.process(x[fs // 2:])
+    rep.append(f"- Hi→Lo glide at θ=120° (range 180) on white noise: output/input RMS over the glide "
+               f"{power(y[0, :2048], x[fs // 2: fs // 2 + 2048]):.4f}")
+    for mode, wide0, theta0 in (("lo", True, 160.0), ("hi", False, 80.0), ("hi", True, 170.0)):
+        p = HiLo(fs, mode, theta0, wide0)
+        p.process(x[: fs // 2])
+        p.set(wide=not wide0, theta=theta0 / 2 if wide0 else theta0 * 2)  # the knob keeps its position
+        y = p.process(x[fs // 2:])
+        rep.append(f"- {mode.upper()} RANGE {'180→90' if wide0 else '90→180'} toggle at knob {theta0 / (180 if wide0 else 90):.2f} "
+                   f"on white noise: output/input RMS over the glide {power(y[0, :2048], x[fs // 2: fs // 2 + 2048]):.4f}; "
+                   f"largest sample-to-sample step vs the same noise unprocessed "
+                   f"{np.max(np.abs(np.diff(y[0]))) / np.max(np.abs(np.diff(x[fs // 2:]))):.2f}x")
+    return rep
 
 
 def main():
@@ -232,104 +377,8 @@ def main():
 
     out = Path(__file__).resolve().parent / "out" / "p1"
     out.mkdir(parents=True, exist_ok=True)
-    rep = ["# P1: Hi/Lo prototype checks\n", "Generated by `prototype/hilo.py`.\n",
-           f"Mapping: Hi f1 = f2 = {MODES['hi'].f1} Hz, ganged from θ = {HI_BLEND_END:.0f}°; "
-           f"Lo f1 = {MODES['lo'].f1} Hz, f2 = {MODES['lo'].f2:.0f} Hz. K_MIN = {K_MIN:.3g}.\n"]
-
-    # 1. Phase vs frequency at every rate.
-    thetas = np.arange(0, 181, 15)
-    for mode in MODES:
-        fig, axes = plt.subplots(2, 2, figsize=(12, 8), sharey=True)
-        for ax, fs in zip(axes.flat, RATES):
-            f = np.geomspace(10, 0.499 * fs, 500)
-            for t in thetas:
-                ax.semilogx(f, lag(mode, t, f, fs), lw=1.4 if t in (90, 180) else 0.8, label=f"{t}°")
-                ax.semilogx(f, analog_lag(mode, t, f), "k:", lw=0.5)
-            ax.axvline(20000, color="k", lw=0.5)
-            ax.set_title(f"{mode} @ {fs} Hz (dotted: analog)")
-            ax.grid(True, which="both", alpha=0.3)
-        axes[0, 0].legend(fontsize=6, ncol=2)
-        for ax in axes[:, 0]:
-            ax.set_ylabel("phase lag (°)")
-        fig.tight_layout()
-        fig.savefig(out / f"phase_{mode}.png", dpi=110)
-        plt.close(fig)
-
-    # 2. Continuity at the 90° handover, and readout accuracy.
-    rep.append("## Handover at 90° (10 Hz–20 kHz)\n")
-    rep.append("| mode | rate | jump across 90° ± 0.001° | largest lag change per 0.1° step, θ 89–91° | "
-               "same, θ 0–2° (section 1 entering) |")
-    rep.append("|---|---|---|---|---|")
-
-    def steepest(mode, f, fs, t0, t1):
-        return max(np.max(np.abs(lag(mode, t + 0.1, f, fs) - lag(mode, t, f, fs))) for t in np.arange(t0, t1, 0.1))
-
-    for mode in MODES:
-        for fs in RATES:
-            f = np.geomspace(10, 20000, 2000)
-            jump = np.max(np.abs(lag(mode, 90.001, f, fs) - lag(mode, 89.999, f, fs)))
-            rep.append(f"| {mode} | {fs} | {jump:.4f}° | {steepest(mode, f, fs, 89.0, 91.0):.1f}° | "
-                       f"{steepest(mode, f, fs, 0.0, 2.0):.1f}° |")
-    rep.append("\nBoth sections always run, so the handover is continuous by construction; there is no engage event. "
-               "Just past 90° the second section's corner sweeps down from far above the audio band, so the top "
-               "octave moves quickly per degree. That is the same thing that happens as section 1 enters near 0°. "
-               "The 30 ms angle smoothing covers it.")
-
-    rep.append("\n## Readout (Hi: true lag at f1; Lo: section lags at f1 and f2)\n")
-    worst = {}
-    for mode in MODES:
-        m = MODES[mode]
-        for fs in RATES:
-            for t in np.arange(0, 180.01, 0.5):
-                k1, k2 = k_pair(mode, t, fs)
-                t1, t2 = split(mode, t)
-                if mode == "hi":
-                    e = abs(section_lag(k1, m.f1, fs) + section_lag(k2, m.f1, fs) - t)
-                else:
-                    e = max(abs(section_lag(k1, m.f1, fs) - t1), abs(section_lag(k2, m.f2, fs) - t2))
-                worst[mode] = max(worst.get(mode, 0.0), float(e))
-    rep.append(f"- Worst readout error, all rates, θ 0–180°: Hi {worst['hi']:.3f}°, Lo {worst['lo']:.3f}° "
-               f"(only the K_MIN floor near 0° contributes).")
-    f_lo = np.array([MODES["lo"].f1])
-    rep.append(f"- Lo's true lag at {MODES['lo'].f1} Hz runs 0–90° over θ 0–90°, then only to "
-               f"{lag('lo', 180, f_lo, 48000)[0]:.1f}° at θ = 180° (the extra phase is higher up), so the Lo readout "
-               f"past 90° is 90° + section 2's lag at {MODES['lo'].f2:.0f} Hz.")
-
-    # 3. Monotonic: more knob never means less phase at any frequency.
-    rep.append("\n## Monotonic in θ\n")
-    fa = np.geomspace(1, 1e6, 3000)
-    for mode in MODES:
-        P = np.array([analog_lag(mode, t, fa) for t in np.arange(0, 180.001, 0.05)])
-        rep.append(f"- {mode}: smallest lag change per 0.05° step over 1 Hz–1 MHz (analog, so it holds at every "
-                   f"rate): {np.min(np.diff(P, axis=0)):+.5f}°")
-
-    # 4. The sample processor equals the closed form (static), and the Hi<->Lo glide stays all-pass.
-    rep.append("\n## Sample processor\n")
-    fs = 48000
-    for mode, t in (("hi", 37.0), ("hi", 140.0), ("lo", 110.0)):
-        p = HiLo(fs, mode, t)
-        n = 1 << 16
-        imp = np.zeros(n)
-        imp[0] = 1.0
-        h = p.process(imp)[0]
-        H = np.fft.rfft(h)
-        f = np.fft.rfftfreq(n, 1 / fs)
-        sel = (f > 10) & (f < 0.45 * fs)
-        meas = -np.degrees(np.unwrap(np.angle(H)))[sel]
-        rep.append(f"- {mode} θ={t:.0f}°: impulse response vs closed form: max phase error "
-                   f"{np.max(np.abs(meas - lag(mode, t, f[sel], fs))):.2e}°, magnitude "
-                   f"{np.max(np.abs(20 * np.log10(np.abs(H[sel])))):.2e} dB")
-    # Glide: settle a long noise burst through a Hi->Lo switch; the output power must match the input's.
-    rng = np.random.default_rng(0)
-    x = rng.standard_normal(fs)
-    p = HiLo(fs, "hi", 120.0)
-    p.process(x[: fs // 2])
-    p.set(mode="lo")
-    y = p.process(x[fs // 2:])
-    rep.append(f"- Hi→Lo glide at θ=120° on white noise: output/input RMS over the glide "
-               f"{np.sqrt(np.mean(y[0, :2048] ** 2) / np.mean(x[fs // 2: fs // 2 + 2048] ** 2)):.4f} "
-               f"(each section is all-pass at every k, so the glide is all-pass throughout).")
-
+    rep = ["# P1: Hi/Lo prototype checks\n", "Generated by `prototype/hilo.py`.\n"]
+    rep += checks(out, plt)
     (out / "report.md").write_text("\n".join(rep) + "\n")
     print("\n".join(rep))
 

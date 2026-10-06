@@ -28,17 +28,17 @@ class HiLoStage
         cascade.prepare(sampleRate * m, AllpassCascade::defaultCell * m);
     }
 
-    // Jumps to the mode and angle, clears the state.
-    void reset(Mode m, double thetaDegrees)
+    // Jumps to the shape (mode and range) and panel angle, clears the state.
+    void reset(Mode m, bool wide, double thetaDegrees)
     {
         oversampler.reset();
-        cascade.reset(m, thetaDegrees);
+        cascade.reset(m, wide, thetaDegrees);
     }
 
-    void setTarget(double thetaDegrees) { cascade.setTarget(thetaDegrees); }
-    void setMode(Mode m) { cascade.setMode(m); }
+    // The panel angle (0 to 90, or 0 to 180 when wide) and the shape: a change glides (AllpassCascade::set).
+    void set(double thetaDegrees, Mode m, bool wide) { cascade.set(thetaDegrees, m, wide); }
     bool isSettled() const { return cascade.isSettled(); }
-    double getTheta() const { return cascade.getTheta(); }
+    double getPhi() const { return cascade.getPhi(); }
     int getLatency() const { return oversampler.getLatency(); }
 
     // In place, n <= maxBlock.

@@ -12,7 +12,7 @@ PhaseAlignProcessor::PhaseAlignProcessor()
                          .withInput("Input", juce::AudioChannelSet::stereo(), true)
                          .withOutput("Output", juce::AudioChannelSet::stereo(), true)
                          .withInput("Sidechain", juce::AudioChannelSet::stereo(), true)),
-      parameters(*this, nullptr, "PhaseAlign", pa::params::createLayout([this] { return getPhaseRangeDegrees(); }))
+      parameters(*this, nullptr, "PhaseAlign", pa::params::createLayout([this] { return getShownPhaseRangeDegrees(); }))
 {
     namespace id = pa::params::id;
     phaseRangeValue = parameters.getRawParameterValue(id::phaseRange);
@@ -86,6 +86,7 @@ pa::dsp::ChainSettings PhaseAlignProcessor::currentSettings() const
     s.polarityInverted = polarityValue->load() >= 0.5f;
     s.phaseOn = phaseOnValue->load() >= 0.5f;
     s.phaseDegrees = phaseValue->load() * getPhaseRangeDegrees();
+    s.phaseWide = phaseRangeValue->load() >= 0.5f;
     s.phaseMode = (pa::dsp::PhaseMode)juce::jlimit(0, 2, juce::roundToInt(phaseModeValue->load()));
     return s;
 }
@@ -157,6 +158,14 @@ void PhaseAlignProcessor::runChain(juce::AudioBuffer<float>& buffer, const pa::d
 double PhaseAlignProcessor::getPhaseRangeDegrees() const
 {
     return pa::params::rangeDegrees(phaseRangeValue != nullptr && phaseRangeValue->load() >= 0.5f);
+}
+
+double PhaseAlignProcessor::getShownPhaseRangeDegrees() const
+{
+    const auto wide = phaseRangeValue != nullptr && phaseRangeValue->load() >= 0.5f;
+    const auto mode = (pa::params::PhaseMode)juce::jlimit(
+        0, 2, phaseModeValue != nullptr ? juce::roundToInt(phaseModeValue->load()) : 0);
+    return pa::params::shownRangeDegrees(wide, mode);
 }
 
 bool PhaseAlignProcessor::isSidechainConnected() const

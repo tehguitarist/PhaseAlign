@@ -27,10 +27,15 @@ job, better.
 
 ## Current status (update as work progresses)
 
-1. **Hi/Lo design (P1 + P5, 2026-10-05):** `prototype/hilo.py` (Hi/Lo prototype, the reference for the C++). Mapping
-   in IMPLEMENTATION_PLAN 2.3. Open, decided after listening to the stems (don't implement yet): what the RANGE button
-   does in the DSP (`phaseRange`, default 90; `phase` is the knob position, angle = phase x range), extending Hi/Lo
-   below their lowest corners. The knob's whole travel is usable (no dead zones; checked 2026-10-06).
+1. **Hi/Lo design:** `prototype/hilo.py` (the reference for the C++). **RANGE redesign (user, 2026-10-06, R15, branch
+   `hilo-range-modes`, not merged: waiting on the user's listening, `prototype/range_ab.py` → `prototype/out/range/`):**
+   RANGE 90 is one section, RANGE 180 two sections sharing the whole knob travel; each (mode, range) is its own shape
+   from the reference unit's captured geometries (LOW 90 75.1 Hz, LOW 180 two stacked at 150.1 Hz, HIGH 90 150.1 Hz,
+   HIGH 180 75.1 Hz + 1502 Hz), and the modes are named for what they do (manual's wording). HIGH at RANGE 180 shows
+   the first section's angle, 0-90, with an asterisk (scale label, readout suffix, tooltips). Plan 2.3 has it all.
+   Extending below the lowest corners is closed. The knob's whole travel is usable in all four shapes (no dead zones;
+   `prototype/hf_check.py` part 5). The reference unit's captures are in `captures/` (gitignored); never name it in
+   the repo (see Naming above).
 2. **Prototypes** (`prototype/`, all through the venv): `hilo.py` (P1), `p2_constant.py` (P2), `p4_meter.py` (P4),
    `subsample.py` (fractional delay), `hf_check.py` (high frequencies, knob travel), `p3_report.py` (P3), `golden.py`
    (the C++ goldens), `fractional_tables.py` (the low-delay kernel tables), `oversampling.py` (Hi/Lo's halfbands →
@@ -50,8 +55,8 @@ job, better.
    bypass and the meter really work; the phase stage is an identity placeholder. One crossfade length for
    delay/polarity/stage on-off: 50 ms (`dsp::crossfadeMs`). The meter is a frequency curve + PHAT
    time-offset view (IMPLEMENTATION_PLAN 3, `prototype/out/p4/report.md`). The editor opens at 80% (782x490); assets
-   are 1:1 with the 1954x1224 design space. Pending from the user: verdict on the meter views in a DAW; whether to
-   lower the minimum editor size (733 px now) to 586.
+   are 1:1 with the 1954x1224 design space. Pending from the user: verdict on the meter views in a DAW. The minimum
+   editor size is 60% (586 px, user 2026-10-06).
 5. **NEXT (user, 2026-10-06), in this order unless the user says otherwise:**
    1. **Delay -4 to +4 ms: DONE (2026-10-06, merged to master).** As built in IMPLEMENTATION_PLAN 2.1a: while on,
       the latency is the reach in whole samples plus the interpolation lookahead; `Chain` fades out, switches and fades

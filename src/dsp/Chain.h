@@ -28,7 +28,8 @@ struct ChainSettings
     bool delayOn = false;
     bool polarityInverted = false;
     bool phaseOn = true;
-    double phaseDegrees = 0.0;
+    double phaseDegrees = 0.0; // the panel angle: 0 to 90 (range 90) or 0 to 180
+    bool phaseWide = false;    // RANGE 180: Hi/Lo's shape; Constant ignores it
     PhaseMode phaseMode = PhaseMode::high;
 
     // Every stage out of the signal path: the output is the input delayed by Hi/Lo's latency (0 from 176.4 kHz up).
@@ -109,7 +110,7 @@ class PhaseStage
     {
         constant = s.phaseMode == PhaseMode::constant;
         hiLoMode = s.phaseMode == PhaseMode::low ? HiLoStage::Mode::lo : HiLoStage::Mode::hi;
-        cascade.reset(hiLoMode, s.phaseDegrees);
+        cascade.reset(hiLoMode, s.phaseWide, s.phaseDegrees);
         hiLoDry.clear();
         rotator.reset(s.phaseDegrees);
         wetGain.reset(s.phaseOn ? 1.0f : 0.0f);
@@ -118,13 +119,11 @@ class PhaseStage
     void setTargets(const ChainSettings& s)
     {
         wetGain.setTarget(s.phaseOn ? 1.0f : 0.0f);
-        cascade.setTarget(s.phaseDegrees);
         rotator.setTarget(s.phaseDegrees);
         if (s.phaseMode != PhaseMode::constant)
-        {
             hiLoMode = s.phaseMode == PhaseMode::low ? HiLoStage::Mode::lo : HiLoStage::Mode::hi;
-            cascade.setMode(hiLoMode); // glides (R3); unheard while Constant is active
-        }
+        // A change of mode or range glides (R3); unheard while Constant is active, where the mode stays as it was.
+        cascade.set(s.phaseDegrees, hiLoMode, s.phaseWide);
     }
 
     // Only while the output is silent. The cascade keeps running in Constant (warm, unheard), so going back to Hi/Lo

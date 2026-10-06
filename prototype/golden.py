@@ -18,10 +18,13 @@ from p2_constant import ConstantRotator
 
 OUT = Path(__file__).resolve().parent.parent / "tests" / "golden"
 
-# Hi/Lo: (sample, theta or None, mode or None). Covers a sweep through 90°, a Hi→Lo glide reversed half way, and a
-# glide while the angle moves.
-HILO_SCRIPT = [(0, 0.0, "hi"), (1024, 150.0, None), (4096, None, "lo"), (4096 + 320, None, "hi"),
-               (6144, 30.0, None), (6400, None, "lo"), (7168, 180.0, None)]
+# Hi/Lo: (sample, theta or None, mode or None, wide or None). Covers a phi sweep in range 90, RANGE toggled to 180 and
+# back (once with the knob kept where it was, which clamps), a Hi→Lo glide reversed half way, a glide while phi moves,
+# and a mode and range change at once.
+HILO_SCRIPT = [(0, 0.0, "hi", False), (1024, 45.0, None, None), (2048, 90.0, None, None), (3072, 120.0, None, True),
+               (4096, None, "lo", None), (4096 + 320, None, "hi", None), (5120, 170.0, None, None),
+               (5632, None, None, False), (6144, 30.0, None, None), (6400, None, "lo", None),
+               (7168, 180.0, None, True), (7680, 100.0, "hi", False)]
 # Constant: (sample, theta). Through 90 and 180 (exact there), and back to 0.
 CONSTANT_SCRIPT = [(0, 0.0), (2048, 90.0), (6144, 180.0), (9216, 37.0), (12288, 0.0)]
 
@@ -38,13 +41,13 @@ def save(name, x, y):
 
 def hilo_case(fs, n=8192):
     x = noise(n, 1)
-    p = HiLoOversampled(fs, "hi", 0.0)
+    p = HiLoOversampled(fs, "hi", 0.0, False)
     y = np.zeros((2, n))
-    events = HILO_SCRIPT[1:] + [(n, None, None)]
+    events = HILO_SCRIPT[1:] + [(n, None, None, None)]
     pos = 0
-    for at, theta, mode in events:
+    for at, theta, mode, wide in events:
         y[:, pos:at] = p.process(x[:, pos:at].astype(np.float64))
-        p.set(theta=theta, mode=mode)
+        p.set(theta=theta, mode=mode, wide=wide)
         pos = at
     save(f"hilo_{fs}", x, y)
 

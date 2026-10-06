@@ -53,13 +53,13 @@ The parameter is stored in **ms**, so sessions are portable across sample rates.
 
 | Item | Spec |
 | --- | --- |
-| Phase knob | 0 to 180° |
+| Phase knob | 0 to 90° or 0 to 180°, set by RANGE (HIGH at RANGE 180 shows 0 to 90° with an asterisk, see 2.3) |
 | Mode switch (3-way) | Hi / Lo / Constant |
 | Polarity flip button | 180° inversion; with the knob this covers the full 360° |
 | Bypass | Independent |
 | Value readout | Degrees; double-click to edit |
 
-The 90°/180° switch from the hardware is dropped. The knob engages the second all-pass section past 90° (section 4.3).
+The RANGE button is the hardware's 90°/180° switch: 90 runs one all-pass section over the knob, 180 two (section 4.3).
 
 ### 3.3 Correlation meter
 
@@ -124,8 +124,11 @@ Polarity flip, phase section and delay are all linear and time-invariant, so the
 ### 4.3 Phase section: Hi and Lo modes
 
 - One or two first-order all-pass sections with a variable corner frequency (TPT or equivalent, chosen for stability under modulation).
-- Knob 0 to 90°: first section only. Knob 90 to 180°: second section engages.
-- The handover at 90° must be seamless. The second section must start at its "no effect" corner setting.
+- The RANGE button picks 90 or 180: at 90 one section runs over the knob's whole travel; at 180 two sections share it. The
+  knob keeps its position when RANGE is pressed. Each mode and range is its own shape, built from the reference unit's
+  measured geometries (IMPLEMENTATION_PLAN 2.3, R15).
+- A change of range or mode must be seamless: the sections' corners glide from the old shape to the new one. Both
+  sections start at their "no effect" corner setting at 0°.
 - Hi and Lo differ in where the sections sit: the corner frequencies and the knob-to-angle mapping are in IMPLEMENTATION_PLAN 2.3.
 - Corner-frequency changes are smoothed.
 - Prewarp the coefficients to reduce cramping near Nyquist (section 4.5).
@@ -233,7 +236,7 @@ Structure the processing chain (flip, phase, delay) as code that can run on a pl
 2. **Hi/Lo design:** corner-frequency ranges for Hi and Lo, the knob-to-angle mapping, and behaviour near Nyquist
    (IMPLEMENTATION_PLAN 2.3).
 3. **Measure magnitude** too, to confirm flatness.
-4. **Validate the 90° handover** between one and two all-pass sections for continuity.
+4. **Validate the range and mode changes** (glides between shapes) for continuity.
 5. **Design Constant-mode coefficients** for 44.1, 48, 88.2, 96 and 192 kHz and plot the achieved 90° accuracy.
 6. Prototype the auto-suggest search in Python: GCC-PHAT delay estimate, then grid search over angle and flip in each mode, using recorded or synthetic signal pairs.
 7. Port the working structures to JUCE.
@@ -242,11 +245,9 @@ Structure the processing chain (flip, phase, delay) as code that can run on a pl
 
 ## 9. Open questions
 
-1. **90° switch.** *Resolved (provisionally, 2026-10-05):* there is no separate 90/180 switch in the DSP; it is folded
-   into the single 0–180° knob, the 180 range adding a second section (one-then-two-section design, IMPLEMENTATION_PLAN
-   2.3). The RANGE button is on the panel (knob 0–90° or 0–180°, the knob keeps its position, default 90); what each
-   range does in the DSP is still open, along with extending Hi/Lo below their lowest corners. Decided after listening
-   to the stems.
+1. **90° switch.** *Resolved (user, 2026-10-06, IMPLEMENTATION_PLAN R15):* the RANGE button selects one section (90) or
+   two (180) over the knob's whole travel; each mode and range is its own shape from the reference unit's measured
+   geometries, named as its manual describes them. Extending Hi/Lo below their lowest corners is closed (not done).
 2. **Decoupling angle and width (unverified idea).** Two cascaded first-order all-passes might allow independent angle
    and width. Parked; not needed for v0.7 (Hi and Lo are two fixed spreads: sections coincident vs 20× apart).
 3. **Meter visual style.** Bars, history, phase curve, or a combination.

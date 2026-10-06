@@ -19,7 +19,7 @@ Items marked **[verify]** are things I believe are right but have not confirmed.
 | R1 | **Constant mode uses a linear-phase FIR Hilbert transformer.** About 43 ms of reported latency, **only while Constant is selected**. | True constant rotation relative to the dry signal, so 0° equals the (delayed) dry signal. A zero-latency IIR pair smears the bass by about 2.3 ms even at 0°. | Yes (4.4, 4.8) |
 | R2 | Keep the IIR filters of a bypassed stage running ("warm"). Skip only the mixing. | Clicks are avoided by design, for about 10 flops per sample (section 2.6) | Yes (4.6) |
 | R3 | Hi↔Lo switches by gliding the corner frequencies instead of crossfading | The signal stays all-pass the whole way: no comb dip and no level change | Yes (4.7) |
-| R4 | The knob angle is the true phase at a per-mode reference frequency (Lo past 90°: plus section 2's phase at its own reference, see 2.3). Sections run in sequence, and the second section is always running. | The 90° handover is continuous by construction. The readout means something. | Refines 4.3 |
+| R4 | The knob angle is the true phase at a per-shape reference frequency (HIGH at RANGE 180: the first section's angle, marked *; see 2.3 and R15). Sections run in sequence, and the second section is always running. | Changes of range or mode are continuous (glided). The readout means something. | Refines 4.3 |
 | R5 | `phaseMode` is not automatable | Changing into or out of Constant changes the reported latency, and hosts re-compensate inconsistently | New |
 | R6 | Meter: the audio thread only copies samples to a FIFO. The GUI does an FFT cross-spectrum and computes band correlation from it. | Lightest possible audio-thread cost, sharper bands, and it reuses code for v0.8 and the deferred phase curve | Refines 6 |
 | R7 | Detect "no sidechain" from the **signal** as well as the bus layout | Logic always supplies a sidechain buffer, so the layout alone can't tell | Refines 6 |
@@ -29,6 +29,7 @@ Items marked **[verify]** are things I believe are right but have not confirmed.
 | R12 | **Delay in steps of 0.1 sample** (user, 2026-10-06; built on `dsp-negative-delay`), replacing whole samples (PLAN decision 12) | Whole samples leave up to 2.4 dB of dip at 20 kHz on a coherent pair at 44.1 kHz; 0.1 sample leaves 0.02 dB (2.1a) | Yes (2.1, decision 12, open question 7) |
 | R13 | **Hi/Lo runs oversampled** (4× below 85 kHz, 2× below 170 kHz) between linear-phase halfbands, and **reports a small latency whenever Constant isn't selected**: 32 samples at 44.1 kHz (0.73 ms), 18 at 48 kHz (0.38 ms), 5 at 88.2/96 kHz, none from 176.4 kHz (user, 2026-10-06; merged to master and approved by ear) | De-cramping: within 2.5° of analog sections to 20 kHz at every rate (was up to 80° at 44.1 kHz), so a setting sounds the same at every rate. Impossible at zero latency (Foster's reactance theorem, 2.3) | Yes (3.4 and 4.8 "zero latency", decision 4 "oversampling dropped") |
 | R14 | **macOS ships two separate builds, not a universal binary** (user, 2026-10-06): arm64, and x86_64 labelled "Intel" in the GitHub release (`release.yml`'s `macos` and `macos-intel` jobs). Local builds are arm64 only | Each download stays half the size; only a small minority need Intel, but it is still offered | Yes (10, "universal binary") |
+| R15 | **RANGE selects the Hi/Lo shape, and the modes are named for what they do** (user, 2026-10-06): the 90 range is one section (LOW 75.1 Hz, HIGH 150.1 Hz); the 180 range is two sections sharing the whole knob travel (LOW: stacked at 150.1 Hz; HIGH: 75.1 Hz and 1502 Hz), glided on a change. HIGH at RANGE 180 shows the first section's angle, 0–90°, with an asterisk. Replaces the single 0–180° knob mapping (P5) | Matches the reference unit's measured 90 and 180 behaviours (captures) with names that agree with its manual; the whole knob stays usable (no dead zones) | Refines 4.3 (2.3) |
 | R11 | **Dim a switched-off section** (user, 2026-10-06; not built yet): its knob, switch, readout values and buttons go semi-transparent but stay usable; the on/off toggles stay at full opacity (4.5) | Shows at a glance what's in the signal path | New |
 
 ---
@@ -235,32 +236,57 @@ form I since 2026-10-06, see "As built"). Parametrise each section by
 - `k` is clamped at `k_min` (phase at 20 kHz below 0.25° at 44.1 kHz). At `k = 0` the pole is on the unit circle,
   so the clamp is needed, and it keeps the section "running" at 0° without any audible effect.
 
-**Knob mapping (P5, 2026-10-05; reference code `prototype/hilo.py`):**
+**Knob mapping (RANGE redesign, 2026-10-06, R15; reference code `prototype/hilo.py`; replaces the P5 mapping):**
 
-The knob angle θ is split into θ₁ (section 1's lag at f₁) and θ₂ (section 2's lag at f₂), and
-`kᵢ = max(tan(θᵢ/2) / tan(π·fᵢ/fs), k_min)`. This is closed form, so no tables are needed.
+The panel angle θ (0–90° at RANGE 90, 0–180° at RANGE 180) gives φ = θ (90) or θ/2 (180), the angle of section 1,
+which is its lag at its reference f₁. Section 2 carries θ₂ = φ at RANGE 180 and nothing (identity) at RANGE 90.
+`kᵢ = max(tan(θᵢ/2) / tan(π·fᵢ/fs), k_min)`: closed form, no tables. Each (mode, range) is its own **shape** with its
+own references, all taken from measurements of the reference unit (nothing invented): 75.1 Hz, 150.1 Hz and
+1502 Hz (20 × 75.1 Hz).
 
-| Mode | f₁ | f₂ | θ 0–90° | θ 90–180° |
-|---|---|---|---|---|
-| **Hi** | 150.1 Hz | 150.1 Hz | θ₁ = θ, θ₂ = 0 | blend: `s = smoothstep((θ−90)/35)`, `θ₁ = 90 − s·(90 − θ/2)`, `θ₂ = θ − θ₁` (θ₁ = θ₂ from 125°) |
-| **Lo** | 75.1 Hz | 1502 Hz (20 × f₁) | θ₁ = θ, θ₂ = 0 | θ₁ = 90, θ₂ = θ − 90 |
+| Mode (named for what it does) | RANGE 90 | RANGE 180 |
+|---|---|---|
+| **LOW** | one section at 75.1 Hz | two stacked sections at 150.1 Hz |
+| **HIGH** | one section at 150.1 Hz | sections at 75.1 Hz and 1502 Hz |
 
-- **Design:** the 90 range is one section; the 180 range adds a second one, ganged at the same corner in Hi and at 20×
-  the corner in Lo. Hi's corner is one octave above Lo's. The corners are fixed in Hz at every rate. θ = 0 is identity.
-- **Lo past 90°** keeps section 1 at 90° and sweeps section 2 at 1502 Hz, so more angle never means less phase at any
-  frequency (other two-section shapes, with less low-frequency phase than Lo at 90°, are not on the knob).
-- **Open design questions (user, 2026-10-05; decided after listening to the stems, not implemented yet).** Function
-  first:
-  - **What the RANGE button does in the DSP.** The UI side is done (2026-10-05): the RANGE button (`phaseRange`) sets
-    the knob's travel to 0–90° or 0–180° with the knob keeping its position, and the phase knob's upper scale label
-    follows it. Still open: what each range does (e.g. one section in 90; in 180, other two-section shapes at the same
-    θ), so the mapping table above is unchanged until then.
-  - **Extending Hi/Lo below their lowest corners** (150 Hz Hi, 75 Hz Lo) for more low-frequency reach.
-  - **No dead knob travel:** confirmed 2026-10-06 (`prototype/out/hf/report.md` part 5): every 0.25° step of θ moves the
-    lag by at least 0.25° somewhere from 20 Hz to 20 kHz, in both modes at every rate, from 0° to 180°.
+- **Why these names (user, 2026-10-06).** The manual describes the 180 range's two settings as one filter on the lows
+  and one on the highs (the wide one, "high") and both filters on the lows (the narrow one, "low"). The captured
+  behaviours had the opposite names in the 180 range, but matched the manual in the 90 range (Lo = the lower corner),
+  so a pure rename could not make all four combinations consistent. Because RANGE is just a button, each combination
+  takes whichever captured geometry fits its name: LOW 90 and HIGH 90 are the captured 90 behaviours unchanged;
+  LOW 180 is the captured stacked pair (at 150.1 Hz), HIGH 180 the captured spread pair (75.1 and 1502 Hz).
+  The 90 range sounds exactly as it did before (identical A/B levels, `prototype/out/range/report.md`); only the 180
+  range changed, where the two sections now share the whole knob travel from 0° instead of the second one only
+  joining past 90°.
+- **Switching shape** (a RANGE press or a mode change) glides each section's k geometrically from the old shape's
+  value to the new one's over 30 ms (R3, the same glide as Hi↔Lo), reversing from where it is if switched back
+  mid-glide. The knob keeps its position through a RANGE press, so φ is unchanged.
+- **The panel angle (what the readout, scale label and host text show):** the shift at the first section's reference
+  where that is exact, else φ. LOW and HIGH at RANGE 90 read 0–90 (the lag at 75.1 / 150.1 Hz); LOW at RANGE 180 reads
+  0–180 exactly (the stacked pair's lag at 150.1 Hz); **HIGH at RANGE 180 shows φ, 0–90, marked with an asterisk**
+  (on the scale label, after the readout's degree sign, and in the tooltips), because its first section's lag at
+  75.1 Hz reaches only about 96° and the second adds its own turn higher up. Constant at RANGE 180 reads 0–180.
+  `params::shownRangeDegrees`; the tooltips for the knob, readout, RANGE button and mode switch describe the current
+  state.
+- **As built (2026-10-06, branch `hilo-range-modes`):** `src/dsp/PhaseMapping.h` (the four shapes, `knobAngle`,
+  `angles`, `kAngles`), `AllpassCascade` (state: φ on the linear ramp, plus shape, previous shape and glide; one
+  `set(theta, mode, wide)` call so a mode and a range change together start one glide, not two), `HiLoStage`, and
+  `ChainSettings::phaseWide`. Goldens regenerated (`prototype/golden.py`, with RANGE toggles and a simultaneous mode and
+  range change in the script): worst difference 1.2e-7 at 44.1 and 48 kHz, 6e-8 at 96 kHz, below 1e-12 at 192 kHz;
+  Constant's goldens are byte-identical. CPU is unchanged (Release: Hi at 60° 16.2 ns at 44.1 kHz, 14.6 at 48 kHz,
+  Constant 38 ns at 48 kHz, before and after). New tests: the static response of each shape against the closed form
+  within 0.01°, the lag at the first reference equal to θ where exact, RANGE and mode toggles on noise (energy within
+  1.5 dB, no larger step than 1.5× the input's), and the UI's labels, asterisk, host text and tooltips by state.
+- **No dead knob travel (user, 2026-10-06):** the reference's knob has dead zones (no change over about the bottom 20%
+  and top 10% of its travel, with a floor of about 7° at 150 Hz at its minimum); ours starts at exactly 0° (identity)
+  and uses its whole travel. Confirmed for all four shapes at every rate, 2026-10-06 (`prototype/out/hf/report.md`
+  part 5): every 0.25° step of θ moves the lag by at least 0.138° somewhere in 20 Hz–20 kHz; the readout's frequency
+  is within 0.0002° of θ.
+- **Extending below the lowest corners (75 Hz) is closed** (user, 2026-10-06): the corners are the reference unit's,
+  which was designed with them in mind; extending them would not be an improvement we can show.
 - **Properties (P1, `prototype/out/p1/report.md`):**
-  - Lag is non-decreasing in θ at every frequency in both modes.
-  - The 90° handover is continuous (both sections always run; there is no engage event).
+  - Lag is non-decreasing in θ at every frequency in all four shapes.
+  - There is no handover at 90° any more: at RANGE 180 both sections run over the whole travel, and a RANGE press or mode change glides (see above).
   - The readout is exact within 0.004° at every rate. In Hi it is the true lag at 150 Hz. In Lo past 90° it is
     90° + section 2's lag at 1502 Hz, because Lo's true lag at 75 Hz only reaches 95.7° at 180°.
   - The top octave moves fast just past 0° and just past 90°, where a corner sweeps down from far above 20 kHz. That
@@ -288,11 +314,12 @@ The knob angle θ is split into θ₁ (section 1's lag at f₁) and θ₂ (secti
     sample at 2× on the way down to make it so): **32 at 44.1 kHz (0.73 ms), 18 at 48 kHz (0.38 ms), 5 at 88.2 and
     96 kHz, 0 at 176.4 and 192 kHz.** It is reported whenever Constant isn't selected, phase on or off, so phase on/off
     stays a crossfade (the dry path is delayed to match) and only entering or leaving Constant changes the latency.
-  - Against analog sections: within 1.6° to 16 kHz and 2.5° to 20 kHz at every rate (target 3° / 10°); the same
+  - Against analog sections: within 1.6° to 16 kHz and 2.5° to 20 kHz at every rate (target 3° / 10°; LOW at RANGE 180
+    stacks two sections at one corner, so its error is about double: up to 4.9° at 44.1 kHz, measured 2026-10-06); the same
     setting within 0.4° between 44.1 and 192 kHz (was 78°). Typical settings (the median over the travel) are within
     0.4° at 16–20 kHz.
   - Kept: the readout (exact at the reference frequencies, now computed at M·fs), lag never decreasing as θ rises,
-    the continuous 90° handover, 0° = the delayed input (at k_min, as before), no bursts on coefficient moves.
+    0° = the delayed input (at k_min, as before), no bursts on coefficient moves.
   - Level: within ±0.07 dB (44.1 kHz) and ±0.09 dB (48 kHz) from 20 Hz to 20 kHz, ±0.03 dB at 88.2/96, exact at
     176.4/192. Above 20 kHz at 44.1/48 kHz it rolls off through the halfbands' transition band, as the delay's
     kernels already do (accepted, 2.6).
@@ -531,10 +558,82 @@ NEON), master's generic engine and the branch back to back (ns per stereo frame)
 
 The convolver's layouts were re-measured with PFFFT and the best are vDSP's (uniform 128 below 80 kHz, 128 + 2048
 above: 27.7 / 33.6 ns for the convolver alone at 96 / 192 kHz), so `ConstantRotator::blockSizesFor` no longer depends on
-the engine. **Still to do: CI's x86 numbers** (SSE, and whether MSVC vectorises the register-blocked loops), which decide
-whether the layouts need an x86 variant. With J and K together (master after the merge, M1): Constant at 60°,
+the engine. CI's x86 numbers (SSE, and whether MSVC vectorises the register-blocked loops), which decide whether the
+layouts need an x86 variant, are in L below. With J and K together (master after the merge, M1): Constant at 60°,
 fractional delay, 44.1 / 48 / 96 / 192 kHz, 50.8 / 44.9 / 38.8 / 39.5 ns with vDSP and 51.1 / 45.7 / 38.1 / 39.1 with
 PFFFT (the warm oversampled Hi/Lo is about 13 ns of it at 44.1 and 48 kHz).
+
+**L. CI numbers with J and K (run 37420074764, commit 0511d9b, 2026-10-06).** CI runner numbers, not the M1's:
+GitHub-hosted macos-latest (Apple silicon, vDSP), ubuntu-24.04 and windows-latest (x86-64, PFFFT on SSE; MSVC on
+Windows), each one run on a shared VM, so noisy (the Windows idle case below is slower than Hi at 60° for that reason).
+ns per stereo frame, from `PhaseAlignDspTests "chain cost per stereo frame"`:
+
+| Case | macOS CI | Linux CI | Windows CI |
+|---|---|---|---|
+| idle: delay off, Hi, phase off, 48 kHz | 13.0 | 20.4 | 46.9 |
+| delay only, whole samples, 48 kHz | 14.3 | 20.6 | 38.5 |
+| delay only, fractional, 44.1 / 48 / 96 kHz | 18.5 / 14.9 / 8.3 | 43.0 / 31.7 / 15.3 | 64.6 / 50.4 / 24.5 |
+| Hi at 60°, delay off, 44.1 / 48 / 96 / 192 kHz | 15.2 / 13.7 / 7.8 / 4.7 | 24.3 / 21.8 / 11.4 / 6.0 | 44.1 / 40.8 / 21.9 / 10.8 |
+| Hi at 60°, fractional delay, 44.1 / 48 kHz | 21.6 / 16.5 | 45.1 / 32.7 | 69.2 / 91.5 |
+| Constant at 60°, delay off, 48 kHz | 38.8 | 60.8 | 193 |
+| Constant at 60°, fractional delay, 44.1 / 48 kHz | 44.3 / 40.8 | 82.0 / 72.1 | 214 / 208 |
+| Constant at 60°, fractional delay, 96 / 192 kHz | 40.4 / 44.3 | 56.9 / 59.7 | 155 / 167 |
+| Constant at 0° (spectra only), 48 kHz | 17.7 | 35.7 | 57.5 |
+| constant automation (all modes), 44.1 / 48 kHz | 45.5 / 39.8 | 79.6 / 70.1 | 149 / 137 |
+| mean 64-sample callback, Constant, 48 / 96 / 192 kHz (µs) | 2.7 / 2.6 / 2.9 | 4.7 / 3.9 / 4.0 | 13.3 / 10.0 / 10.6 |
+| worst 64-sample callback, Constant, 48 / 96 / 192 kHz (µs, of 1333 / 667 / 333) | 15.9 / 23.4 / 63.7 | 22.4 / 42.9 / 64.4 | 55.9 / 122 / 156 |
+| rebuild on entering Constant, 48 / 192 kHz (µs, once, while muted) | 5.0 / 26.8 | 7.3 / 34.2 | 21.4 / 95.4 |
+
+Against the budgets (Hi/Lo < 50 ns, Constant < 150 ns):
+- **macOS and Linux: all within budget**, Hi/Lo and Constant at every rate (Linux Constant peaks at 82 ns at 44.1 kHz,
+  Hi/Lo at 45 ns). Linux's worst callbacks (64 µs at 192 kHz) are a fifth of the 333 µs the callback has. The Windows
+  worst callbacks (156 µs at 192 kHz) are under half of it, where the previous CI run (before PFFFT) had one of 1088 µs.
+- **Windows: Constant is over 150 ns** with delay off or fractional at 44.1 / 48 / 192 kHz (193 / 214 / 208 / 167 ns;
+  155 at 96 kHz); the "all modes" automation case, which includes Constant, sits at 137 to 149, just under. Before K
+  the Windows figures were 232 to 327 ns, so PFFFT took off a quarter to a half but did not reach the budget.
+- **Windows: Hi/Lo is over 50 ns** in the delay-only and fractional-delay cases at 44.1 and 48 kHz (50 to 92 ns) and in
+  the idle case (47 ns, noise: it exceeds the 41 ns of Hi at 60°). Hi at 60° with delay off is 44 / 41 ns, within
+  budget. The 44.1 kHz excess on Windows and Linux is the accepted one (user, 2026-10-06); the 48 kHz fractional-delay
+  case (91.5 ns, but 69 at 44.1 kHz, the dearer rate, so most likely a noisy sample) is not covered by that acceptance.
+  Linux Hi/Lo is within budget everywhere (45 ns at 44.1 kHz with a fractional delay).
+- Per frame, Windows is 2 to 3× Linux for the Simd.h halfbands and cascade (Hi at 60° 40.8 vs 21.8 ns, delay-only whole
+  samples 38.5 vs 20.6) but 3 to 4× for the convolver (Constant 193 vs 61; convolver alone at 48 kHz, 128 partitions:
+  152 vs 36.6, and macOS 24.3). Linux's ratio to macOS is about 1.5× across the board.
+
+**Convolver layouts on x86** (`"convolver cost per stereo frame by block layout"`, ns per stereo frame; the layouts now
+in use are 128 below 80 kHz and 128 / 2048 from 88.2 kHz):
+
+| Layout | 48 kHz: mac / Linux / Windows | 96 kHz: mac / Linux / Windows | 192 kHz: mac / Linux / Windows |
+|---|---|---|---|
+| 128 (uniform; in use below 80 kHz) | **24.3** / 36.6 / 152 | 41.3 / 56.2 / 257 | 83.8 / 106 / 496 |
+| 128 / 2048 (in use from 88.2 kHz) | 30.8 / 36.7 / 122 | **29.2** / 39.2 / 128 | **35.8** / **46.9** / 146 |
+| 128 / 512 | 30.6 / 33.8 / 100 | 34.6 / 39.2 / 127 | 51.7 / 50.2 / 186 |
+| 64 / 512 | 27.8 / **33.5** / **98.3** | 34.1 / **38.8** / 124 | 49.9 / 49.3 / 184 |
+
+(Bold: the best of the 14 layouts on that machine, where it is among those four. Windows's best at 96 kHz is
+64 / 512 / 2048 at 111 against 128 / 2048's 128, and at 192 kHz 130 against 146. Mac's best at 48 kHz is 128 and Linux's
+at 192 kHz is 128 / 2048. The rest is in the CI log.)
+
+**Decision on `ConstantRotator::blockSizesFor`: left as it is.** Linux's differences are within the run's noise (36.6
+against 33.8 ns at 48 kHz) and its 96 / 192 kHz choice is already the best or within 1 ns of it. Only Windows
+below 80 kHz clearly prefers a two-tier layout (128 / 512: 100 against 152 ns, about a third less), while the M1 prefers
+the uniform 128 by a quarter (24.3 against 30.6). An x86-only layout would therefore help Windows alone and would also
+apply to Intel Macs (R14), which no number here covers; and the ranking on Windows probably moves when the loops
+vectorise (next paragraph), so tuning it now would tune around a compiler problem. If Windows stays over budget after
+that, 128 / 512 below 80 kHz behind `_M_X64` is the first thing to try (about 52 ns off the 193).
+
+**MSVC and the register-blocked loops (judged from the numbers; the disassembly is not available).** The loops run at
+2 to 3× Linux's cost on Windows where the explicitly vectorised Simd.h code (halfbands, cascade) does, and at 3 to 4× where
+the convolver's loops (head, multiply-add, fractional kernel) rely on the compiler: the runners share a CPU model, so
+a gap that grows from 2× to 4× is what unvectorised, unfused float sums look like (MSVC will not reorder float
+additions without `/fp:fast`, and the loops' sums in registers are such reductions). This points at those loops not
+being vectorised on MSVC, but it does not prove it. **Not changed**: moving them onto `src/dsp/Simd.h` is the fix, to be
+done and measured on a Windows runner or machine; with Constant at 155 to 214 ns against the 150 ns budget on a shared
+VM it is worth doing, though no user-heard effect follows from it being over, and the worst callback is under half of its
+length.
+
+**pluginval on the CI runners (same run).** Strictness 10, in-process, on the VST3: **passed on Windows and Linux**
+(each ended `SUCCESS`, no failed tests), as on macOS. `continue-on-error` is dropped from their step in `ci.yml`.
 
 **Candidates looked at and not built:**
 - Polyphase split of the Hilbert (every other tap is zero): in the frequency domain it is the same work as doubling the
@@ -640,7 +739,7 @@ anywhere: no capture, no timer, no analysis. The screen repaints only itself, on
 
 ### 4.2 Size, scaling and assets
 
-- **Reference size 977×612** (`uiScale` 1), user resizable from 75% to 200% of it (733 to 1954 px wide), with a locked
+- **Reference size 977×612** (`uiScale` 1), user resizable from 60% to 200% of it (586 to 1954 px wide; the minimum was 75%, 733 px, until user 2026-10-06), with a locked
   aspect ratio, a corner handle and the scale saved in state. **A new instance opens at 80%, 782×490** (user,
   2026-10-06; `PhaseAlignProcessor::defaultUiScale`). 250% of that is 1954×1224: the design space, and the maximum size.
 - **Assets at 2.5× of default slot sizes**, which since the 80% default (2026-10-06) is exactly the design space
@@ -704,7 +803,7 @@ Each item has a "done when" check. P* (Python) and U* (UI) work can run in paral
 - [x] Project venv + `prototype/requirements.txt` + CLAUDE.md note.
 - [x] Source layout per 1.1 (2026-10-05; `src/dsp/` and `src/meter/` arrive with M2/M4). Parameters and state per
   1.2, with state round-trip tests (`tests/StateTests.cpp`). `meterOn` defaults to on, `delayUnit` is stored as
-  `ms`/`samples`/`cm`, `uiScale` is 0.75–2. Loading validates the ui properties and keeps the editor's ValueTree.
+  `ms`/`samples`/`cm`, `uiScale` is 0.6–2. Loading validates the ui properties and keeps the editor's ValueTree.
 - [x] `tests/` target (Catch2 v3.16 via FetchContent) + `ctest` in CI (Linux under xvfb). pluginval (strictness 10) in
   CI on macOS: **added but not yet seen running** (not installed locally).
   - **Deviation from R8:** for now the single test runner compiles the full plugin sources, editor included, because

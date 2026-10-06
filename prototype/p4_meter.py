@@ -88,7 +88,7 @@ def tf_rotation(deg):
 
 
 def tf_hi(theta):
-    return lambda f: np.exp(-1j * np.radians(hilo.lag("hi", theta, np.minimum(f, FS / 2 - 1), FS)))
+    return lambda f: np.exp(-1j * np.radians(hilo.lag("hi", theta, np.minimum(f, FS / 2 - 1), FS, theta > 90)))
 
 
 def tf_product(*tfs):
@@ -435,7 +435,7 @@ EXTRA_CASES = [
     Case("rot60+delay2", "sidechain 2 ms later and rotated 60 deg",
          lambda f: np.ones_like(f, dtype=complex), tf_product(tf_rotation(60), tf_delay(2.0)), tf_delay(2.0)),
     Case("lo150", "sidechain through Lo 150 deg", lambda f: np.ones_like(f, dtype=complex),
-         lambda f: np.exp(-1j * np.radians(hilo.lag("lo", 150, np.minimum(f, FS / 2 - 1), FS))),
+         lambda f: np.exp(-1j * np.radians(hilo.lag("lo", 150, np.minimum(f, FS / 2 - 1), FS, True))),
          lambda f: np.ones_like(f, dtype=complex)),
 ]
 

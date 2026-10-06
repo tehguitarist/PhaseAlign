@@ -27,8 +27,9 @@ std::vector<float> load(const std::string& name)
 struct Event
 {
     int at;
-    double theta; // < 0: unchanged
-    int mode;     // < 0: unchanged; else PhaseMode
+    double theta;  // < 0: unchanged
+    int mode;      // < 0: unchanged; else PhaseMode
+    int wide = -1; // < 0: unchanged; else 0 or 1 (RANGE 180)
 };
 
 // Runs the case's input through a chain with only the phase stage on, applying the events, in blocks of `block`
@@ -56,6 +57,8 @@ double worstError(const std::string& name, double fs, PhaseMode initialMode, con
                 s.phaseDegrees = events[next].theta;
             if (events[next].mode >= 0)
                 s.phaseMode = (PhaseMode)events[next].mode;
+            if (events[next].wide >= 0)
+                s.phaseWide = events[next].wide != 0;
             chain.setSettings(s);
             ++next;
         }
@@ -82,8 +85,10 @@ constexpr int hi = (int)PhaseMode::high, lo = (int)PhaseMode::low;
 TEST_CASE("golden: Hi/Lo matches prototype/hilo.py sample by sample", "[dsp][golden]")
 {
     // golden.py HILO_SCRIPT
-    const std::vector<Event> events = {{1024, 150.0, -1}, {4096, -1.0, lo}, {4096 + 320, -1.0, hi},
-                                       {6144, 30.0, -1},  {6400, -1.0, lo}, {7168, 180.0, -1}};
+    const std::vector<Event> events = {{1024, 45.0, -1, -1}, {2048, 90.0, -1, -1},       {3072, 120.0, -1, 1},
+                                       {4096, -1.0, lo, -1}, {4096 + 320, -1.0, hi, -1}, {5120, 170.0, -1, -1},
+                                       {5632, -1.0, -1, 0},  {6144, 30.0, -1, -1},       {6400, -1.0, lo, -1},
+                                       {7168, 180.0, -1, 1}, {7680, 100.0, hi, 0}};
     for (const auto fs : {44100.0, 48000.0, 96000.0, 192000.0}) // oversampled 4x (both outer halfbands), 2x, not
         for (const auto block : {512, 37})
         {

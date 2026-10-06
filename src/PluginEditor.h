@@ -10,7 +10,7 @@
 #include "ui/ToggleSwitch3.h"
 
 // The panel (IMPLEMENTATION_PLAN 4): baked artwork plus image controls laid out from ui/ui-info.csv.
-// Resizable 75% to 200% of 977x612 with a locked aspect ratio; the size is kept in the ui state. Nothing
+// Resizable 60% to 200% of 977x612 with a locked aspect ratio; the size is kept in the ui state. Nothing
 // repaints while idle: every control repaints only when its value changes, and the meter screen is
 // opaque and repaints only itself.
 class PhaseAlignEditor : public juce::AudioProcessorEditor,
@@ -48,15 +48,23 @@ class PhaseAlignEditor : public juce::AudioProcessorEditor,
     pa::params::DelayUnit delayUnit() const;
     double sampleRate() const { return audioProcessor.getDelaySampleRate(); }
     // Read from the parameter itself: inside a parameter callback the processor's raw value may not be updated yet.
-    double phaseRange() const
+    bool range180() const { return parameter(pa::params::id::phaseRange).getValue() >= 0.5f; }
+    pa::params::PhaseMode phaseModeNow() const
     {
-        return pa::params::rangeDegrees(parameter(pa::params::id::phaseRange).getValue() >= 0.5f);
+        const auto& p = parameter(pa::params::id::phaseMode);
+        return (pa::params::PhaseMode)juce::roundToInt(p.convertFrom0to1(p.getValue()));
     }
+    // What the knob's number means in the current mode and range (Parameters.h shownRangeDegrees): 90, or 180 where it
+    // reads exactly. High at RANGE 180 shows the first section's angle, 0 to 90, marked with an asterisk.
+    double shownRange() const { return pa::params::shownRangeDegrees(range180(), phaseModeNow()); }
+    bool shownRangeIsApproximate() const { return pa::params::shownRangeIsApproximate(range180(), phaseModeNow()); }
     // The phase readout shows the total rotation, so it starts at 180 while the polarity is inverted.
     double polarityOffset() const { return parameter(pa::params::id::polarity).getValue() >= 0.5f ? 180.0 : 0.0; }
     juce::RangedAudioParameter& parameter(const char* id) const;
     void updateDelayReadout();
     void updatePhaseReadout();
+    // The scale label, its asterisk, and the tooltips that describe the current mode and range.
+    void updateRangeUi();
     void updateMeter();
     // Dims or restores the delay and phase sections with their on/off parameters (IMPLEMENTATION_PLAN 4.5).
     void updateDimming();

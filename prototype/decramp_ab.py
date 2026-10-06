@@ -9,6 +9,9 @@ sums with another mic. So each render is the processed signal summed 50/50 with 
 as a host does), the way the plugin is used, and the report gives that sum's level per band: (1 + H) / 2, which is
 0 dB where the two agree and drops where the lag nears 180°. The renders use the golden-tested Python references
 (HiLo, HiLoOversampled), which the C++ matches within 1e-6.
+
+Historical (the de-cramping was approved 2026-10-06): after the RANGE redesign the settings below are read in the new
+mapping, with an angle above 90 meaning the 180 range, so the modes' sections differ from the ones this was listened to.
 """
 
 import math
@@ -43,8 +46,8 @@ def source(name, fs):
 
 def render(kind, mode, theta, x, fs):
     if kind == "old":
-        return HiLo(fs, mode, theta).process(x), 0
-    p = HiLoOversampled(fs, mode, theta)
+        return HiLo(fs, mode, theta, theta > 90).process(x), 0
+    p = HiLoOversampled(fs, mode, theta, theta > 90)
     return p.process(x), p.latency
 
 
@@ -52,11 +55,11 @@ def summed_db(kind, mode, theta, fs, f):
     """Level of (dry + wet) / 2 at f, in dB."""
     f = np.asarray(f, dtype=float)
     if kind == "analog":
-        phi, g = analog_lag(mode, theta, f), 1.0
+        phi, g = analog_lag(mode, theta, f, theta > 90), 1.0
     elif kind == "old":
-        phi, g = lag(mode, theta, f, fs), 1.0
+        phi, g = lag(mode, theta, f, fs, theta > 90), 1.0
     else:
-        phi, g = lag_oversampled(mode, theta, f, fs), response(fs, f)
+        phi, g = lag_oversampled(mode, theta, f, fs, theta > 90), response(fs, f)
     return 20 * np.log10(np.abs(1 + g * np.exp(-1j * np.radians(phi))) / 2)
 
 

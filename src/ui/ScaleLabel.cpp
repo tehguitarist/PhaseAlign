@@ -15,7 +15,9 @@ juce::Path textPath(const juce::Font& font, const juce::String& text)
 }
 } // namespace
 
-ScaleLabel::ScaleLabel(juce::Rectangle<float> slotIn) : DesignComponent(slotIn.expanded(8.0f)), slot(slotIn)
+// The margin leaves room on the right for the asterisk, which sits after the degree sign.
+ScaleLabel::ScaleLabel(juce::Rectangle<float> slotIn)
+    : DesignComponent(slotIn.expanded(8.0f).withTrimmedRight(-24.0f)), slot(slotIn)
 {
     setInterceptsMouseClicks(false, false);
 }
@@ -25,6 +27,14 @@ void ScaleLabel::setDegrees(int newDegrees)
     if (newDegrees == degrees)
         return;
     degrees = newDegrees;
+    repaint();
+}
+
+void ScaleLabel::setAsterisk(bool shown)
+{
+    if (shown == asterisk)
+        return;
+    asterisk = shown;
     repaint();
 }
 
@@ -48,5 +58,12 @@ void ScaleLabel::paint(juce::Graphics& g)
     g.setColour(design::scaleLabelColour.withMultipliedAlpha(contentAlpha()));
     g.fillPath(digits);
     g.fillPath(degree);
+    if (asterisk)
+    {
+        auto star = textPath(font, "*");
+        const auto starBox = degreeBox.translated(degreeBox.getWidth() + design::scaleDegreeGap * s * 0.6f, 0.0f);
+        star.applyTransform(star.getTransformToScaleToFit(starBox, true));
+        g.fillPath(star);
+    }
 }
 } // namespace pa::ui

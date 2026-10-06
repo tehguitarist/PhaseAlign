@@ -45,7 +45,7 @@ TEST_CASE("editor opens at the saved size and keeps every control inside the pan
 {
     PhaseAlignProcessor proc;
 
-    for (const auto scale : {0.75, 1.0, 2.0})
+    for (const auto scale : {0.6, 0.75, 1.0, 2.0})
     {
         INFO("scale " << scale);
         proc.getUiState().setProperty(UiProps::uiScale, scale, nullptr);
@@ -66,14 +66,14 @@ TEST_CASE("editor opens at the saved size and keeps every control inside the pan
     }
 }
 
-TEST_CASE("resizing is limited to 75-200% with the aspect ratio locked, and is saved", "[editor]")
+TEST_CASE("resizing is limited to 60-200% with the aspect ratio locked, and is saved", "[editor]")
 {
     PhaseAlignProcessor proc;
     auto editor = makeEditor(proc);
     auto* constrainer = editor->getConstrainer();
     REQUIRE(constrainer != nullptr);
 
-    CHECK(constrainer->getMinimumWidth() == 733);
+    CHECK(constrainer->getMinimumWidth() == 586);
     CHECK(constrainer->getMaximumWidth() == 1954);
     CHECK(constrainer->getFixedAspectRatio() == Approx(1954.0 / 1224.0));
 
@@ -100,13 +100,22 @@ TEST_CASE("readouts follow the parameters and the unit switch", "[editor]")
     CHECK(delayReadout->getDigits() == "1.000");
     CHECK(phaseReadout->getDigits() == "45.0");
 
-    // RANGE keeps the knob position, so the angle doubles; the scale label follows.
+    // RANGE keeps the knob position. In High the number stays the first section's angle and gains an asterisk; in Low
+    // (and Constant) the angle doubles and the scale label follows.
     const auto labels = childrenOfType<pa::ui::ScaleLabel>(*editor);
     REQUIRE(labels.size() == 1);
     CHECK(labels[0]->getDegrees() == 90);
+    CHECK_FALSE(labels[0]->hasAsterisk());
     setParam(proc, id::phaseRange, 1.0f);
+    CHECK(phaseReadout->getDigits() == "45.0");
+    CHECK(phaseReadout->getSuffix() == juce::String::fromUTF8("\xc2\xb0*"));
+    CHECK(labels[0]->getDegrees() == 90);
+    CHECK(labels[0]->hasAsterisk());
+    setParam(proc, id::phaseMode, 1.0f); // Low
     CHECK(phaseReadout->getDigits() == "90.0");
+    CHECK(phaseReadout->getSuffix() == juce::String::fromUTF8("\xc2\xb0"));
     CHECK(labels[0]->getDegrees() == 180);
+    CHECK_FALSE(labels[0]->hasAsterisk());
 
     proc.getUiState().setProperty(UiProps::delayUnit, "samples", nullptr);
     CHECK(delayReadout->getDigits() == "48.0");
@@ -127,7 +136,7 @@ TEST_CASE("readouts follow the parameters and the unit switch", "[editor]")
     CHECK(getParam(proc, id::delayMs) == Approx(1.0f));
     delayReadout->onTextEntered("-59.3"); // samples, fractional, negative
     CHECK(delayReadout->getDigits() == "-59.3");
-    phaseReadout->onTextEntered("36"); // range 180
+    phaseReadout->onTextEntered("36"); // range 180, Low
     CHECK(getParam(proc, id::phase) == Approx(0.2f));
     phaseReadout->onTextEntered("junk");
     CHECK(getParam(proc, id::phase) == Approx(0.2f));
@@ -150,6 +159,8 @@ TEST_CASE("the phase readout adds 180 while the polarity is inverted, up to 360"
     CHECK(phaseReadout->getDigits() == "225.0"); // range 90
     setParam(proc, id::phaseRange, 1.0f);
     setParam(proc, id::phase, 1.0f);
+    CHECK(phaseReadout->getDigits() == "270.0"); // High at RANGE 180 shows the first section's angle, 0 to 90
+    setParam(proc, id::phaseMode, 1.0f);         // Low reads the full 0 to 180
     CHECK(phaseReadout->getDigits() == "360.0");
     setParam(proc, id::polarity, 0.0f);
     CHECK(phaseReadout->getDigits() == "180.0");
@@ -245,8 +256,8 @@ TEST_CASE("snapshots", "[.][snapshot]")
         const char* name;
     };
     for (const auto& shot :
-         {Shot{0.75, 1.0f, "ui_075.png"}, Shot{1.0, 1.0f, "ui_100.png"}, Shot{2.0, 1.0f, "ui_200.png"},
-          Shot{1.0, 2.0f, "ui_100_retina.png"}, Shot{1.5, 1.0f, "ui_150.png"}})
+         {Shot{0.6, 1.0f, "ui_060.png"}, Shot{0.75, 1.0f, "ui_075.png"}, Shot{1.0, 1.0f, "ui_100.png"},
+          Shot{2.0, 1.0f, "ui_200.png"}, Shot{1.0, 2.0f, "ui_100_retina.png"}, Shot{1.5, 1.0f, "ui_150.png"}})
     {
         proc.getUiState().setProperty(UiProps::uiScale, shot.uiScale, nullptr);
         auto editor = makeEditor(proc);
@@ -297,7 +308,7 @@ TEST_CASE("idle editor does not repaint", "[.][desktop]")
 {
     PhaseAlignProcessor proc;
     auto editor = makeEditor(proc);
-    editor->addToDesktop(juce::ComponentPeer::windowHasTitleBar);
+    editor->addToDesktop(0); // borderless: a title bar would eat into the editor and skew the aspect
     editor->setVisible(true);
 
     auto* mm = juce::MessageManager::getInstance();
@@ -339,7 +350,7 @@ TEST_CASE("meter on screen: reads +1 when aligned, and stops when off", "[.][des
     proc.prepareToPlay(fs, block);
     auto& capture = proc.getMeterCapture();
     auto editor = makeEditor(proc);
-    editor->addToDesktop(juce::ComponentPeer::windowHasTitleBar);
+    editor->addToDesktop(0); // borderless: a title bar would eat into the editor and skew the aspect
     editor->setVisible(true);
     auto& screen = editor->getMeterScreen();
     auto* mm = juce::MessageManager::getInstance();
@@ -461,7 +472,7 @@ TEST_CASE("meter profile run", "[.][profile]")
     if (phase != "closed")
     {
         editor = makeEditor(proc);
-        editor->addToDesktop(juce::ComponentPeer::windowHasTitleBar);
+        editor->addToDesktop(0); // borderless: a title bar would eat into the editor and skew the aspect
         editor->setVisible(true);
         mm->runDispatchLoopUntil(300);
         if (phase == "meterOff")
@@ -498,4 +509,107 @@ TEST_CASE("a new instance opens at 80% of the reference size", "[editor]")
     auto editor = makeEditor(proc);
     CHECK(editor->getWidth() == 782);
     CHECK(editor->getHeight() == 490);
+}
+
+// The phase section's labels and tooltips describe the state the controls are in (RANGE and mode).
+TEST_CASE("the phase scale label, readout and tooltips follow mode and range", "[editor]")
+{
+    PhaseAlignProcessor proc;
+    auto editor = makeEditor(proc);
+    const auto readouts = childrenOfType<pa::ui::Readout>(*editor);
+    REQUIRE(readouts.size() == 2);
+    auto* phaseReadout = readouts[0]->getX() > readouts[1]->getX() ? readouts[0] : readouts[1];
+    const auto labels = childrenOfType<pa::ui::ScaleLabel>(*editor);
+    REQUIRE(labels.size() == 1);
+    const auto deg = juce::String::fromUTF8("\xc2\xb0");
+    const auto star = juce::String::fromUTF8("\xc2\xb0*");
+
+    struct Case
+    {
+        float range, mode;
+        const char* digits;
+        int label;
+        bool asterisk;
+        const char* readoutTip; // what the readout's tooltip says it is
+    };
+    // Knob at 0.5. Mode: 0 High, 1 Low, 2 Constant.
+    const Case cases[] = {{0.0f, 0.0f, "45.0", 90, false, "In High at RANGE 90 it is the shift at 150 Hz"},
+                          {0.0f, 1.0f, "45.0", 90, false, "In Low at RANGE 90 it is the shift at 75 Hz"},
+                          {0.0f, 2.0f, "45.0", 90, false, "In Constant it is the rotation at every frequency"},
+                          {1.0f, 0.0f, "45.0", 90, true, "first section's angle, 0 to 90"},
+                          {1.0f, 1.0f, "90.0", 180, false, "In Low at RANGE 180 it is the shift at 150 Hz"},
+                          {1.0f, 2.0f, "90.0", 180, false, "In Constant it is the rotation at every frequency"}};
+    setParam(proc, id::phase, 0.5f);
+    for (const auto& c : cases)
+    {
+        INFO("range " << c.range << " mode " << c.mode);
+        setParam(proc, id::phaseRange, c.range);
+        setParam(proc, id::phaseMode, c.mode);
+        CHECK(phaseReadout->getDigits() == c.digits);
+        CHECK(phaseReadout->getSuffix() == (c.asterisk ? star : deg));
+        CHECK(labels[0]->getDegrees() == c.label);
+        CHECK(labels[0]->hasAsterisk() == c.asterisk);
+        CHECK(phaseReadout->getTooltip().contains(c.readoutTip));
+    }
+
+    // The RANGE button's tooltip names the current range, what it does here, and the other one.
+    setParam(proc, id::phaseMode, 0.0f); // High
+    setParam(proc, id::phaseRange, 0.0f);
+    const auto buttons = childrenOfType<pa::ui::PanelButton>(*editor);
+    pa::ui::PanelButton* range = nullptr;
+    for (auto* b : buttons)
+        if (b->getTooltip().startsWith("RANGE"))
+            range = b;
+    REQUIRE(range != nullptr);
+    CHECK(range->getTooltip().startsWith("RANGE 90"));
+    CHECK(range->getTooltip().contains("Press for 180"));
+    setParam(proc, id::phaseRange, 1.0f);
+    CHECK(range->getTooltip().startsWith("RANGE 180"));
+    CHECK(range->getTooltip().contains("one on the lows"));
+    CHECK(range->getTooltip().contains("0 to 90" + star)); // "0 to 90°*"
+    CHECK(range->getTooltip().contains("Press for 90"));
+    setParam(proc, id::phaseMode, 1.0f); // Low
+    CHECK(range->getTooltip().contains("two stacked sections around 150 Hz"));
+
+    // The knob's tooltip carries the range and the caveat only where it applies.
+    const auto knobs = childrenOfType<pa::ui::ImageKnob>(*editor);
+    REQUIRE(knobs.size() == 2);
+    auto* phaseKnob = knobs[0]->getX() > knobs[1]->getX() ? knobs[0] : knobs[1];
+    CHECK(phaseKnob->getTooltip().contains("0 to 180"));
+    CHECK_FALSE(phaseKnob->getTooltip().contains("first section's angle"));
+    setParam(proc, id::phaseMode, 0.0f);
+    CHECK(phaseKnob->getTooltip().contains("0 to 90"));
+    CHECK(phaseKnob->getTooltip().contains("first section's angle"));
+}
+
+// Hidden: the phase section in each RANGE and mode state (the scale label's asterisk, the readout, the RANGE button),
+// at 200% Retina. PA_SNAPSHOT_DIR picks the folder.
+TEST_CASE("range states", "[.][snapshot]")
+{
+    PhaseAlignProcessor proc;
+    const auto dirName = juce::SystemStats::getEnvironmentVariable("PA_SNAPSHOT_DIR", "snapshots");
+    const auto dir = juce::File::getCurrentWorkingDirectory().getChildFile(dirName);
+    dir.createDirectory();
+    proc.getUiState().setProperty(UiProps::uiScale, 1.0, nullptr);
+    setParam(proc, id::phase, 0.75f);
+
+    struct State
+    {
+        float range, mode;
+        const char* name;
+    };
+    for (const auto& st : {State{0.0f, 0.0f, "high_90"}, State{1.0f, 0.0f, "high_180"}, State{0.0f, 1.0f, "low_90"},
+                           State{1.0f, 1.0f, "low_180"}, State{1.0f, 2.0f, "constant_180"}})
+    {
+        setParam(proc, id::phaseRange, st.range);
+        setParam(proc, id::phaseMode, st.mode);
+        auto editor = makeEditor(proc);
+        auto area = editor->getLocalBounds();
+        area = area.removeFromRight(area.getWidth() * 2 / 5).removeFromTop(area.getHeight() * 11 / 20);
+        const auto image = editor->createComponentSnapshot(area, true, 2.0f);
+        const auto file = dir.getChildFile(juce::String("range_") + st.name + ".png");
+        file.deleteFile();
+        juce::FileOutputStream out(file);
+        REQUIRE(juce::PNGImageFormat().writeImageToStream(image, out));
+    }
 }

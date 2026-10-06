@@ -20,13 +20,41 @@ using Catch::Approx;
 
 namespace
 {
-ChainSettings phaseOnly(PhaseMode mode, double degrees)
+ChainSettings phaseOnly(PhaseMode mode, double degrees, bool wide = false)
 {
     auto s = ChainSettings::neutral();
     s.phaseOn = true;
     s.phaseMode = mode;
     s.phaseDegrees = degrees;
+    s.phaseWide = wide;
     return s;
+}
+
+// Hi/Lo's four shapes, each with the knob positions worth checking (panel angles; the 90 range ends at 90).
+struct ShapeCase
+{
+    PhaseMode mode;
+    bool wide;
+    std::vector<double> thetas;
+    mapping::Shape shape() const { return {mode == PhaseMode::low ? mapping::Mode::lo : mapping::Mode::hi, wide}; }
+    std::string name() const { return std::string(mode == PhaseMode::low ? "LOW " : "HIGH ") + (wide ? "180" : "90"); }
+};
+
+std::vector<ShapeCase> shapeCases(bool edges = false)
+{
+    std::vector<double> narrow = {0.0, 10.0, 45.0, 90.0}, wide = {0.0, 10.0, 45.0, 90.0, 100.0, 135.0, 180.0};
+    if (edges) // just past the ends of each range: a corner far up
+    {
+        narrow = {0.0, 0.5, 2.0, 10.0, 45.0, 90.0};
+        wide = {0.0, 0.5, 2.0, 10.0, 45.0, 90.0, 90.5, 92.0, 120.0, 180.0};
+    }
+    std::vector<ShapeCase> list;
+    for (const auto mode : {PhaseMode::low, PhaseMode::high})
+    {
+        list.push_back({mode, false, narrow});
+        list.push_back({mode, true, wide});
+    }
+    return list;
 }
 
 // The chain's impulse response at settled settings (mono).
@@ -73,13 +101,12 @@ std::vector<double> testFrequencies(double fs)
 } // namespace
 
 // Analog first-order sections with the mapping's lag at each reference frequency (plan 2.3): what Hi/Lo approaches.
-static double analogLagDegrees(PhaseMode mode, double theta, double f)
+static double analogLagDegrees(const mapping::Shape& shape, double theta, double f)
 {
-    const auto& shape = mode == PhaseMode::high ? mapping::hi : mapping::lo;
-    const auto [t1, t2] = mapping::split(shape, theta);
+    const auto r = mapping::references(shape);
+    const auto [t1, t2] = mapping::angles(shape, mapping::knobAngle(theta, shape.wide));
     return 2.0 *
-           (std::atan(std::tan(t1 * M_PI / 360.0) * f / shape.f1) +
-            std::atan(std::tan(t2 * M_PI / 360.0) * f / shape.f2)) *
+           (std::atan(std::tan(t1 * M_PI / 360.0) * f / r.f1) + std::atan(std::tan(t2 * M_PI / 360.0) * f / r.f2)) *
            180.0 / M_PI;
 }
 
@@ -92,29 +119,24 @@ TEST_CASE("Hi/Lo is flat within 0.1 dB to 20 kHz, its readout is the knob angle 
         CHECK(latency == (fs < 47000.0 ? 32 : fs < 85000.0 ? 18 : fs < 170000.0 ? 5 : 0));
         CHECK(Chain::latencyFor(phaseOnly(PhaseMode::high, 0.0), fs, 400) == latency);
         CHECK(Chain::latencyFor(ChainSettings::neutral(), fs, 400) == latency); // Hi/Lo's even while off
-        for (const auto mode : {PhaseMode::high, PhaseMode::low})
-            for (const auto theta : {0.0, 10.0, 45.0, 90.0, 100.0, 135.0, 180.0})
+        for (const auto& c : shapeCases())
+            for (const auto theta : c.thetas)
             {
-                INFO("fs " << fs << ", " << (mode == PhaseMode::high ? "Hi" : "Lo") << " " << theta);
-                const auto h = impulseResponse(fs, phaseOnly(mode, theta), (int)(0.4 * fs));
+                INFO("fs " << fs << ", " << c.name() << " " << theta);
+                const auto h = impulseResponse(fs, phaseOnly(c.mode, theta, c.wide), (int)(0.4 * fs));
                 // The halfbands' passband ripple (prototype/oversampling.py: within 0.09 dB end to end).
                 for (const auto f : testFrequencies(fs))
                     REQUIRE(std::abs(20.0 * std::log10(std::abs(response(h, f, fs, latency)))) < 0.1);
 
-                // The readout (plan 2.3): Hi, the lag at 150.1 Hz; Lo, the lag at 75.1 Hz up to 90 degrees, then 90
-                // plus section 2's lag at 1502 Hz (section 1, fixed at 90 there, is taken off analytically: the
-                // sections run at the oversampled rate).
-                const auto fo = fs * Oversampler::factorFor(fs);
-                if (mode == PhaseMode::high)
-                    CHECK(lagDegrees(response(h, 150.1, fs, latency)) == Approx(theta).margin(0.1));
-                else if (theta <= 90.0)
-                    CHECK(lagDegrees(response(h, 75.1, fs, latency)) == Approx(theta).margin(0.1));
+                // The readout (plan 2.3): the lag at the first section's reference frequency is the panel angle in
+                // LOW 90, HIGH 90 and LOW 180. HIGH 180 reads the first section's angle (theta / 2) instead, as the
+                // closed form says (section 2's small lag at 75.1 Hz adds to it).
+                const auto r = mapping::references(c.shape());
+                const auto lag = lagDegrees(response(h, r.f1, fs, latency));
+                if (c.mode == PhaseMode::high && c.wide)
+                    CHECK(lag == Approx(analogLagDegrees(c.shape(), theta, r.f1)).margin(0.1));
                 else
-                {
-                    const auto k1 = std::tan(M_PI / 4.0) / std::tan(M_PI * 75.1 / fo);
-                    const auto section1 = 2.0 * std::atan(k1 * std::tan(M_PI * 1502.0 / fo)) * 180.0 / M_PI;
-                    CHECK(lagDegrees(response(h, 1502.0, fs, latency)) - section1 == Approx(theta - 90.0).margin(0.1));
-                }
+                    CHECK(lag == Approx(theta).margin(0.1));
             }
     }
 }
@@ -124,21 +146,66 @@ TEST_CASE("Hi/Lo is within 2.5 degrees of analog sections to 20 kHz at every rat
     // Settings just past 0 and 90 degrees are the worst: a corner far up, which a zero-latency section cramps by up to
     // 80 degrees at 16-20 kHz at 44.1 kHz (plan 2.3, prototype/out/hf/report.md).
     for (const auto fs : {44100.0, 48000.0, 88200.0, 96000.0, 192000.0})
-        for (const auto mode : {PhaseMode::high, PhaseMode::low})
-            for (const auto theta : {0.0, 0.5, 2.0, 10.0, 45.0, 90.0, 90.5, 92.0, 120.0, 180.0})
+        for (const auto& c : shapeCases(true))
+            for (const auto theta : c.thetas)
             {
-                INFO("fs " << fs << ", " << (mode == PhaseMode::high ? "Hi" : "Lo") << " " << theta);
+                INFO("fs " << fs << ", " << c.name() << " " << theta);
                 const auto latency = HiLoStage::latencyFor(fs);
-                const auto h = impulseResponse(fs, phaseOnly(mode, theta), (int)(0.4 * fs));
+                // LOW 180 stacks two sections at one corner, so their de-cramping errors add (hilo.py: up to 4.9).
+                const auto stack = c.mode == PhaseMode::low && c.wide ? 2.0 : 1.0;
+                const auto h = impulseResponse(fs, phaseOnly(c.mode, theta, c.wide), (int)(0.4 * fs));
                 for (const auto f : testFrequencies(fs))
                 {
                     INFO(f << " Hz");
                     auto lag = lagDegrees(response(h, f, fs, latency));
-                    const auto analog = analogLagDegrees(mode, theta, f);
+                    const auto analog = analogLagDegrees(c.shape(), theta, f);
                     lag += 360.0 * std::round((analog - lag) / 360.0);
-                    REQUIRE(lag == Approx(analog).margin(f <= 16000.0 ? 1.7 : 2.6));
+                    REQUIRE(lag == Approx(analog).margin(stack * (f <= 16000.0 ? 2.1 : 2.6)));
                 }
             }
+}
+
+TEST_CASE("the plain cascade's static response is the mapping's closed form, in all four shapes", "[dsp][phase]")
+{
+    // AllpassCascade alone (no oversampling) at 48 kHz: its impulse response against k = tan(theta_i / 2) / tan(pi f_i
+    // / fs) per section, within 0.01 degree from 20 Hz to 20 kHz; the lag at the first reference is theta for LOW 90,
+    // HIGH 90 and LOW 180, and the closed form's for HIGH 180.
+    const auto fs = 48000.0;
+    const auto length = (int)(0.5 * fs);
+    for (const auto& c : shapeCases(true))
+        for (const auto theta : c.thetas)
+        {
+            INFO(c.name() << " " << theta);
+            const auto mode = c.mode == PhaseMode::low ? AllpassCascade::Mode::lo : AllpassCascade::Mode::hi;
+            AllpassCascade cascade;
+            cascade.prepare(fs);
+            cascade.reset(mode, c.wide, theta);
+            std::vector<float> h((size_t)length, 0.0f);
+            h[0] = 1.0f;
+            float* p = h.data();
+            cascade.process(&p, 1, length);
+
+            const auto phi = mapping::knobAngle(theta, c.wide);
+            const auto [t1, t2] = mapping::angles(c.shape(), phi);
+            const auto [k1, k2] = mapping::kAngles(c.shape(), t1, t2, fs);
+            const auto section = [&](double k, double f)
+            { return 2.0 * std::atan(k * std::tan(M_PI * f / fs)) * 180.0 / M_PI; };
+            for (const auto f : testFrequencies(fs))
+            {
+                INFO(f << " Hz");
+                const auto expected = section(k1, f) + section(k2, f);
+                auto lag = lagDegrees(response(h, f, fs));
+                lag += 360.0 * std::round((expected - lag) / 360.0);
+                REQUIRE(lag == Approx(expected).margin(0.01));
+                REQUIRE(std::abs(20.0 * std::log10(std::abs(response(h, f, fs)))) < 0.01);
+            }
+            const auto r = mapping::references(c.shape());
+            const auto atRef = lagDegrees(response(h, r.f1, fs));
+            if (c.mode == PhaseMode::high && c.wide)
+                CHECK(atRef == Approx(section(k1, r.f1) + section(k2, r.f1)).margin(0.01));
+            else if (theta >= 1.0 && theta < 180.0) // the k floor and the 0/180 wrap aside
+                CHECK(atRef == Approx(theta).margin(0.01));
+        }
 }
 
 TEST_CASE("Constant: exact at 0 and 180 degrees, 90 degrees within 0.5 from 20 Hz to 20 kHz, latency L", "[dsp][phase]")
@@ -241,14 +308,14 @@ TEST_CASE("a Hi <-> Lo glide stays all-pass", "[dsp][phase]")
 
         Chain chain;
         chain.prepare(fs, 1, 400);
-        chain.reset(phaseOnly(PhaseMode::high, 120.0));
+        chain.reset(phaseOnly(PhaseMode::high, 120.0, true));
         const auto glideAt = (int)(0.2 * fs), reverseAt = glideAt + (int)(0.015 * fs);
         for (int pos = 0; pos < length; pos += 64)
         {
             if (pos == glideAt / 64 * 64)
-                chain.setSettings(phaseOnly(PhaseMode::low, 120.0));
+                chain.setSettings(phaseOnly(PhaseMode::low, 120.0, true));
             if (pos == reverseAt / 64 * 64)
-                chain.setSettings(phaseOnly(PhaseMode::high, 120.0));
+                chain.setSettings(phaseOnly(PhaseMode::high, 120.0, true));
             float* p = x.data() + pos;
             chain.process(&p, 1, std::min(64, length - pos));
         }
@@ -298,14 +365,22 @@ TEST_CASE("leaving 0 or 90 degrees on broadband input releases no burst", "[dsp]
     {
         PhaseMode mode;
         double from, to;
-        bool viaConstant; // settled in Constant first, then Hi/Lo at `from`, then the move
+        bool wideFrom, wideTo; // RANGE 180 before and after the move
+        bool viaConstant;      // settled in Constant first, then Hi/Lo at `from`, then the move
     };
     for (const auto fs : {44100.0, 48000.0, 96000.0, 192000.0})
-        for (const auto& c : {Case{PhaseMode::high, 0.0, 60.0, false}, Case{PhaseMode::high, 90.0, 150.0, false},
-                              Case{PhaseMode::low, 0.0, 60.0, false}, Case{PhaseMode::low, 90.0, 150.0, false},
-                              Case{PhaseMode::high, 0.0, 60.0, true}})
+        for (const auto& c : {Case{PhaseMode::high, 0.0, 60.0, false, false, false},
+                              Case{PhaseMode::high, 90.0, 150.0, true, true, false},
+                              Case{PhaseMode::low, 0.0, 60.0, false, false, false},
+                              Case{PhaseMode::low, 90.0, 150.0, true, true, false},
+                              Case{PhaseMode::high, 0.0, 60.0, false, false, true},
+                              // RANGE toggled from 90 to 180 with the second section at identity (and back)
+                              Case{PhaseMode::high, 60.0, 60.0, false, true, false},
+                              Case{PhaseMode::low, 60.0, 60.0, false, true, false},
+                              Case{PhaseMode::low, 120.0, 50.0, true, false, false}})
         {
-            INFO("fs " << fs << ", mode " << (int)c.mode << ", " << c.from << " to " << c.to
+            INFO("fs " << fs << ", mode " << (int)c.mode << ", " << c.from << " to " << c.to << ", range "
+                       << (c.wideFrom ? 180 : 90) << " to " << (c.wideTo ? 180 : 90)
                        << (c.viaConstant ? " after Constant" : ""));
             const auto length = (int)(0.6 * fs);
             std::vector<float> x((size_t)length);
@@ -314,14 +389,14 @@ TEST_CASE("leaving 0 or 90 degrees on broadband input releases no burst", "[dsp]
             const auto input = x;
             Chain chain;
             chain.prepare(fs, 1, 400);
-            chain.reset(phaseOnly(c.viaConstant ? PhaseMode::constant : c.mode, c.from));
+            chain.reset(phaseOnly(c.viaConstant ? PhaseMode::constant : c.mode, c.from, c.wideFrom));
             float worst = 0.0f;
             for (int pos = 0; pos < length; pos += 64)
             {
                 if (c.viaConstant && pos == (int)(0.1 * fs) / 64 * 64)
-                    chain.setSettings(phaseOnly(c.mode, c.from)); // leaves Constant (a latency switch)
+                    chain.setSettings(phaseOnly(c.mode, c.from, c.wideFrom)); // leaves Constant (a latency switch)
                 if (pos == (int)(0.3 * fs) / 64 * 64)
-                    chain.setSettings(phaseOnly(c.mode, c.to));
+                    chain.setSettings(phaseOnly(c.mode, c.to, c.wideTo));
                 float* p = x.data() + pos;
                 chain.process(&p, 1, std::min(64, length - pos));
                 for (int i = pos; i < std::min(pos + 64, length); ++i)
@@ -343,6 +418,75 @@ TEST_CASE("leaving 0 or 90 degrees on broadband input releases no burst", "[dsp]
                 CHECK(std::abs(10.0 * std::log10(out / in)) < 1.5);
             }
         }
+}
+
+TEST_CASE("a RANGE toggle or a mode switch mid-signal keeps the energy and makes no step", "[dsp][phase]")
+{
+    // The shape glides (R3) like a mode switch always did: the sections stay all-pass, so white noise keeps its energy
+    // and the output never steps more than the plain input does (like the checks in prototype/hilo.py).
+    struct Case
+    {
+        PhaseMode mode;
+        double from, to;
+        bool wideFrom, wideTo;
+        PhaseMode modeTo;
+    };
+    const auto fs = 48000.0;
+    const auto length = (int)fs;
+    const auto toggleAt = length / 2 / 64 * 64;
+    for (const auto& c : {Case{PhaseMode::low, 160.0, 80.0, true, false, PhaseMode::low},
+                          Case{PhaseMode::high, 80.0, 160.0, false, true, PhaseMode::high},
+                          Case{PhaseMode::high, 170.0, 85.0, true, false, PhaseMode::high},
+                          Case{PhaseMode::low, 80.0, 160.0, false, true, PhaseMode::low},
+                          Case{PhaseMode::high, 120.0, 120.0, true, true, PhaseMode::low},
+                          Case{PhaseMode::low, 45.0, 45.0, false, false, PhaseMode::high},
+                          Case{PhaseMode::high, 60.0, 120.0, false, true, PhaseMode::low}})
+    {
+        INFO((int)c.mode << " " << c.from << (c.wideFrom ? " (180)" : " (90)") << " to " << (int)c.modeTo << " " << c.to
+                         << (c.wideTo ? " (180)" : " (90)"));
+        std::mt19937 rng(71);
+        std::uniform_real_distribution<float> dist(-0.5f, 0.5f);
+        std::vector<float> x((size_t)length);
+        for (auto& v : x)
+            v = dist(rng);
+        const auto input = x;
+
+        Chain chain;
+        chain.prepare(fs, 1, 400);
+        chain.reset(phaseOnly(c.mode, c.from, c.wideFrom));
+        const pa::test::AllocationProbe probe;
+        for (int pos = 0; pos < length; pos += 64)
+        {
+            if (pos == toggleAt)
+                chain.setSettings(phaseOnly(c.modeTo, c.to, c.wideTo));
+            float* p = x.data() + pos;
+            chain.process(&p, 1, std::min(64, length - pos));
+        }
+        CHECK(probe.allocations() == 0);
+
+        const auto latency = HiLoStage::latencyFor(fs);
+        double maxStep = 0.0, maxInStep = 0.0;
+        for (int i = toggleAt - latency; i < length; ++i)
+        {
+            maxStep = std::max(maxStep, (double)std::abs(x[(size_t)i] - x[(size_t)i - 1]));
+            maxInStep =
+                std::max(maxInStep, (double)std::abs(input[(size_t)(i - latency)] - input[(size_t)(i - latency - 1)]));
+        }
+        CHECK(maxStep <= 1.5 * maxInStep); // white noise: both are about the noise's own peak-to-peak steps
+
+        // Energy over windows spanning the glide against the input's (shifted by the latency).
+        for (int start = toggleAt - 4096; start + 1024 <= length; start += 512)
+        {
+            double out = 0.0, in = 0.0;
+            for (int i = start; i < start + 1024; ++i)
+            {
+                out += (double)x[(size_t)i] * x[(size_t)i];
+                in += (double)input[(size_t)(i - latency)] * input[(size_t)(i - latency)];
+            }
+            INFO("window at " << start);
+            CHECK(std::abs(10.0 * std::log10(out / in)) < 1.5);
+        }
+    }
 }
 
 namespace

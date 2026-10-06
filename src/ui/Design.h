@@ -6,7 +6,7 @@
 // "ui/full example.png", in the same 1954x1224 design space as Layout.h.
 namespace pa::design
 {
-// The reference editor size (uiScale 1) is half the design space; resizable from 75% to 200% of it, opening at 80%
+// The reference editor size (uiScale 1) is half the design space; resizable from 60% to 200% of it, opening at 80%
 // (PhaseAlignProcessor::defaultUiScale; IMPLEMENTATION_PLAN 4.2).
 inline constexpr int defaultWidth = 977;
 inline constexpr int defaultHeight = 612;

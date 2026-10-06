@@ -49,7 +49,7 @@ void Readout::paint(juce::Graphics& g)
                     const auto digitFont = readoutFont(assets, design::readoutDigitHeight * s);
                     // A degree sign sits at the top of the digits, like the panel's printed scale; units sit on the
                     // baseline.
-                    const auto isDegree = suffix == juce::String::fromUTF8("\xc2\xb0");
+                    const auto isDegree = suffix.startsWith(juce::String::fromUTF8("\xc2\xb0")); // "°" or "°*"
                     const auto suffixCap = isDegree ? design::readoutDegreeCapHeight : design::readoutSuffixCapHeight;
                     const auto suffixFont = labelFont(suffixCap * s);
                     const auto baseline = r.getCentreY() + 0.5f * design::readoutDigitHeight * s;

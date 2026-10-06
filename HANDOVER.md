@@ -46,11 +46,14 @@ git history, before f1b4c30). Read CLAUDE.md first; plan sections are IMPLEMENTA
 
 ## Next: needs no input from the user
 
-1. **After the next push** (the user's call): read CI's numbers for Windows and Linux into plan 2.6 (Constant with
-   PFFFT, the oversampled Hi/Lo) and re-tune `ConstantRotator::blockSizesFor` for x86 if CI's convolver benchmark says
-   so. Check that MSVC vectorises the convolver's register-blocked loops (head, multiply-add, fractional kernel); if not,
-   move them onto `src/dsp/Simd.h` as the halfbands did. Once Windows/Linux pluginval has passed, drop its
-   `continue-on-error`.
+1. **Windows Constant is over budget (CI run 37420074764; user, 2026-10-06: do this very last).** CI's numbers are in
+   plan 2.6 L: Windows Constant 155-214 ns against the 150 budget (macOS and Linux are within it); Windows Hi/Lo is
+   over 50 ns at 44.1 and 48 kHz (44.1 kHz accepted; the 48 kHz fractional-delay 91.5 ns looks like noise but isn't
+   covered by the acceptance). The Windows convolver costs 3-4x Linux's against 2-3x for the `Simd.h` code, which fits
+   MSVC not vectorising its float reductions. Move the convolver's head, multiply-add and fractional-kernel loops onto
+   `src/dsp/Simd.h` and measure on a Windows runner; fallback: 128/512 blocks below 80 kHz behind `_M_X64` (about 52 ns
+   off 193). `blockSizesFor` was left alone (Linux within noise; the M1 prefers the current layout). pluginval passes
+   on Windows and Linux at strictness 10, and `continue-on-error` is gone from that CI step.
 2. **Optional CPU:** the chain adds about 6 ns around the Hi/Lo stage that it didn't before (the delayed dry path, and
    more: plan 2.6 J), and Hi/Lo kept warm in Constant costs about 13 ns there. Neither is over budget.
 
@@ -65,6 +68,8 @@ git history, before f1b4c30). Read CLAUDE.md first; plan sections are IMPLEMENTA
   Live and Reaper.
 - **Listening:** M2 in a DAW, P2 (is true rotation useful on real material), P3 fade tuning (`prototype/out/p3/`).
 - **Real multi-mic stems.**
-- **Design decisions:** what RANGE does in the DSP; extending Hi/Lo below their lowest corners; the meter views; the
-  dimming alpha; the minimum editor size; ANALYSE (dead last).
+- **The RANGE redesign (branch `hilo-range-modes`):** listen to `prototype/out/range/` (current vs new, 180 range
+  only; the 90 range is identical), then merge. Pending after that: the README/plan already describe it.
+- **Design decisions:** the meter views (to discuss, "last"); ANALYSE (dead last). Decided 2026-10-06: dimming alpha
+  0.4, minimum editor size 60% (586 px), RANGE/Hi-Lo as above, no extension below the lowest corners.
 - AU in pluginval locally needs the AU installed in `/Library/Audio/Plug-Ins/Components`.

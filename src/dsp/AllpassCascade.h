@@ -8,13 +8,15 @@
 #include <cmath>
 #include <functional>
 
-// Hi/Lo phase modes (IMPLEMENTATION_PLAN 2.3): two first-order all-pass sections in series, double state, the
-// knob angle smoothed linearly over smoothMs and mapped to the sections' k (PhaseMapping.h). Switching Hi <-> Lo glides
-// log k from the old mode's mapping to the new one's over glideMs, so the signal stays all-pass throughout (R3);
-// switching back during a glide reverses it from where it is. Reference: prototype/hilo.py (HiLo), golden-tested.
+// Hi/Lo phase modes (IMPLEMENTATION_PLAN 2.3): two first-order all-pass sections in series, double state. The knob's
+// panel angle and the range (90 or 180) set the target of phi, section 1's angle, which is smoothed linearly over
+// smoothMs and mapped to the sections' k by the current shape, (mode, range) (PhaseMapping.h). Changing the shape (mode
+// or range) glides log k from the old shape's mapping to the new one's over glideMs, so the signal stays all-pass
+// throughout (R3); switching back during a glide reverses it from where it is. Reference: prototype/hilo.py (HiLo),
+// golden-tested.
 //
 // Coefficients are computed on a fixed grid of `cell` samples counted from reset(), so the output doesn't
-// depend on the host's block sizes: at the start of each cell the angle and glide move on by one cell, and each
+// depend on the host's block sizes: at the start of each cell phi and the glide move on by one cell, and each
 // section's G is interpolated linearly per sample from its value at the old angle to its value at the new one (every G
 // in (0, 1] is an all-pass, so the path stays all-pass). Without the interpolation, a section whose corner sweeps down
 // from near Nyquist (just past 0 and 90 degrees) would step and click. While the angle is static and no glide is
@@ -36,11 +38,7 @@ class AllpassCascade
     static constexpr int defaultCell = 32;
     static constexpr double smoothMs = 30.0, glideMs = 30.0;
 
-    enum class Mode
-    {
-        hi,
-        lo
-    };
+    using Mode = mapping::Mode;
 
     // cellLength: the coefficient grid in samples (32; 32 M when run at M times a session rate, so the grid keeps its
     // length in time).
@@ -50,14 +48,14 @@ class AllpassCascade
         cell = std::max(1, cellLength);
         smoothSamples = std::max(1.0, std::round(smoothMs * 1.0e-3 * sampleRate));
         glideSamples = std::max(1.0, std::round(glideMs * 1.0e-3 * sampleRate));
-        reset(Mode::hi, 0.0);
+        reset(Mode::hi, false, 0.0);
     }
 
-    // Jumps to the mode and angle, clears the state.
-    void reset(Mode m, double thetaDegrees)
+    // Jumps to the shape and angle, clears the state.
+    void reset(Mode m, bool wide, double thetaDegrees)
     {
-        mode = previousMode = m;
-        theta = target = thetaDegrees;
+        shape = previousShape = {m, wide};
+        phi = target = mapping::knobAngle(thetaDegrees, wide);
         step = 0.0;
         glide = 1.0;
         untilUpdate = 0;
@@ -66,45 +64,38 @@ class AllpassCascade
         stale = true;
     }
 
-    // Jumps to the mode with no glide, keeping the state: for a switch made while the output is silent.
-    void jumpToMode(Mode m)
+    // The panel angle (0 to 90, or 0 to 180 when wide) and the shape. A new target for phi restarts its linear ramp
+    // (a RANGE toggle at the same knob position keeps phi, so it only glides the shape); a new shape starts the glide,
+    // or reverses it when it is the one just left.
+    void set(double thetaDegrees, Mode m, bool wide)
     {
-        if (m != mode || glide < 1.0)
-            stale = true;
-        mode = previousMode = m;
-        glide = 1.0;
-    }
-
-    void setTarget(double thetaDegrees)
-    {
-        if (! std::equal_to<double>()(thetaDegrees, target)) // exact: any new value restarts the ramp
+        const auto newPhi = mapping::knobAngle(thetaDegrees, wide);
+        if (! std::equal_to<double>()(newPhi, target)) // exact: any new value restarts the ramp
         {
-            target = thetaDegrees;
-            step = (target - theta) / smoothSamples; // a linear ramp of fixed length
+            target = newPhi;
+            step = (target - phi) / smoothSamples; // a linear ramp of fixed length
         }
-    }
-
-    void setMode(Mode m)
-    {
-        if (m == mode)
+        const mapping::Shape next{m, wide};
+        if (next == shape)
             return;
-        if (glide < 1.0 && m == previousMode) // back again mid-glide: reverse from where it is
+        if (glide < 1.0 && next == previousShape) // back again mid-glide: reverse from where it is
         {
-            std::swap(mode, previousMode);
+            std::swap(shape, previousShape);
             glide = 1.0 - glide;
         }
         else
         {
-            previousMode = mode;
-            mode = m;
+            previousShape = shape;
+            shape = next;
             glide = 0.0;
         }
         stale = true;
     }
 
-    bool isSettled() const { return std::equal_to<double>()(theta, target) && glide >= 1.0; }
+    bool isSettled() const { return std::equal_to<double>()(phi, target) && glide >= 1.0; }
 
-    double getTheta() const { return theta; }
+    // Section 1's angle now (the ramped phi).
+    double getPhi() const { return phi; }
 
     void process(float* const* io, int numChannels, int n)
     {
@@ -226,8 +217,6 @@ class AllpassCascade
         return i;
     }
 
-    static const mapping::ModeShape& shape(Mode m) { return m == Mode::hi ? mapping::hi : mapping::lo; }
-
     // A new cell: from the coefficients now (g0) to those after one cell's move of the angle and glide (g1).
     void startCell()
     {
@@ -250,10 +239,12 @@ class AllpassCascade
 
     void computeG(double* g) const
     {
-        auto [k1, k2] = mapping::kPair(shape(mode), theta, sampleRate);
+        const auto [a1, a2] = mapping::angles(shape, phi);
+        auto [k1, k2] = mapping::kAngles(shape, a1, a2, sampleRate);
         if (glide < 1.0)
         {
-            const auto [o1, o2] = mapping::kPair(shape(previousMode), theta, sampleRate);
+            const auto [p1, p2] = mapping::angles(previousShape, phi);
+            const auto [o1, o2] = mapping::kAngles(previousShape, p1, p2, sampleRate);
             k1 = std::exp((1.0 - glide) * std::log(o1) + glide * std::log(k1));
             k2 = std::exp((1.0 - glide) * std::log(o2) + glide * std::log(k2));
         }
@@ -271,22 +262,22 @@ class AllpassCascade
                     v = 0.0;
     }
 
-    // The angle ramp and the glide move on by one cell.
+    // The ramp of phi and the glide move on by one cell.
     void advance()
     {
-        if (! std::equal_to<double>()(theta, target))
+        if (! std::equal_to<double>()(phi, target))
         {
-            theta += step * cell;
-            if ((step > 0.0) == (theta >= target))
-                theta = target;
+            phi += step * cell;
+            if ((step > 0.0) == (phi >= target))
+                phi = target;
         }
         if (glide < 1.0)
             glide = std::min(1.0, glide + cell / glideSamples);
     }
 
     double sampleRate = 48000.0, smoothSamples = 1.0, glideSamples = 1.0;
-    Mode mode = Mode::hi, previousMode = Mode::hi;
-    double theta = 0.0, target = 0.0, step = 0.0, glide = 1.0;
+    mapping::Shape shape, previousShape;
+    double phi = 0.0, target = 0.0, step = 0.0, glide = 1.0;
     int cell = defaultCell, untilUpdate = 0;
     bool stale = true, interpolating = false;
     double g0[2] = {1.0, 1.0}, g1[2] = {1.0, 1.0};
