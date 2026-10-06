@@ -99,10 +99,9 @@ jobs:
           pluginval.app/Contents/MacOS/pluginval --strictness-level 10 --validate-in-process \
             --timeout-ms 300000 --output-dir pluginval-logs "build/PhaseAlign_artefacts/Release/VST3/Phase Align.vst3"
 
-      - name: Validate VST3 (pluginval, Windows and Linux; information only)
-        # Not yet seen green on these runners, so it can't fail the build; drop continue-on-error once it has passed.
+      - name: Validate VST3 (pluginval, Windows and Linux)
+        # Green on both since run 37420074764 (strictness 10), so it now fails the build.
         if: runner.os != 'macOS'
-        continue-on-error: true
         shell: bash
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then zip=pluginval_Windows.zip; bin=./pluginval.exe; else zip=pluginval_Linux.zip; bin=./pluginval; fi
@@ -115,7 +114,7 @@ jobs:
             "build/PhaseAlign_artefacts/Release/VST3/Phase Align.vst3"
 
       - name: Upload pluginval logs
-        # On failure; on Windows and Linux always, while their pluginval step is information only.
+        # On failure, and always on Windows and Linux (their logs are small).
         if: failure() || (always() && runner.os != 'macOS')
         uses: actions/upload-artifact@v4
         with:
