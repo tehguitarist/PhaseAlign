@@ -119,8 +119,11 @@ job, better.
       and phase knobs preview on the frozen picture (`dsp/PhaseResponse.h`). 2026-10-07, later (branch `phase-preview`,
       not merged): the phase knob previews too (R20 step 2); only the active view's work runs (R21: the attack features
       cost ~90% of the old 2.8% of a core and now run only in TIME OFFSET); ALIGNMENT captures a hit and renders it through
-      the knobs (R22: `meter/ScopeBuffer` scan, `meter/HitCapture`; CAPTURE toggle, default on). Pending: the user's DAW
-      verdict.
+      the knobs (R22: `meter/ScopeBuffer` scan, `meter/HitCapture`; CAPTURE toggle, default on). All merged to master
+      (2026-10-07). **Later the same day, branch `meter-v3` (R23):** three views only (BANDS default, VECTORSCOPE with a
+      STEREO source on stereo tracks, ALIGNMENT with - and + zoom buttons), blue input, slower SLOW and eased bars. The
+      analysis side (curves, PHAT and attack lags) is kept for ANALYSE and is unused by the views; **clean up what ANALYSE
+      doesn't use afterwards (user)**. Pending: the user's DAW verdict.
    - The stem analysis and auto-suggest (ANALYSE) work is dead last. Real multi-mic stem pairs are still wanted for the
      P2/P3 listening.
    - Installing (when the user asks): `/Library/Audio/Plug-Ins/{Components,VST3}`, not ~/Library.

@@ -102,10 +102,10 @@ void process(PhaseAlignProcessor& p, juce::AudioBuffer<float>& buffer, int block
 // Empties the meter's FIFO, as the meter screen does, so it never fills.
 void drain(PhaseAlignProcessor& p)
 {
-    static std::vector<float> streams[3];
+    static std::vector<float> streams[pa::meter::MeterCapture::numStreams];
     for (auto& s : streams)
         s.resize((size_t)pa::meter::MeterCapture::capacity);
-    float* dest[] = {streams[0].data(), streams[1].data(), streams[2].data()};
+    float* dest[] = {streams[0].data(), streams[1].data(), streams[2].data(), streams[3].data(), streams[4].data()};
     p.getMeterCapture().pull(dest, pa::meter::MeterCapture::capacity);
 }
 

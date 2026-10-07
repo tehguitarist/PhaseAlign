@@ -306,10 +306,10 @@ TEST_CASE("M4: a delayed copy as the sidechain reads +1 once the delay knob alig
 
         pa::meter::CorrelationAnalyser analyser;
         analyser.prepare(fs);
-        std::vector<float> streams[3];
+        std::vector<float> streams[pa::meter::MeterCapture::numStreams];
         for (auto& s : streams)
             s.resize((size_t)pa::meter::MeterCapture::capacity);
-        float* dest[] = {streams[0].data(), streams[1].data(), streams[2].data()};
+        float* dest[] = {streams[0].data(), streams[1].data(), streams[2].data(), streams[3].data(), streams[4].data()};
 
         std::mt19937 rng(9);
         std::normal_distribution<float> dist(0.0f, 0.2f);
@@ -347,7 +347,7 @@ TEST_CASE("M4: a delayed copy as the sidechain reads +1 once the delay knob alig
         CHECK(analyser.lagPeakProcessed().lagMs == Approx(1000.0 * d / fs).margin(0.01)); // knob at 0: no net shift
 
         setParam(proc, id::delayMs, (float)(1000.0 * d / fs)); // the delay knob, set to the peak's reading
-        run(3.0);
+        run(8.0); // the slow average (R23) has to forget the 2 s that weren't aligned
         CHECK(analyser.overallProcessed() > 0.999f);
         for (const auto r : analyser.curveProcessed())
             if (! std::isnan(r))

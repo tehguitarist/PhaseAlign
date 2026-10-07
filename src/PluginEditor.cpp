@@ -247,9 +247,9 @@ PhaseAlignEditor::PhaseAlignEditor(PhaseAlignProcessor& p)
 
     // Meter.
     meterButton.setTooltip(
-        juce::String::fromUTF8("Correlation meter on/off: how well this track lines up with the sidechain, per "
-                               "frequency band (+1 in phase, \xe2\x88\x92"
-                               "1 out of phase), as the time offset between them, or as the phase angle. Needs a sidechain input; it "
+        juce::String::fromUTF8("Meter on/off: how well this track lines up with the sidechain, in six bands (+1 in "
+                               "phase, \xe2\x88\x92"
+                               "1 out of phase), as a vectorscope, or as waveforms on top of each other. Needs a sidechain input; it "
                                "only runs while this window is open."));
     meterButton.onClick = [this]
     { uiState.setProperty(PhaseAlignProcessor::UiProps::meterOn, ! meterButton.isLit(), nullptr); };
@@ -257,13 +257,21 @@ PhaseAlignEditor::PhaseAlignEditor(PhaseAlignProcessor& p)
     meterScreen.onViewSelected = [this](pa::ui::MeterScreen::View v)
     {
         uiState.setProperty(PhaseAlignProcessor::UiProps::meterView,
-                            v == pa::ui::MeterScreen::View::time    ? "time"
-                            : v == pa::ui::MeterScreen::View::phase ? "phase"
-                            : v == pa::ui::MeterScreen::View::bands ? "bands"
+                            v == pa::ui::MeterScreen::View::vector  ? "vector"
                             : v == pa::ui::MeterScreen::View::scope ? "scope"
-                                                                    : "frequency",
+                                                                    : "bands",
                             nullptr);
     };
+    meterScreen.onSeriesToggled = [this](pa::ui::MeterScreen::Series series, bool on)
+    {
+        using Series = pa::ui::MeterScreen::Series;
+        uiState.setProperty(series == Series::input    ? PhaseAlignProcessor::UiProps::showInput
+                            : series == Series::output ? PhaseAlignProcessor::UiProps::showOutput
+                                                       : PhaseAlignProcessor::UiProps::showSidechain,
+                            on, nullptr);
+    };
+    meterScreen.onVectorModeSelected = [this](bool stereo)
+    { uiState.setProperty(PhaseAlignProcessor::UiProps::vectorStereo, stereo, nullptr); };
     meterScreen.onCaptureSelected = [this](bool on)
     { uiState.setProperty(PhaseAlignProcessor::UiProps::alignCapture, on, nullptr); };
     meterScreen.onSpeedSelected = [this](pa::ui::MeterScreen::Speed speed)
@@ -352,7 +360,10 @@ void PhaseAlignEditor::valueTreePropertyChanged(juce::ValueTree&, const juce::Id
     }
     else if (property == PhaseAlignProcessor::UiProps::meterOn || property == PhaseAlignProcessor::UiProps::meterView ||
              property == PhaseAlignProcessor::UiProps::meterSpeed ||
-             property == PhaseAlignProcessor::UiProps::alignCapture)
+             property == PhaseAlignProcessor::UiProps::alignCapture ||
+             property == PhaseAlignProcessor::UiProps::vectorStereo ||
+             property == PhaseAlignProcessor::UiProps::showInput || property == PhaseAlignProcessor::UiProps::showOutput ||
+             property == PhaseAlignProcessor::UiProps::showSidechain)
     {
         updateMeter();
     }
@@ -472,15 +483,17 @@ void PhaseAlignEditor::updateMeter()
     const auto on = (bool)uiState.getProperty(PhaseAlignProcessor::UiProps::meterOn);
     meterButton.setLit(on);
     const auto view = uiState.getProperty(PhaseAlignProcessor::UiProps::meterView).toString();
-    meterScreen.setView(view == "time"    ? pa::ui::MeterScreen::View::time
-                        : view == "phase" ? pa::ui::MeterScreen::View::phase
-                        : view == "bands" ? pa::ui::MeterScreen::View::bands
+    meterScreen.setView(view == "vector"  ? pa::ui::MeterScreen::View::vector
                         : view == "scope" ? pa::ui::MeterScreen::View::scope
-                                          : pa::ui::MeterScreen::View::frequency);
+                                          : pa::ui::MeterScreen::View::bands);
     meterScreen.setSpeed(uiState.getProperty(PhaseAlignProcessor::UiProps::meterSpeed).toString() == "fast"
                              ? pa::ui::MeterScreen::Speed::fast
                              : pa::ui::MeterScreen::Speed::slow);
     meterScreen.setCaptureMode((bool)uiState.getProperty(PhaseAlignProcessor::UiProps::alignCapture));
+    meterScreen.setVectorStereo((bool)uiState.getProperty(PhaseAlignProcessor::UiProps::vectorStereo));
+    meterScreen.setShown(pa::ui::MeterScreen::Series::input, (bool)uiState.getProperty(PhaseAlignProcessor::UiProps::showInput));
+    meterScreen.setShown(pa::ui::MeterScreen::Series::output, (bool)uiState.getProperty(PhaseAlignProcessor::UiProps::showOutput));
+    meterScreen.setShown(pa::ui::MeterScreen::Series::sidechain, (bool)uiState.getProperty(PhaseAlignProcessor::UiProps::showSidechain));
     meterScreen.setMeterOn(on);
 }
 

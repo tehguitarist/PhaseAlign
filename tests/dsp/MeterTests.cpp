@@ -125,7 +125,7 @@ TEST_CASE("an inverted sidechain reads -1 and peaks at 0 ms, negative", "[meter]
 TEST_CASE("signals below the gate are not measured; sidechain silence is timed", "[meter]")
 {
     const auto fs = 48000.0;
-    const auto length = (int)(2.0 * fs);
+    const auto length = (int)(6.0 * fs); // the slow average needs a few seconds to fill again
     const auto loud = noise(length, 3);
     const auto quiet = noise(length, 4, 3.0e-5f); // about -90 dBFS
     const std::vector<float> silence((size_t)length, 0.0f);
@@ -145,29 +145,25 @@ TEST_CASE("signals below the gate are not measured; sidechain silence is timed",
     CHECK(a.sidechainSilentSeconds() > 1.5);
 }
 
-TEST_CASE("averaging settles within about a second", "[meter]")
+TEST_CASE("averaging settles within about two seconds on slow", "[meter]")
 {
-    // P4: tau = max(0.3 s, 8 cycles) takes r from +1 to below -0.8 in about 0.75 s after a polarity step.
+    // tau = max(0.75 s, 12 cycles) takes r from +1 to below -0.8 in about 1.7 s after a polarity step (R23: it was
+    // 0.75 s with P4's 0.3 s; slower and steadier at the user's request).
     const auto fs = 48000.0;
-    const auto source = noise((int)(4.0 * fs), 5);
+    const auto source = noise((int)(9.0 * fs), 5);
     auto flipped = source;
-    for (size_t i = (size_t)(2.0 * fs); i < flipped.size(); ++i)
+    for (size_t i = (size_t)(5.0 * fs); i < flipped.size(); ++i)
         flipped[i] = -flipped[i];
 
     CorrelationAnalyser a;
     a.prepare(fs);
-    feed(a, std::vector<float>(source.begin(), source.begin() + (long)(2.0 * fs)),
-         std::vector<float>(source.begin(), source.begin() + (long)(2.0 * fs)),
-         std::vector<float>(flipped.begin(), flipped.begin() + (long)(2.0 * fs)));
+    const auto part = [&](const std::vector<float>& v, double from, double to)
+    { return std::vector<float>(v.begin() + (long)(from * fs), v.begin() + (long)(to * fs)); };
+    feed(a, part(source, 0.0, 5.0), part(source, 0.0, 5.0), part(flipped, 0.0, 5.0));
     CHECK(a.overallProcessed() > 0.99f);
-
-    const auto rest = [&](double from, double to)
-    { return std::vector<float>(source.begin() + (long)(from * fs), source.begin() + (long)(to * fs)); };
-    const auto restFlipped = [&](double from, double to)
-    { return std::vector<float>(flipped.begin() + (long)(from * fs), flipped.begin() + (long)(to * fs)); };
-    feed(a, rest(2.0, 2.4), rest(2.0, 2.4), restFlipped(2.0, 2.4));
+    feed(a, part(source, 5.0, 5.8), part(source, 5.0, 5.8), part(flipped, 5.0, 5.8));
     CHECK(a.overallProcessed() > -0.8f); // not yet
-    feed(a, rest(2.4, 3.2), rest(2.4, 3.2), restFlipped(2.4, 3.2));
+    feed(a, part(source, 5.8, 7.6), part(source, 5.8, 7.6), part(flipped, 5.8, 7.6));
     CHECK(a.overallProcessed() < -0.8f);
 }
 
@@ -193,8 +189,8 @@ TEST_CASE("capture: nothing is queued while inactive; streams stay aligned when 
     CHECK(probe.allocations() == 0);
     CHECK(c.getNumReady() == MeterCapture::capacity - 1);
 
-    std::vector<float> a(64), b(64), s(64);
-    float* dest[] = {a.data(), b.data(), s.data()};
+    std::vector<float> a(64), b(64), s(64), side1(64), side2(64);
+    float* dest[] = {a.data(), b.data(), s.data(), side1.data(), side2.data()};
     REQUIRE(c.pull(dest, 64) == 64);
     for (int i = 0; i < 64; ++i)
     {
@@ -231,8 +227,8 @@ TEST_CASE("capture delays the input and sidechain by the latency, so they line u
     }
     CHECK(probe.allocations() == 0);
 
-    std::vector<float> a(4000), b(4000), s(4000);
-    float* dest[] = {a.data(), b.data(), s.data()};
+    std::vector<float> a(4000), b(4000), s(4000), side1(4000), side2(4000);
+    float* dest[] = {a.data(), b.data(), s.data(), side1.data(), side2.data()};
     REQUIRE(c.pull(dest, 4000) == 4000);
     for (size_t i = 0; i < 4000; ++i)
     {
@@ -1171,5 +1167,45 @@ TEST_CASE("hit detector: scanning back over what is in the buffer finds the late
         CHECK(onset.index + (long long)(0.24 * fs) <= b.total());                // with the audio after it
         // And scanning carries on from there: the next hit is found as it completes.
         b.push(in.data(), in.data(), sc.data(), 100);
+    }
+}
+
+TEST_CASE("capture: the side streams are only filled when given, and are aligned like the input", "[meter]")
+{
+    MeterCapture c;
+    c.prepareAlignment(40, 32);
+    c.setActive(true);
+    CHECK_FALSE(c.wantsSide());
+    c.setWantSide(true);
+    CHECK(c.wantsSide());
+    c.setStereoTrack(true);
+    CHECK(c.isStereoTrack());
+
+    const auto length = 1024;
+    const auto in = noise(length, 61), out = noise(length, 62), sc = noise(length, 63), inSide = noise(length, 64),
+               outSide = noise(length, 65);
+    const auto latency = 25;
+    for (int pos = 0; pos < length; pos += 32)
+        c.push(in.data() + pos, out.data() + pos, sc.data() + pos, 32, latency, inSide.data() + pos, outSide.data() + pos);
+
+    std::vector<float> s0(length), s1(length), s2(length), s3(length), s4(length);
+    float* dest[] = {s0.data(), s1.data(), s2.data(), s3.data(), s4.data()};
+    REQUIRE(c.pull(dest, length) == length);
+    for (int i = latency; i < length; ++i)
+    {
+        CHECK(s0[(size_t)i] == in[(size_t)(i - latency)]);       // input and its side: delayed by the latency
+        CHECK(s3[(size_t)i] == inSide[(size_t)(i - latency)]);
+        CHECK(s4[(size_t)i] == outSide[(size_t)i]);              // the output side is not
+        CHECK(s1[(size_t)i] == out[(size_t)i]);
+    }
+
+    // Not given: zeros.
+    for (int pos = 0; pos < length; pos += 32)
+        c.push(in.data() + pos, out.data() + pos, sc.data() + pos, 32, latency);
+    REQUIRE(c.pull(dest, length) == length);
+    for (int i = 0; i < length; ++i)
+    {
+        CHECK(s3[(size_t)i] == 0.0f);
+        CHECK(s4[(size_t)i] == 0.0f);
     }
 }

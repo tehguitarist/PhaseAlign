@@ -25,7 +25,9 @@ class HitCapture
     {
         input = 0,
         output = 1, // the rendering of the input through the knobs' settings
-        sidechain = 2
+        sidechain = 2,
+        inputSide = 3,  // (L - R) / 2 of the input, if captured (the vectorscope's STEREO mode)
+        outputSide = 4  // and its rendering
     };
 
     using PhaseResponse = std::function<std::complex<double>(double hz)>;
@@ -42,6 +44,7 @@ class HitCapture
         for (auto& r : raw)
             r.clear();
         rendered.clear();
+        renderedSide.clear();
     }
 
     // Copies the window around `onset` out of the buffer.
@@ -51,13 +54,30 @@ class HitCapture
         first = onsetIndex - (long long)(preSeconds * fs);
         const auto length = (int)((preSeconds + postSeconds) * fs);
         onset = onsetIndex;
-        for (int s : {input, sidechain})
+        for (int s : {input, sidechain, inputSide})
         {
             raw[s].resize((size_t)length);
             for (int i = 0; i < length; ++i)
                 raw[s][(size_t)i] = buffer.at(s, first + i);
         }
         rendered = raw[input]; // until render() is called
+        renderedSide = raw[inputSide];
+    }
+
+    // Copies `length` samples of input and sidechain from `firstIndex` on (the vectorscope's held window).
+    void captureRange(const ScopeBuffer& buffer, long long firstIndex, int length)
+    {
+        fs = buffer.getSampleRate();
+        first = firstIndex;
+        onset = firstIndex;
+        for (int s : {input, sidechain, inputSide})
+        {
+            raw[s].resize((size_t)length);
+            for (int i = 0; i < length; ++i)
+                raw[s][(size_t)i] = buffer.at(s, first + i);
+        }
+        rendered = raw[input];
+        renderedSide = raw[inputSide];
     }
 
     long long onsetIndex() const { return onset; }
@@ -70,7 +90,31 @@ class HitCapture
     {
         if (! valid())
             return;
-        const auto n = (int)raw[input].size();
+        renderStream(raw[input], rendered, settings);
+        renderStream(raw[inputSide], renderedSide, settings); // the same linear stages act on the side signal
+    }
+
+    // The sample at an absolute index (0 outside the window).
+    float at(int stream, long long index) const
+    {
+        const auto i = index - first;
+        const auto& v = stream == output ? rendered : stream == outputSide ? renderedSide : raw[stream];
+        return i < 0 || i >= (long long)v.size() ? 0.0f : v[(size_t)i];
+    }
+
+    float interpolated(int stream, double index) const
+    {
+        const auto i = (long long)std::floor(index);
+        const auto f = (float)(index - (double)i);
+        return at(stream, i) * (1.0f - f) + at(stream, i + 1) * f;
+    }
+
+  private:
+    double fs = 0.0;
+    // The input's spectrum times the settings' response, back to the time domain.
+    void renderStream(const std::vector<float>& source, std::vector<float>& result, const Settings& settings)
+    {
+        const auto n = (int)source.size();
         auto size = 1;
         while (size < 2 * n + (int)(0.02 * fs))
             size *= 2;
@@ -80,7 +124,7 @@ class HitCapture
             fftSize = size;
         }
         work.assign((size_t)(2 * size), 0.0f);
-        std::copy(raw[input].begin(), raw[input].end(), work.begin());
+        std::copy(source.begin(), source.end(), work.begin());
         fft->performRealOnlyForwardTransform(work.data(), true);
         const auto pi = 3.14159265358979323846;
         for (int k = 0; k <= size / 2; ++k)
@@ -99,28 +143,11 @@ class HitCapture
             work[(size_t)(2 * k + 1)] = (float)y.imag();
         }
         fft->performRealOnlyInverseTransform(work.data());
-        rendered.assign(work.begin(), work.begin() + n);
+        result.assign(work.begin(), work.begin() + n);
     }
 
-    // The sample at an absolute index (0 outside the window).
-    float at(int stream, long long index) const
-    {
-        const auto i = index - first;
-        const auto& v = stream == output ? rendered : raw[stream];
-        return i < 0 || i >= (long long)v.size() ? 0.0f : v[(size_t)i];
-    }
-
-    float interpolated(int stream, double index) const
-    {
-        const auto i = (long long)std::floor(index);
-        const auto f = (float)(index - (double)i);
-        return at(stream, i) * (1.0f - f) + at(stream, i + 1) * f;
-    }
-
-  private:
-    double fs = 0.0;
     long long first = 0, onset = 0;
-    std::vector<float> raw[3], rendered, work;
+    std::vector<float> raw[5], rendered, renderedSide, work;
     std::unique_ptr<juce::dsp::FFT> fft;
     int fftSize = 0;
 };

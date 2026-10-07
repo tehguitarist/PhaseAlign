@@ -376,6 +376,7 @@ TEST_CASE("meter on screen: reads +1 when aligned, and stops when off", "[.][des
     size_t h = 0;
     int lag = d;
     float sidechainGain = 1.0f;
+    bool stereoWide = false;
     bool hits = false; // true: a drum-like hit every 0.3 s (a click and a decaying 120 Hz body) instead of noise
     long long counter = 0;
     // Roughly real time: a block of audio, then about a block's worth of message loop.
@@ -398,7 +399,8 @@ TEST_CASE("meter on screen: reads +1 when aligned, and stops when off", "[.][des
                 const auto late = history[(h + history.size() - (size_t)lag) % history.size()] * sidechainGain;
                 h = (h + 1) % history.size();
                 b.setSample(0, i, x);
-                b.setSample(1, i, x);
+                // A wide stereo track: the right is half the left plus other noise (L/R correlation about 0.71).
+                b.setSample(1, i, stereoWide ? 0.5f * x + 0.5f * (rng.nextFloat() - 0.5f) * 0.6f : x);
                 b.setSample(2, i, late);
                 b.setSample(3, i, late);
             }
@@ -407,55 +409,82 @@ TEST_CASE("meter on screen: reads +1 when aligned, and stops when off", "[.][des
         }
     };
 
-    play(2.5);
+    // BANDS, the default view, not yet aligned: the pair reads about 0 (a 1 ms delay averages away); aligned, +1.
+    play(5.0);
+    CHECK(screen.getView() == pa::ui::MeterScreen::View::bands);
     CHECK(screen.getState() == pa::ui::MeterScreen::State::metering);
     CHECK(screen.getAnalyser().overallProcessed() < 0.5f);
-    snapshot("meter_frequency_unaligned.png");
-    proc.getUiState().setProperty(UiProps::meterView, "time", nullptr);
-    play(0.3);
-    snapshot("meter_time_unaligned.png");
+    snapshot("meter_bands_unaligned.png");
+
+    // The VECTORSCOPE: noise against its 1 ms late copy is a cloud; aligned, a line up and down.
+    proc.getUiState().setProperty(UiProps::meterView, "vector", nullptr);
+    play(0.5);
+    CHECK(screen.getView() == pa::ui::MeterScreen::View::vector);
+    REQUIRE(screen.vectorReading().valid);
+    CHECK(std::abs(screen.vectorReading().outputR) < 0.4f);
+    snapshot("meter_vector_unaligned.png");
 
     setParam(proc, id::delayMs, (float)(1000.0 * d / fs));
-    play(2.5);
-    CHECK(screen.getAnalyser().overallProcessed() > 0.99f);
-    snapshot("meter_time_aligned.png");
-    proc.getUiState().setProperty(UiProps::meterView, "frequency", nullptr);
-    play(0.3);
-    snapshot("meter_frequency_aligned.png");
-
-    // The phase view, HOLD and the delay preview, with the plugin not yet aligned (the delay set to 0).
-    setParam(proc, id::delayMs, 0.0f);
-    proc.getUiState().setProperty(UiProps::meterView, "phase", nullptr);
-    proc.getUiState().setProperty(UiProps::meterSpeed, "fast", nullptr);
-    play(2.0);
-    snapshot("meter_phase_unaligned.png");
+    play(0.8);
+    CHECK(screen.vectorReading().outputR > 0.95f);
+    CHECK(std::abs(screen.vectorReading().inputR) < 0.4f); // the input is still unaligned: the blue cloud
+    snapshot("meter_vector_aligned.png");
+    // Hiding a series from its legend label: the blue input goes, the green output stays.
+    screen.setShown(pa::ui::MeterScreen::Series::input, false);
+    play(0.2);
+    snapshot("meter_vector_input_hidden.png");
+    screen.setShown(pa::ui::MeterScreen::Series::input, true);
     proc.getUiState().setProperty(UiProps::meterView, "bands", nullptr);
-    play(0.3);
-    snapshot("meter_bands_unaligned.png");
-    proc.getUiState().setProperty(UiProps::meterView, "time", nullptr);
-    play(0.3);
+    play(4.0);
+    CHECK(screen.getAnalyser().overallProcessed() > 0.99f);
+    CHECK(screen.shownOverall(true) > 0.95f); // the bar has glided there
+    snapshot("meter_bands_aligned.png");
+
+    // HOLD with the plugin not yet aligned (the delay back at 0): turning the delay shows the result, in every view.
+    setParam(proc, id::delayMs, 0.0f);
+    proc.getUiState().setProperty(UiProps::meterSpeed, "fast", nullptr);
+    play(2.5);
     screen.setHeld(true);
     CHECK(screen.isFrozen());
-    snapshot("meter_time_held.png");
+    snapshot("meter_bands_held.png");
     const auto frozenOverall = screen.getAnalyser().overallUnprocessed();
     play(0.5); // audio carries on; the picture doesn't
     CHECK(screen.getAnalyser().overallUnprocessed() == frozenOverall);
-    screen.setPreviewDelayMs(1000.0 * d / fs);
+    setParam(proc, id::delayMs, (float)(1000.0 * d / fs)); // the knob previews on the frozen picture
+    CHECK(screen.isPreviewing());
     CHECK(screen.getAnalyser().overallProcessed() > 0.99f);
-    snapshot("meter_time_preview.png");
-    proc.getUiState().setProperty(UiProps::meterView, "frequency", nullptr);
-    mm->runDispatchLoopUntil(100);
-    snapshot("meter_frequency_preview.png");
-    proc.getUiState().setProperty(UiProps::meterView, "phase", nullptr);
-    mm->runDispatchLoopUntil(100);
-    snapshot("meter_phase_preview.png");
-    proc.getUiState().setProperty(UiProps::meterView, "bands", nullptr);
-    mm->runDispatchLoopUntil(100);
+    mm->runDispatchLoopUntil(400); // the bars glide
     snapshot("meter_bands_preview.png");
+    proc.getUiState().setProperty(UiProps::meterView, "vector", nullptr);
+    mm->runDispatchLoopUntil(100);
+    CHECK(screen.vectorReading().outputR > 0.95f); // the frozen window, rendered through the knob
+    snapshot("meter_vector_preview.png");
+    proc.getUiState().setProperty(UiProps::meterView, "bands", nullptr);
     screen.setHeld(false);
     CHECK_FALSE(screen.isPreviewing());
     proc.getUiState().setProperty(UiProps::meterSpeed, "slow", nullptr);
-    setParam(proc, id::delayMs, (float)(1000.0 * d / fs));
+    play(0.5);
+
+    // The VECTORSCOPE's STEREO mode, on a wide stereo track: the track's own left and right.
+    proc.getUiState().setProperty(UiProps::meterView, "vector", nullptr);
+    stereoWide = true;
+    play(0.5);
+    CHECK(capture.isStereoTrack());
+    proc.getUiState().setProperty(UiProps::vectorStereo, true, nullptr);
+    mm->runDispatchLoopUntil(50);
+    CHECK(screen.isVectorStereo());
+    CHECK(capture.wantsSide()); // asked for only now
+    play(1.0);
+    REQUIRE(screen.vectorReading().valid);
+    CHECK(screen.vectorReading().stereo);
+    CHECK(screen.vectorReading().outputR == Approx(0.71f).margin(0.1f));
+    CHECK(screen.vectorReading().inputR == Approx(0.71f).margin(0.1f));
+    snapshot("meter_vector_stereo.png");
+    proc.getUiState().setProperty(UiProps::vectorStereo, false, nullptr);
+    mm->runDispatchLoopUntil(50);
+    CHECK_FALSE(capture.wantsSide()); // and not asked for again
+    stereoWide = false;
+    proc.getUiState().setProperty(UiProps::meterView, "bands", nullptr);
     play(0.5);
 
     // ALIGNMENT with CAPTURE on: a hit train, not yet aligned; the view holds one hit; setting the delay moves its output
@@ -503,16 +532,7 @@ TEST_CASE("meter on screen: reads +1 when aligned, and stops when off", "[.][des
     setParam(proc, id::delayMs, (float)(1000.0 * d / fs));
     screen.setScopeSpanMs(20.0);
     hits = false;
-    proc.getUiState().setProperty(UiProps::meterView, "frequency", nullptr);
-    play(1.0);
-
-    // An offset beyond the knob's reach (4.5 ms) says so in the time view.
-    lag = 216;
-    proc.getUiState().setProperty(UiProps::meterView, "time", nullptr);
-    play(2.5);
-    snapshot("meter_time_out_of_range.png");
-    lag = d;
-    proc.getUiState().setProperty(UiProps::meterView, "frequency", nullptr);
+    proc.getUiState().setProperty(UiProps::meterView, "bands", nullptr);
     play(2.5);
 
     // The panel itself never repaints for the meter.

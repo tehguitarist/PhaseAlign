@@ -58,12 +58,13 @@ sections are IMPLEMENTATION_PLAN.md. Nothing here needs code first: what's left 
 
 ## Next: needs the user (decisions and listening)
 
-1. **The meter views: discussed and built (2026-10-07, plan R17 to R20); the user's verdict in a DAW is outstanding.**
-   FREQUENCY, TIME OFFSET (waveform and ATTACK readings), PHASE, BANDS and ALIGNMENT from a drop-up selector; SLOW/FAST;
-   HOLD (also while the host is stopped); while held, the DELAY, polarity and phase knobs preview on the frozen picture.
-   Still open: the scrub-to-find-a-delay and auto-suggest that belong to ANALYSE (the meter's pieces are ready: the
-   attack and waveform lags, the preview); ATTACK on FAST is less reliable; bleed between mics is out of scope
-   (user); CPU of the new meter work has not been profiled (`tools/meter_profile.py` should be re-run).
+1. **The meter: BANDS (default), VECTORSCOPE (with STEREO on stereo tracks) and ALIGNMENT (plan R17 to R23); the user's verdict in
+   a DAW is outstanding.** SLOW/FAST, HOLD (also while the host is stopped), and while held the DELAY, polarity and phase
+   knobs preview on the frozen picture; ALIGNMENT captures a hit and renders it through the knobs. The FREQUENCY, TIME
+   OFFSET and PHASE views were removed on 2026-10-07 but their analysis (curves, PHAT lag, attack lag; the user's pairs
+   in `captures/` with the hidden tests `[.userpairs]`) stays for ANALYSE. After ANALYSE, clean up whatever it doesn't
+   use (user). The meter's CPU per view is measured in plan R21 (re-run `[.analysercost]` after any change); bleed
+   between mics is out of scope (user).
 2. **Listening.** (a) The 180-range A/B files in `prototype/out/range/` (current vs new; see `report.md` and
    `fr_check.png`; only the RANGE in files differ; nothing sounding wrong means done). (b) M2 in a DAW. (c) P2: is true
    rotation useful on real material. (d) P3 fade tuning (`prototype/out/p3/`). Real multi-mic stems are still wanted.

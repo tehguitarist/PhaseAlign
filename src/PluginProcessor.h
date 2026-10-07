@@ -32,8 +32,12 @@ class PhaseAlignProcessor : public juce::AudioProcessor,
         static inline const juce::Identifier delayUnit{"delayUnit"}; // "ms" / "samples" / "cm"
         static inline const juce::Identifier meterOn{"meterOn"};     // bool
         static inline const juce::Identifier uiScale{"uiScale"};     // 0.6 to 2, 1 = 977x612; opens at 0.8
-        static inline const juce::Identifier meterView{"meterView"}; // "frequency" / "time" / "phase" / "bands" / "scope"
+        static inline const juce::Identifier meterView{"meterView"}; // "bands" / "vector" / "scope"
         static inline const juce::Identifier meterSpeed{"meterSpeed"}; // "slow" / "fast"
+        static inline const juce::Identifier vectorStereo{"vectorStereo"}; // bool: VECTORSCOPE shows the track's L/R
+        static inline const juce::Identifier showInput{"showInput"};         // bool: the legend toggles (all on by default)
+        static inline const juce::Identifier showOutput{"showOutput"};       // bool
+        static inline const juce::Identifier showSidechain{"showSidechain"}; // bool
         static inline const juce::Identifier alignCapture{"alignCapture"}; // bool: ALIGNMENT holds the last hit
     };
     static constexpr double minUiScale = 0.6, maxUiScale = 2.0;

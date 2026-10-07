@@ -40,15 +40,17 @@ it on one of the pair and feed the other into its **sidechain**; the meter then 
      the plugin's pin connector.
    - Cubase/Nuendo: enable the plugin's side-chain button and add a side-chain send from the other track.
    - Studio One and Bitwig: pick the other track in the plugin's sidechain selector.
-2. **Time first.** Switch to the meter's **TIME OFFSET** view. The INPUT reading is how far apart the two tracks are
-   (positive: the sidechain is later). Turn **DELAY** on and set the knob to that reading; the OUTPUT peak moves to
-   0 ms. The delay reaches −4 to +4 ms, so it can move this track either way. Beyond that the screen says **TRANSIENTS
-   OUT OF DELAY RANGE**: move a clip in the DAW first.
-3. **Then phase.** Switch to the **FREQUENCY** view and turn **PHASE** on. The bright curve (processed) should sit at
-   +1 across the band. **LOW** and **HIGH** rotate like an all-pass (under 1 ms of latency): LOW centres the turn lower down in
-   frequency, HIGH higher up (and, with RANGE in, spread wider); **CONSTANT** turns every frequency by the same angle.
-   **RANGE** out is one section (finer); pressed in it is two (a wider turn).
-4. **Polarity (Ø)** inverts the track if the curve sits near −1 everywhere.
+2. **Time first.** Switch to the **ALIGNMENT** view. It holds a hit from the sidechain and shows the waveforms on top of
+   each other: the sidechain (pale), this track's INPUT (blue) and the OUTPUT (green). Turn **DELAY** on and move the
+   knob until the green waveform starts where the pale one does; zoom in with the mouse wheel or the **-** and **+**
+   buttons to see exactly where each starts to rise. The delay reaches −4 to +4 ms, so it can move this track either
+   way. If the hits are further apart than that, move a clip in the DAW first.
+3. **Then phase.** Turn **PHASE** on and watch **BANDS** (the green bars should reach +1 in every band) and the
+   **VECTORSCOPE** (the green shape should close up to a line running up and down). **LOW** and **HIGH** rotate like an
+   all-pass (under 1 ms of latency): LOW centres the turn lower down in frequency, HIGH higher up (and, with RANGE in,
+   spread wider); **CONSTANT** turns every frequency by the same angle. **RANGE** out is one section (finer); pressed
+   in it is two (a wider turn).
+4. **Polarity (Ø)** inverts the track if the bars sit near −1, or the vectorscope shows a line running across.
 5. Check by ear: solo the pair and listen for the low end filling in.
 
 **Latency.** HIGH and LOW add 0.7 ms at 44.1 kHz (0.4 ms at 48 kHz, almost none at 96 kHz and up), so their sections
@@ -92,9 +94,9 @@ work, so you can set them up before switching them on).
 | Control | What it does |
 |---|---|
 | **METER button** | Turns the meter on or off. When it's off (or the window is closed) the meter does no work at all, which saves CPU. |
-| **View selector** (middle of the row under the screen) | Click it for a menu that opens upwards: FREQUENCY, TIME OFFSET, PHASE, BANDS or ALIGNMENT. See [Reading the meter](#reading-the-meter). |
-| **SLOW / FAST** | How much the meter averages. SLOW is steadier (it settles in about 0.75 s); FAST follows your changes much sooner (about 0.25 s) but flickers more, and it is less sure of an offset on sparse material such as a lone kick. Switching restarts the averaging. |
-| **HOLD** | Freezes the screen so you can study it. It also freezes by itself while your DAW's transport is stopped (if the DAW reports it). Frozen, turning **DELAY** or the polarity button shows what they would do, and you can drag across the TIME OFFSET view to preview a delay (see below). |
+| **View selector** (middle of the row under the screen) | Click it for a menu that opens upwards: BANDS (the default), VECTORSCOPE or ALIGNMENT. See [Reading the meter](#reading-the-meter). |
+| **SLOW / FAST** | How much the meter averages. SLOW is the steady one: it averages over a few seconds and the bars glide, so it settles in about two seconds. FAST follows your changes in about a third of a second, and its bars move more. |
+| **HOLD** | Freezes the screen so you can study it. It also freezes by itself while your DAW's transport is stopped (if the DAW reports it). Frozen, turning **DELAY**, the polarity button or the phase shows what they would do (see below). |
 | **ANALYSE** | Reserved for a future automatic-suggestion feature. It doesn't do anything yet. |
 
 ### Using the knobs
@@ -169,100 +171,75 @@ rather than jumping.
 
 ### Choosing one
 
-A reasonable way in, using the FREQUENCY meter view: if the two tracks only disagree in the bass, try **LOW**; if the
+A reasonable way in, using the BANDS view: if the two tracks only disagree in the bass, try **LOW**; if the
 disagreement carries up through the mids, try **HIGH**; press RANGE in when 90° doesn't reach far enough; use
 **CONSTANT** when you want the same angle at every frequency, or to nudge a track by a few degrees across the whole
 band. Set the **delay** first, and flip **Ø** if the curve sits near −1 everywhere.
 
 ## Reading the meter
 
-The meter compares the track Phase Align is on with the track in its **sidechain**. It shows a correlation, *r*, which
-is **+1** when the two agree perfectly, **0** when they are unrelated, and **−1** when one is the exact opposite of the
-other. Both tracks need to be playing the same source at the same time; the meter settles within about a second (about a quarter of that on FAST).
+The meter compares the track Phase Align is on with the track in its **sidechain**. Its main number is a correlation,
+*r*: **+1** when the two agree perfectly, **0** when they are unrelated, **−1** when one is the exact opposite of the
+other. Both tracks need to be playing the same source at the same time. Everywhere on the screen, **blue** is this track
+*before* Phase Align (the INPUT) and **green** is after it (the OUTPUT), so "better or worse" is the gap between them.
+The labels at the top right of the plot (INPUT, OUTPUT and, in ALIGNMENT, SIDECHAIN) are switches: click one to hide that
+trace (it is struck through), and again to bring it back. They are all on by default, and the choice is kept with the plugin.
+The bars on the right (**ALL**) are the single overall figure: lit green segments for the output, a blue tick for the
+input. Pick a view from the menu in the middle of the row under the screen.
 
-Each view draws two things: the **INPUT** (what the pair looks like without Phase Align, dim) and the **OUTPUT** (with
-it, bright), so "better or worse" is the gap between them.
+### BANDS (the default)
 
-### FREQUENCY view
+![The bands view, aligned](docs/images/meter-bands.png)
 
-![The frequency view before aligning](docs/images/meter-frequency-before.png)
+Six bars, one per band (20–100 Hz, 100–250, 250–630, 630 Hz–1.6k, 1.6k–4k, 4k–20k), each showing *r* for the OUTPUT with
+its number, and a blue tick for the INPUT. Two spaced mics make the low bands agree before the high ones do, so the
+ticks usually tell you which bands need work. Each bar averages everything in its band, so for two spaced mics the upper
+bars hover around 0 whatever you do (the comb averages away).
 
-*r* at each frequency from 20 Hz to 20 kHz. Two mics at different distances make the curve swing up and down (a comb
-filter); a polarity problem pulls the whole curve toward −1. The goal is a bright curve sitting at +1. The bar on the
-right is the single overall figure for the whole band: lit segments for the output, a tick for the input.
+### VECTORSCOPE
 
-### TIME OFFSET view
+![The vectorscope: the input against the sidechain in blue, the output in green](docs/images/meter-vectorscope.png)
 
-![The time offset view](docs/images/meter-time.png)
+This track against the sidechain, as a shape: each pair of samples is a dot, the input in blue and the output in green,
+each scaled to its own level so only the *phase* shows. A **line running up and down** is in phase, a **circle** is 90°
+off, a **line across** is inverted, and a **cloud** means the two aren't related (a delay too long for the signal, say).
+The numbers are the correlation over the last 60 ms. Turn the delay and phase and watch the green shape close up.
 
-Where the two tracks line up, from −5 ms to +5 ms. A single sharp peak is the delay between the tracks, and the peak's
-position is printed next to INPUT and OUTPUT (positive means the sidechain is later). The part the delay knob can reach
-(−4 to +4 ms) is shaded. After you set the delay (or the right phase), the OUTPUT peak should move to 0 ms.
+On a stereo track, the **SOURCE** label (top left of the plot) switches the vectorscope to the track's own **left and
+right**: the classic stereo goniometer.
 
-There are two readings of the offset for INPUT and OUTPUT, in two columns, and neither is the "right" one for every
-sound. **WAVEFORM** compares the signals themselves (the solid line): it works when the two tracks are the same sound,
-such as two mics on one source, or a sustained bass or guitar. **ATTACK** compares where the hits start (the dashed
-line): it ignores the waveforms and looks only at the sharp rises, in three bands (below 150 Hz, 150 to 600 Hz, above
-600 Hz) so a kick's thump, a guitar stab's mids and a snare's top end all count. It works for a kick against a kick
-sample, whose pitch and tail differ so much that the waveforms don't match, and for any playing with plenty of hits.
-When both give a number and they agree, trust it. A `--` means no steady, clear peak was found, which is the right
-answer for a pair with no hits (ATTACK) or with different sounds (WAVEFORM). An ATTACK reading has to hold steady for
-about a quarter of a second before it shows. On FAST it settles less reliably (it has half the data to go on), so
-use SLOW for drums. Once the delay is set, the OUTPUT readings should go to 0.
+![The stereo vectorscope](docs/images/meter-vectorscope-stereo.png)
 
-If the peak is outside the delay's reach, the screen says **TRANSIENTS OUT OF DELAY RANGE** and shows the offset:
+A line up and down is mono, a line along **L** or **R** is one side only, and a line across is left and right opposite
+(which cancels in mono). The phase stage turns both channels alike, so it doesn't change this shape; it is for checking
+the track's own stereo image.
 
-![Offset beyond the delay's range](docs/images/meter-out-of-range.png)
+### ALIGNMENT
 
-Move one of the clips in your DAW by that amount first (up to ±40 ms is detected), then fine-tune with the delay.
+![The alignment view](docs/images/meter-alignment.png)
 
-### PHASE view
+The waveforms themselves, on top of each other around a hit: the **sidechain** (pale), this track's **INPUT** (blue) and
+the **OUTPUT** (green), each scaled to its own peak, so you are comparing shapes, not levels. The vertical line at 0
+marks where the hit starts on the sidechain. Zoom with the **mouse wheel** or the **-** and **+** buttons (top left of
+the plot), from 0.5 ms to 200 ms across; zoomed in, you can see exactly where each waveform starts rising.
 
-The angle between this track and the sidechain at each frequency, from −180° to +180°. A straight slope running up through
-the frequencies is a **delay**; a flat line away from 0° is a **rotation**; a line at ±180° is a **polarity flip**. The
-goal is a bright line along 0°. The line is drawn faintly where the two tracks only weakly agree, and not at all where they
-don't agree enough for an angle to mean anything. A long delay wraps the line round and round at high frequencies: set
-the delay first and it straightens out.
+**CAPTURE** (on by default) holds the last hit it detected, so the picture sits still while you work. The green trace is
+then **this hit as your knobs would make it**: turn the **DELAY** knob, press the polarity button, or set the phase
+(knob, mode, RANGE, PHASE button), and it moves at once, with no new audio needed and no scrubbing to find a hit. A hit
+has to be within 12 dB of the strongest recent one to be captured, so a ghost note doesn't replace a good kick, and a new
+hit only replaces the held one after the knobs have been left alone for two seconds, so the picture doesn't change under
+your hand. **HOLD** pins the captured hit for as long as you like. With CAPTURE off, the view follows the live audio; there,
+with HOLD on, drag across the plot to slide the INPUT against the sidechain. If nothing on the sidechain counts as a hit (a
+pad, say), the view says it is waiting for one.
 
-### BANDS view
+### Holding the screen and previewing
 
-Six bars, one per band (20–100 Hz, 100–250, 250–630, 630 Hz–1.6k, 1.6k–4k, 4k–20k), each showing *r* for the OUTPUT with its
-number, and a tick for the INPUT. It reads at a glance, but each bar averages everything in its band, so for two spaced
-mics the upper bars hover around 0 whatever you do (the comb averages away). The FREQUENCY view has the detail.
-
-### ALIGNMENT view
-
-The waveforms themselves, on top of each other around a hit: the **sidechain** (pale), this track's **INPUT** (dim green)
-and the **OUTPUT** (bright green), each scaled to its own peak, so you are comparing shapes, not levels. The vertical line
-at 0 marks where the hit starts on the sidechain. Use the **mouse wheel** to zoom, from 0.5 ms to 200 ms across; zoomed
-in, you can see exactly where each waveform starts rising.
-
-**CAPTURE** (on by default, the label at the top left of the plot) holds the last hit it detected, so the picture sits
-still while you work. The bright trace is then **this hit as your knobs would make it**: turn the **DELAY** knob, press
-the polarity button, or set the phase (knob, mode, RANGE, PHASE button), and it moves at once, with no new audio needed
-and no scrubbing to find a hit. A hit has to be within 12 dB of the strongest recent one to be captured, so a ghost note
-doesn't replace a good kick; and a new hit only replaces the held one after the knobs have been left alone for two
-seconds, so the picture doesn't change under your hand. **HOLD** pins the captured hit for as long as you like. With
-CAPTURE off, the view follows the live audio instead; there, with HOLD on, drag across the plot to slide the INPUT
-against the sidechain (the OUTPUT trace becomes the **PREVIEW**).
-
-If nothing on the sidechain counts as a hit (a pad, say), the view says it is waiting for one.
-
-### Holding the screen and previewing a delay
-
-While the screen is held (or the host is stopped), **turn the DELAY knob, press the polarity button, or set the phase**
-(the PHASE knob, the mode switch, RANGE, and the PHASE button) and the views update as if the audio were running: the
-OUTPUT trace becomes the **PREVIEW**, this track with those settings applied to the held picture. Turn the delay on or
-off, change it, flip the polarity, try HIGH, LOW or CONSTANT, and watch the correlation, the phase line and the bands
-line up. The phase turn is worked out from the stage's own response, so it agrees with what the plugin does to within a
-couple of degrees. In ALIGNMENT's live view the waveforms show the delay and polarity but not the phase turn (they say so); with CAPTURE
-on they show all three.
-
-**HOLD** freezes the screen, and releasing it carries on. Frozen, drag across the TIME OFFSET view (or, in ALIGNMENT, slide the input): the OUTPUT trace
-becomes **PREVIEW**, what the track would read with the DELAY knob at the point you're dragging (in 0.1-sample steps, within
-the knob's reach), on every view and on the overall bar. Find the position where the FREQUENCY curve and BANDS sit at
-+1 or the PHASE line goes flat, then set the knob there. The preview is of a delay alone, with PHASE off. Letting go of HOLD
-clears it.
+**HOLD** freezes the screen, and releasing it carries on. While it is held (or the host is stopped), **turn the DELAY
+knob, press the polarity button, or set the phase** (the PHASE knob, the mode switch, RANGE, and the PHASE button) and the
+views update as if the audio were running: the green becomes the **PREVIEW**, this track with those settings applied to
+the held picture. Turn the delay on or off, flip the polarity, try HIGH, LOW or CONSTANT, and watch the bars and the
+shape line up. The phase turn is worked out from the stage's own response, so it agrees with what the plugin does to
+within a couple of degrees. The delay counts as 0 when it is off.
 
 ### Messages
 
@@ -275,9 +252,9 @@ clears it.
   **delay**. Phase rotation can't fix it properly, because a delay turns each frequency by a different amount
   (higher frequencies more) and an all-pass doesn't follow that.
 - **A DI and a mic'd amp, or a mic's own phase response**: no simple delay between them. Use the **phase** section;
-  try HIGH and LOW and watch the FREQUENCY view. If you want the same shift at every frequency, use **CONSTANT**.
+  try HIGH and LOW and watch the BANDS and the VECTORSCOPE. If you want the same shift at every frequency, use **CONSTANT**.
 - **Top and bottom snare mics, or a kick's inside and outside mics**: usually opposite polarity. Press **Ø** first.
-- **Both together**: set the delay first (TIME OFFSET view), then the phase (FREQUENCY view), then check the polarity.
+- **Both together**: set the delay first (ALIGNMENT view), then the phase (BANDS and VECTORSCOPE), then check the polarity.
 
 ## Latency and automation
 
@@ -328,14 +305,19 @@ zero-latency partitioned convolver, plus a matching delay: the 43 ms or so.
 Kaiser windows), so its response stays flat well into the top octave. Steps are 0.1 sample. Changing the value
 crossfades two read taps over 50 ms, so it doesn't click. At 44.1 kHz the delay rolls off a little above 20 kHz.
 
-**The meter.** The sidechain, the input and the output are analysed in overlapping FFT frames (8192 points at 44.1 and 48 kHz,
-Hann window, 75% overlap), and the cross-spectrum between each of the pair and the sidechain is averaged over about
-a second per frequency bin. *r* is the normalised correlation of the two signals within a band, the real part of that
-cross-spectrum divided by the geometric mean of the two powers (FAST uses half-length frames and averages over about a third of that). The FREQUENCY view plots it per 1/6 octave; the BANDS view takes it over six wide bands; the PHASE view is the angle of that cross-spectrum over 1/24 octave, drawn only where it is coherent. The delay preview turns each bin of the input's cross-spectrum by the phase of the chosen delay before it is summed. The ATTACK reading splits each signal into three bands (35 to 150 Hz, 150 to 600 Hz, and everything above 600 Hz), takes each band's envelope (smoothed over 12, 5 and 1.5 ms: about a cycle of the band's lower notes, or a note's own ripple reads as repeated attacks), and keeps only the rises of its logarithm; those are cross-correlated per band, with a longer average than the audio's (about a second on SLOW, since attacks only arrive with the hits), and the bands' results are averaged. The TIME OFFSET view whitens the cross-spectrum (every bin set to unit
-magnitude, the "PHAT" weighting) and weights each bin by how coherent the two signals are in it (so the bins a kick drum has nothing in, which are most of them, don't bury its peak), and takes the inverse FFT: a pure delay then shows as a single sharp peak at its lag,
-and a phase rotation as a peak at 0 ms, which a plain cross-correlation would blur into a hump that suggests a delay
-that isn't there. The audio thread only copies samples into a buffer; the analysis runs on the interface's 30 Hz timer, and only while
-the editor is open and the meter is on.
+**The meter.** The audio thread only copies samples into a buffer; everything else runs on the interface's 30 Hz timer, and
+only while the editor is open and the meter is on, and only for the view you are looking at. For BANDS, the sidechain, the
+input and the output are analysed in overlapping FFT frames (8192 points at 44.1 and 48 kHz, Hann window, 75% overlap), and
+the cross-spectrum between each of the pair and the sidechain is averaged per frequency bin (a time constant of at least
+0.75 s on SLOW, 0.08 s on FAST, which also halves the frames). *r* is the normalised correlation of the two signals within
+a band, the real part of that cross-spectrum divided by the geometric mean of the two powers. The bars then glide toward
+their values at the screen's own pace. The VECTORSCOPE plots the last 60 ms of samples, each stream scaled to a standard
+deviation of 1 and turned 45 degrees. ALIGNMENT keeps four seconds of the streams, finds hits on the sidechain (the rise of
+its 0.5 ms envelope, within 12 dB of the strongest recent one, from a quiet start) and, for a captured hit, renders this
+track's input through the knobs: its spectrum times the response of the delay, the polarity flip and the phase stage (two
+first-order all-passes for HIGH and LOW, a rotation for CONSTANT), back to the time domain. The meter's analysis also
+measures delays and rotations (a PHAT lag function and an attack-based lag, kept for the automatic suggestion that is
+planned) but no view shows them.
 
 **Efficiency.** On an Apple M1, a stereo frame costs about 18 to 23 ns in HIGH or LOW and about 30 ns in CONSTANT at
 48 kHz. The FFT is vDSP on macOS and [PFFFT](https://bitbucket.org/jpommier/pffft) on Windows and Linux. Nothing

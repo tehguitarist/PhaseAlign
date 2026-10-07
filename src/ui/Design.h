@@ -52,6 +52,8 @@ inline constexpr float readoutGhostAlpha = 0.07f;
 // Meter screen (positions measured on the example; the band count is provisional until P4).
 inline const juce::Colour phosphor{0xff3cf04e};
 inline const juce::Colour meterAxisText{0xffd0d0cc};
+// This track before the plugin: a soft blue, to tell it from the output's phosphor green (user, 2026-10-07).
+inline const juce::Colour meterInput{0xff5a8fdc};
 inline const juce::Colour meterGrid{0xff5a5a58};
 inline constexpr float meterPlotLeft = 186.0f, meterPlotRight = 1298.0f;
 inline constexpr float meterPlusOneY = 656.0f, meterZeroY = 837.0f, meterMinusOneY = 1016.0f;

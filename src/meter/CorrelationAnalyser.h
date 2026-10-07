@@ -34,10 +34,10 @@ class CorrelationAnalyser
         slow,
         fast
     };
-    static constexpr double tauFloorSeconds = 0.3, tauCycles = 8.0;
+    static constexpr double tauFloorSeconds = 0.75, tauCycles = 12.0; // slower and steadier than P4's 0.3 s (user, R23)
     // Fast also halves the analysis frame (4096 points at 48 kHz: 85 ms, a new result every 21 ms; 11.7 Hz bins), so
     // it responds in about 0.1 s rather than 0.25 s. Switching speed restarts the averages.
-    static constexpr double fastTauFloorSeconds = 0.04, fastTauCycles = 2.0;
+    static constexpr double fastTauFloorSeconds = 0.08, fastTauCycles = 3.0;
     static constexpr double gateDb = -70.0; // a signal below this in a window is not measured
     static constexpr double minHz = 20.0, maxHz = 20000.0;
     static constexpr int curvePoints = 256; // log-spaced, minHz to maxHz (or just below Nyquist)

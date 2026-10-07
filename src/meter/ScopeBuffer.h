@@ -12,7 +12,7 @@ namespace pa::meter
 class ScopeBuffer
 {
   public:
-    static constexpr int numStreams = 3; // input, output, sidechain, as MeterCapture
+    static constexpr int numStreams = 5; // input, output, sidechain, input side, output side, as MeterCapture
     static constexpr double seconds = 4.0;
     static constexpr float startRatio = 2.0f; // a hit's 4 ms envelope against its quietest level just before (scan)
 
@@ -38,14 +38,15 @@ class ScopeBuffer
     long long oldest() const { return std::max(0LL, pushed - size); }
     long long end() const { return pushed; }
 
-    void push(const float* in, const float* out, const float* sc, int n)
+    void push(const float* in, const float* out, const float* sc, int n, const float* inSide = nullptr,
+              const float* outSide = nullptr)
     {
         if (size == 0)
             return;
-        const float* src[numStreams] = {in, out, sc};
+        const float* src[numStreams] = {in, out, sc, inSide, outSide};
         for (int s = 0; s < numStreams; ++s)
             for (int i = 0; i < n; ++i)
-                data[s][(size_t)((pushed + i) % size)] = src[s][i];
+                data[s][(size_t)((pushed + i) % size)] = src[s] != nullptr ? src[s][i] : 0.0f;
         pushed += n;
     }
 

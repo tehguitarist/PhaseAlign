@@ -10,7 +10,7 @@
 #include <vector>
 
 // Audio side of the correlation meter (IMPLEMENTATION_PLAN 3, R6): a lock-free single-producer, single-consumer
-// FIFO of three mono streams (input, output, sidechain). The audio thread pushes only while the meter is active
+// FIFO of mono streams (input, output, sidechain, and, when asked for, the input's and output's side signals). The audio thread pushes only while the meter is active
 // (editor showing AND meter on); otherwise push() returns at once. If the GUI falls behind, samples are dropped
 // from all three streams together, so the streams stay aligned with each other.
 //
@@ -27,6 +27,8 @@ class MeterCapture
         input,
         output,
         sidechain,
+        inputSide,  // (L - R) / 2 of the input and the output: only filled while wantSide() (the vectorscope's STEREO
+        outputSide, // mode on a stereo track); zeros otherwise
         numStreams
     };
 
@@ -67,6 +69,13 @@ class MeterCapture
         return transportKnown.load(std::memory_order_relaxed) && ! transportPlaying.load(std::memory_order_relaxed);
     }
 
+    // The vectorscope's STEREO mode needs the side signals: the GUI asks for them, the audio thread fills them only then.
+    void setWantSide(bool want) { wantSideFlag.store(want, std::memory_order_relaxed); }
+    bool wantsSide() const { return wantSideFlag.load(std::memory_order_relaxed); }
+    // Audio side: whether the main bus is stereo (a mono track has no side).
+    void setStereoTrack(bool stereo) { stereoFlag.store(stereo, std::memory_order_relaxed); }
+    bool isStereoTrack() const { return stereoFlag.load(std::memory_order_relaxed); }
+
     double getSampleRate() const { return sampleRate.load(); }
 
     bool hasSidechain() const { return sidechainPresent.load(std::memory_order_relaxed); }
@@ -75,15 +84,17 @@ class MeterCapture
     // maxBlock samples.
     void prepareAlignment(int maxLatency, int maxBlock)
     {
-        alignment.prepare(2, std::max(0, maxLatency), std::max(1, maxBlock));
+        alignment.prepare(3, std::max(0, maxLatency), std::max(1, maxBlock)); // input, sidechain, input side
         alignmentMax = std::max(0, maxLatency);
         alignmentBlock = std::max(1, maxBlock);
         alignmentFresh = false;
     }
 
     // Audio thread: n mono samples of each stream; the output is `latency` samples behind the input and sidechain.
-    // Real-time safe. Without prepareAlignment(), the latency must be 0.
-    void push(const float* in, const float* out, const float* sc, int n, int latency = 0)
+    // inSide and outSide (null: zeros) are the side signals, used while wantsSide(). Real-time safe. Without
+    // prepareAlignment(), the latency must be 0.
+    void push(const float* in, const float* out, const float* sc, int n, int latency = 0, const float* inSide = nullptr,
+              const float* outSide = nullptr)
     {
         if (! isActive())
         {
@@ -92,7 +103,7 @@ class MeterCapture
         }
         if (alignment.getNumChannels() == 0)
         {
-            queue(in, out, sc, n);
+            queue(in, out, sc, n, inSide, outSide);
             return;
         }
         if (! alignmentFresh)
@@ -102,17 +113,20 @@ class MeterCapture
         }
 
         constexpr int chunk = 64;
-        float inAligned[chunk], scAligned[chunk];
+        float inAligned[chunk], scAligned[chunk], sideAligned[chunk], zeros[chunk] = {};
         const auto delay = std::clamp(latency, 0, alignmentMax);
         for (int start = 0; start < n;)
         {
             const auto m = std::min({chunk, alignmentBlock, n - start});
             alignment.write(0, in + start, m);
             alignment.write(1, sc + start, m);
+            alignment.write(2, inSide != nullptr ? inSide + start : zeros, m);
             alignment.read(0, m, delay, inAligned);
             alignment.read(1, m, delay, scAligned);
+            alignment.read(2, m, delay, sideAligned);
             alignment.advance(m);
-            queue(inAligned, out + start, scAligned, m);
+            queue(inAligned, out + start, scAligned, m, inSide != nullptr ? sideAligned : nullptr,
+                  outSide != nullptr ? outSide + start : nullptr);
             start += m;
         }
     }
@@ -135,15 +149,23 @@ class MeterCapture
     int getNumReady() const { return fifo.getNumReady(); }
 
   private:
-    void queue(const float* in, const float* out, const float* sc, int n)
+    void queue(const float* in, const float* out, const float* sc, int n, const float* inSide = nullptr,
+               const float* outSide = nullptr)
     {
         int start1, size1, start2, size2;
         fifo.prepareToWrite(n, start1, size1, start2, size2);
-        const float* src[numStreams] = {in, out, sc};
+        const float* src[numStreams] = {in, out, sc, inSide, outSide};
         for (int s = 0; s < numStreams; ++s)
         {
-            std::copy(src[s], src[s] + size1, buffers[(size_t)s].data() + start1);
-            std::copy(src[s] + size1, src[s] + size1 + size2, buffers[(size_t)s].data() + start2);
+            auto* b = buffers[(size_t)s].data();
+            if (src[s] == nullptr) // not wanted: zeros
+            {
+                std::fill(b + start1, b + start1 + size1, 0.0f);
+                std::fill(b + start2, b + start2 + size2, 0.0f);
+                continue;
+            }
+            std::copy(src[s], src[s] + size1, b + start1);
+            std::copy(src[s] + size1, src[s] + size1 + size2, b + start2);
         }
         fifo.finishedWrite(size1 + size2); // a full FIFO writes fewer than n: the rest is dropped
     }
@@ -152,7 +174,8 @@ class MeterCapture
 
     juce::AbstractFifo fifo{capacity};
     std::array<std::vector<float>, numStreams> buffers;
-    std::atomic<bool> active{false}, sidechainPresent{false}, transportKnown{false}, transportPlaying{false};
+    std::atomic<bool> active{false}, sidechainPresent{false}, transportKnown{false}, transportPlaying{false},
+        wantSideFlag{false}, stereoFlag{false};
     std::atomic<double> sampleRate{48000.0};
 
     // Audio thread only.

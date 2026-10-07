@@ -48,7 +48,9 @@ TEST_CASE("state round-trips every parameter and the ui settings", "[state]")
     a.getUiState().setProperty(UiProps::delayUnit, "cm", nullptr);
     a.getUiState().setProperty(UiProps::meterOn, false, nullptr);
     a.getUiState().setProperty(UiProps::uiScale, 1.5, nullptr);
-    a.getUiState().setProperty(UiProps::meterView, "time", nullptr);
+    a.getUiState().setProperty(UiProps::meterView, "vector", nullptr);
+    a.getUiState().setProperty(UiProps::showInput, false, nullptr);
+    a.getUiState().setProperty(UiProps::vectorStereo, true, nullptr);
 
     PhaseAlignProcessor b;
     const auto uiTree = b.getUiState(); // the editor holds this handle; loading must not replace it
@@ -69,7 +71,10 @@ TEST_CASE("state round-trips every parameter and the ui settings", "[state]")
     CHECK(b.getUiState()[UiProps::delayUnit].toString() == "cm");
     CHECK((bool)b.getUiState()[UiProps::meterOn] == false);
     CHECK((double)b.getUiState()[UiProps::uiScale] == Approx(1.5));
-    CHECK(b.getUiState()[UiProps::meterView].toString() == "time");
+    CHECK(b.getUiState()[UiProps::meterView].toString() == "vector");
+    CHECK_FALSE((bool)b.getUiState()[UiProps::showInput]);
+    CHECK((bool)b.getUiState()[UiProps::showOutput]); // not touched: still on
+    CHECK((bool)b.getUiState()[UiProps::vectorStereo]);
 
     // And a second trip gives identical bytes.
     CHECK(save(b) == save(a));
@@ -111,7 +116,7 @@ TEST_CASE("loading tolerates missing, bad and foreign state", "[state]")
         CHECK(p.getUiState()[UiProps::delayUnit].toString() == "ms");
         CHECK((bool)p.getUiState()[UiProps::meterOn] == true);
         CHECK((double)p.getUiState()[UiProps::uiScale] == Approx(PhaseAlignProcessor::defaultUiScale));
-        CHECK(p.getUiState()[UiProps::meterView].toString() == "frequency");
+        CHECK(p.getUiState()[UiProps::meterView].toString() == "bands");
     }
 
     SECTION("out-of-range ui values are clamped or replaced")
@@ -126,7 +131,20 @@ TEST_CASE("loading tolerates missing, bad and foreign state", "[state]")
         load(p, block);
         CHECK(p.getUiState()[UiProps::delayUnit].toString() == "ms");
         CHECK((double)p.getUiState()[UiProps::uiScale] == Approx(PhaseAlignProcessor::maxUiScale));
-        CHECK(p.getUiState()[UiProps::meterView].toString() == "frequency");
+        CHECK(p.getUiState()[UiProps::meterView].toString() == "bands");
+    }
+
+    SECTION("a state from before BANDS was the default (FREQUENCY, TIME or PHASE) opens on BANDS")
+    {
+        for (const auto* old : {"frequency", "time", "phase"})
+        {
+            juce::ValueTree tree("PhaseAlign");
+            tree.appendChild(juce::ValueTree(UiProps::type, {{UiProps::meterView, old}}), nullptr);
+            juce::MemoryBlock block;
+            juce::AudioProcessor::copyXmlToBinary(*tree.createXml(), block);
+            load(p, block);
+            CHECK(p.getUiState()[UiProps::meterView].toString() == "bands");
+        }
     }
 
     SECTION("another plugin's state is ignored")

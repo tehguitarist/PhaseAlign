@@ -307,7 +307,7 @@ TEST_CASE("meter view: the selector in the middle of the bottom row opens a menu
 {
     Fixture f;
     auto& screen = f.editor->getMeterScreen();
-    REQUIRE(screen.getView() == pa::ui::MeterScreen::View::frequency);
+    REQUIRE(screen.getView() == pa::ui::MeterScreen::View::bands); // the default
     using View = pa::ui::MeterScreen::View;
 
     // The selector sits under the plot centre; elsewhere clicks pass through. A click opens the menu (here: counted).
@@ -320,9 +320,8 @@ TEST_CASE("meter view: the selector in the middle of the bottom row opens a menu
     CHECK(opened == 1);
 
     // What the menu does with a choice.
-    for (const auto& [view, name] : {std::pair{View::time, "time"}, std::pair{View::phase, "phase"},
-                                      std::pair{View::bands, "bands"}, std::pair{View::scope, "scope"},
-                                      std::pair{View::frequency, "frequency"}})
+    for (const auto& [view, name] : {std::pair{View::vector, "vector"}, std::pair{View::scope, "scope"},
+                                      std::pair{View::bands, "bands"}})
     {
         screen.chooseView(view);
         CHECK(f.proc.getUiState()[UiProps::meterView].toString() == name);
@@ -348,6 +347,22 @@ TEST_CASE("meter scope: the wheel zooms between 0.5 and 200 ms", "[interaction]"
     CHECK(screen.getScopeSpanMs() == Approx(0.5));
     screen.setScopeSpanMs(5000.0);
     CHECK(screen.getScopeSpanMs() == Approx(200.0));
+
+    // The - and + buttons: a bit at a time, within the same limits.
+    screen.setScopeSpanMs(20.0);
+    click(screen, screen.zoomButtonCentreForTesting(true)); // + zooms in
+    CHECK(screen.getScopeSpanMs() == Approx(20.0 / pa::ui::MeterScreen::zoomStep));
+    click(screen, screen.zoomButtonCentreForTesting(false)); // - zooms out
+    click(screen, screen.zoomButtonCentreForTesting(false));
+    CHECK(screen.getScopeSpanMs() == Approx(20.0 * pa::ui::MeterScreen::zoomStep));
+    for (int i = 0; i < 20; ++i)
+        click(screen, screen.zoomButtonCentreForTesting(true));
+    CHECK(screen.getScopeSpanMs() == Approx(0.5));
+
+    // They are only there in ALIGNMENT.
+    screen.chooseView(pa::ui::MeterScreen::View::bands);
+    CHECK_FALSE(screen.hitTest(juce::roundToInt(screen.zoomButtonCentreForTesting(true).x),
+                               juce::roundToInt(screen.zoomButtonCentreForTesting(true).y)));
 }
 
 TEST_CASE("meter speed: SLOW and FAST at the left of the bottom row, kept in the UI state", "[interaction]")
@@ -454,4 +469,42 @@ TEST_CASE("meter hold: while frozen, the phase knob and mode preview too (phase 
     CHECK(screen.isPreviewing());
     screen.setHeld(false);
     CHECK_FALSE(screen.getAnalyser().previewHasPhase());
+}
+
+TEST_CASE("meter legend: clicking INPUT, OUTPUT or SIDECHAIN hides or shows it, kept in the UI state", "[interaction]")
+{
+    Fixture f;
+    auto& screen = f.editor->getMeterScreen();
+    using Series = pa::ui::MeterScreen::Series;
+    f.proc.getUiState().setProperty(UiProps::meterOn, true, nullptr);
+
+    // All shown by default.
+    for (const auto s : {Series::input, Series::output, Series::sidechain})
+        CHECK(screen.isShown(s));
+    CHECK((bool)f.proc.getUiState()[UiProps::showInput]);
+
+    // The legend is a click target (the screen must be metering: give it a state by showing it as the desktop does; here
+    // the labels are hit-tested whatever the audio is doing, as long as the meter is on).
+    const auto input = screen.legendCentreForTesting(Series::input);
+    const auto output = screen.legendCentreForTesting(Series::output);
+    CHECK(screen.hitTest(juce::roundToInt(input.x), juce::roundToInt(input.y)));
+    click(screen, input);
+    CHECK_FALSE(screen.isShown(Series::input));
+    CHECK_FALSE((bool)f.proc.getUiState()[UiProps::showInput]);
+    CHECK(screen.isShown(Series::output)); // only the one
+    click(screen, output);
+    CHECK_FALSE(screen.isShown(Series::output));
+    click(screen, input);
+    click(screen, output);
+    CHECK(screen.isShown(Series::input));
+    CHECK(screen.isShown(Series::output));
+
+    // The sidechain label is only there in ALIGNMENT.
+    CHECK(screen.legendCentreForTesting(Series::sidechain) == juce::Point<float>());
+    screen.chooseView(pa::ui::MeterScreen::View::scope);
+    const auto sidechain = screen.legendCentreForTesting(Series::sidechain);
+    CHECK(screen.hitTest(juce::roundToInt(sidechain.x), juce::roundToInt(sidechain.y)));
+    click(screen, sidechain);
+    CHECK_FALSE(screen.isShown(Series::sidechain));
+    CHECK_FALSE((bool)f.proc.getUiState()[UiProps::showSidechain]);
 }

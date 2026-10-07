@@ -120,6 +120,7 @@ void PhaseAlignProcessor::runChain(juce::AudioBuffer<float>& buffer, const pa::d
     const auto sidechain = getBusBuffer(buffer, true, 1);
     const auto numChannels = main.getNumChannels();
     meterCapture.setSidechainPresent(sidechain.getNumChannels() > 0);
+    meterCapture.setStereoTrack(numChannels > 1);
     {
         const auto position = getPlayHead() != nullptr ? getPlayHead()->getPosition() : juce::Optional<juce::AudioPlayHead::PositionInfo>();
         meterCapture.setTransport(position.hasValue(), position.hasValue() && position->getIsPlaying());
@@ -135,7 +136,8 @@ void PhaseAlignProcessor::runChain(juce::AudioBuffer<float>& buffer, const pa::d
     // Metering: mono sums of the input, output and sidechain, a sub-block at a time (no scratch to size). The capture
     // delays the input and sidechain by the chain's current latency, so all three line up.
     constexpr int sub = pa::dsp::Chain::subBlockSize;
-    float in[sub], out[sub], sc[sub];
+    float in[sub], out[sub], sc[sub], inSide[sub], outSide[sub];
+    const auto withSide = numChannels > 1 && meterCapture.wantsSide();
     float* channels[pa::dsp::Chain::maxChannels];
     const auto mono = [](const juce::AudioBuffer<float>& b, int start, int n, float* dest)
     {
@@ -146,16 +148,29 @@ void PhaseAlignProcessor::runChain(juce::AudioBuffer<float>& buffer, const pa::d
             juce::FloatVectorOperations::multiply(dest, 1.0f / (float)b.getNumChannels(), n);
     };
 
+    // (L - R) / 2 of the first two channels.
+    const auto side = [](const juce::AudioBuffer<float>& b, int start, int n, float* dest)
+    {
+        const auto* l = b.getReadPointer(0, start);
+        const auto* r = b.getReadPointer(1, start);
+        for (int i = 0; i < n; ++i)
+            dest[i] = 0.5f * (l[i] - r[i]);
+    };
+
     for (int start = 0; start < main.getNumSamples(); start += sub)
     {
         const auto n = std::min(sub, main.getNumSamples() - start);
         mono(main, start, n, in);
+        if (withSide)
+            side(main, start, n, inSide);
         mono(sidechain, start, n, sc);
         for (int ch = 0; ch < std::min(numChannels, pa::dsp::Chain::maxChannels); ++ch)
             channels[ch] = main.getWritePointer(ch, start);
         chain.process(channels, std::min(numChannels, pa::dsp::Chain::maxChannels), n);
         mono(main, start, n, out);
-        meterCapture.push(in, out, sc, n, chain.latency());
+        if (withSide)
+            side(main, start, n, outSide);
+        meterCapture.push(in, out, sc, n, chain.latency(), withSide ? inSide : nullptr, withSide ? outSide : nullptr);
     }
 }
 
@@ -189,9 +204,13 @@ juce::ValueTree PhaseAlignProcessor::defaultUiState()
     return juce::ValueTree(UiProps::type, {{UiProps::delayUnit, toString(pa::params::DelayUnit::ms)},
                                            {UiProps::meterOn, true},
                                            {UiProps::uiScale, defaultUiScale},
-                                           {UiProps::meterView, "frequency"},
+                                           {UiProps::meterView, "bands"},
                                            {UiProps::meterSpeed, "slow"},
-                                           {UiProps::alignCapture, true}});
+                                           {UiProps::alignCapture, true},
+                                           {UiProps::vectorStereo, false},
+                                           {UiProps::showInput, true},
+                                           {UiProps::showOutput, true},
+                                           {UiProps::showSidechain, true}});
 }
 
 void PhaseAlignProcessor::restoreUiState(const juce::ValueTree& loaded)
@@ -206,11 +225,14 @@ void PhaseAlignProcessor::restoreUiState(const juce::ValueTree& loaded)
                         toString(pa::params::delayUnitFromString(get(UiProps::delayUnit).toString())), nullptr);
     uiState.setProperty(UiProps::meterOn, (bool)get(UiProps::meterOn), nullptr);
     uiState.setProperty(UiProps::uiScale, juce::jlimit(minUiScale, maxUiScale, (double)get(UiProps::uiScale)), nullptr);
+    // The old FREQUENCY, TIME OFFSET and PHASE views are gone (R23): an old state opens on BANDS.
     const auto view = get(UiProps::meterView).toString();
-    uiState.setProperty(UiProps::meterView, view == "time" || view == "phase" || view == "bands" || view == "scope" ? view : juce::String("frequency"),
-                        nullptr);
+    uiState.setProperty(UiProps::meterView, view == "vector" || view == "scope" ? view : juce::String("bands"), nullptr);
     uiState.setProperty(UiProps::meterSpeed, get(UiProps::meterSpeed).toString() == "fast" ? "fast" : "slow", nullptr);
     uiState.setProperty(UiProps::alignCapture, (bool)get(UiProps::alignCapture), nullptr);
+    uiState.setProperty(UiProps::vectorStereo, (bool)get(UiProps::vectorStereo), nullptr);
+    for (const auto& id : {UiProps::showInput, UiProps::showOutput, UiProps::showSidechain})
+        uiState.setProperty(id, (bool)get(id), nullptr);
 }
 
 void PhaseAlignProcessor::getStateInformation(juce::MemoryBlock& destData)
