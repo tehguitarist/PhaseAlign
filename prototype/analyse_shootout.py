@@ -70,7 +70,50 @@ def blind(fs=48000):
     (root / "key.txt").write_text("\n".join(key) + "\n")
 
 
+# What the ear liked best in the first blind set (2026-10-08), added where it is not already among the options, so the new
+# way (a manual shift, then options for what is left) is heard against it.
+EARLIER_BEST = {"snare_sample": an.Candidate("constant", True, 50.0, -5.94, False, 0.0)}
+
+
+def blind2(fs=48000):
+    """The second blind set: for each pair, ANALYSE's own answer (`suggest_with_shift`): off, the manual shift alone when it asks
+    for one, and each option applied after the shift. Sums with the sidechain, shuffled under letters, key in
+    prototype/out/analyse/blind2/key.txt."""
+    import soundfile as sf
+    rng = np.random.default_rng(2027)
+    root = an.OUT / "blind2"
+    key = []
+    for tag, track, ref in st.PAIRS:
+        a, b = st.load(track), st.load(ref)
+        n = min(len(a), len(b))
+        a, b = a[:n], b[:n]
+        opts, base, lag, verdict, shift, msg = an.suggest_with_shift(a, b, fs)
+        x = an.shift_samples(a, shift)
+        items = [("off", a, an.Candidate("none", False, 0.0, 0.0, False, base))]
+        if shift:
+            items.append((f"manual shift {shift:+d} samples only", x, an.Candidate("none", False, 0.0, 0.0, False, base)))
+        for name, c, g, lf in opts:
+            items.append((f"suggested ({name})" + (f" after shift {shift:+d}" if shift else ""), x, c))
+        if tag in EARLIER_BEST:
+            items.append(("earlier best by ear", a, EARLIER_BEST[tag]))
+        order = rng.permutation(len(items))
+        clips = [an.render(items[i][1], fs, items[i][2]) + b for i in order]
+        g = 0.9 / max(np.abs(c).max() for c in clips)
+        folder = root / tag
+        folder.mkdir(parents=True, exist_ok=True)
+        for f in folder.glob("*.wav"):
+            f.unlink()
+        for letter, i, clip in zip("ABCDEF", order, clips):
+            sf.write(folder / f"{tag}_{letter}.wav", (clip * g).astype(np.float32), fs, subtype="FLOAT")
+            key.append(f"{tag} {letter}: {items[i][0]}: {items[i][2].label()}")
+        key.append(f"  ({verdict}. {msg})\n")
+        print(f"{tag}: {len(items)} files")
+    (root / "key.txt").write_text("\n".join(key) + "\n")
+
+
 def main():
+    if "--blind2" in sys.argv:
+        return blind2()
     if "--blind" in sys.argv:
         return blind()
     if "--reach" in sys.argv:

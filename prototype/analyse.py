@@ -115,9 +115,12 @@ def stage_response(mode, wide, theta, fs, freqs):
     return h
 
 
-def settings():
-    """Every (mode, wide, theta) the search covers: Hi/Lo in both ranges over their travel, and Constant 0 to 180."""
+def settings(phase_on=True):
+    """Every (mode, wide, theta) the search covers: Hi/Lo in both ranges over their travel, and Constant 0 to 180. With the PHASE
+    stage off (user, 2026-10-08) only "none": the search leaves the phase alone."""
     out = [("none", False, 0.0)]
+    if not phase_on:
+        return out
     for mode, wide in SHAPES:
         top = 180.0 if wide else 90.0
         out += [(mode, wide, t) for t in np.arange(STEP, top + 1e-9, STEP)]
@@ -142,10 +145,10 @@ class Candidate:
         return f"{phase}, {'Ø ' if self.flip else ''}delay {self.delay_ms:+.2f} ms"
 
 
-def band_scores(sp, g_k):
+def band_scores(sp, g_k, reach_ms=None):
     """Per band r_b at every lag: rows are bands, columns lags -L..+L in 1/PAD samples (index m = lag * PAD)."""
     n = sp.n * PAD
-    reach = int(math.ceil(MAX_DELAY_MS * 1e-3 * sp.fs)) * PAD
+    reach = int(math.ceil((MAX_DELAY_MS if reach_ms is None else reach_ms) * 1e-3 * sp.fs)) * PAD
     out = np.empty((len(sp.edges), 2 * reach + 1))
     lags = np.arange(-reach, reach + 1)
     for i, (a, b) in enumerate(sp.edges):
@@ -163,16 +166,17 @@ def score_at(sp, g_k):
     return float(np.mean(r))
 
 
-def search(sp, top=6, verbose=False, window_ms=None):
+def search(sp, top=6, verbose=False, window_ms=None, phase_on=True, reach_ms=None):
     """window_ms = (lo, hi) restricts the delay to that range (the attack lag's neighbourhood); None searches the knob's reach."""
     t0 = time.time()
     freqs = sp.freqs
     best = []    # (score, mode, wide, theta, delay, flip)
-    lo_s, hi_s = (-MAX_DELAY_MS, MAX_DELAY_MS) if window_ms is None else window_ms
-    lo_s, hi_s = max(lo_s, -MAX_DELAY_MS) * 1e-3 * sp.fs, min(hi_s, MAX_DELAY_MS) * 1e-3 * sp.fs
-    for mode, wide, theta in settings():
+    reach = MAX_DELAY_MS if reach_ms is None else reach_ms      # 0 with the DELAY stage off: only polarity and phase are searched
+    lo_s, hi_s = (-reach, reach) if window_ms is None else window_ms
+    lo_s, hi_s = max(lo_s, -reach) * 1e-3 * sp.fs, min(hi_s, reach) * 1e-3 * sp.fs
+    for mode, wide, theta in settings(phase_on):
         h = stage_response(mode, wide, theta, sp.fs, freqs) if mode != "none" else np.ones(len(freqs))
-        r, lags = band_scores(sp, h)
+        r, lags = band_scores(sp, h, reach)
         s = r.mean(0)
         inside = (lags >= lo_s) & (lags <= hi_s)
         for flip, sign in ((False, 1.0), (True, -1.0)):
@@ -203,7 +207,7 @@ def search(sp, top=6, verbose=False, window_ms=None):
             break
     baseline = score_at(sp, np.ones(len(freqs)))
     if verbose:
-        print(f"  search {time.time() - t0:.1f} s, {len(settings())} settings, {len(sp.edges)} bands")
+        print(f"  search {time.time() - t0:.1f} s, {len(settings(phase_on))} settings, {len(sp.edges)} bands")
     return families, baseline
 
 
@@ -335,17 +339,20 @@ def synthetic_checks(report):
 PAIRS = ["kick", "snare", "bass", "guitar", "hats"]
 
 
-def analyse(x, y, fs, top=5):
+def analyse(x, y, fs, top=5, delay_on=True, phase_on=True):
     """The delay-first search: the attack lag fixes the delay (when it is clear and inside the knob's reach), then phase and
     polarity are chosen at that delay (refined by up to +-0.3 ms, the score's own say). Falls back to the joint search.
     Returns (candidates, baseline r, attack reading, which method)."""
     sp = spectra(x, y, fs)
     lag = attack_lag(x, y, fs)
     ms, clear = lag[0], lag[1]
+    if not delay_on:
+        fam, base = search(sp, top=top, phase_on=phase_on, reach_ms=0.0)
+        return fam, base, lag, "delay off"
     if clear and abs(ms) <= MAX_DELAY_MS:
-        fam, base = search(sp, top=top, window_ms=(ms - 0.3, ms + 0.3))
+        fam, base = search(sp, top=top, window_ms=(ms - 0.3, ms + 0.3), phase_on=phase_on)
         return fam, base, lag, "attack"
-    fam, base = search(sp, top=top)
+    fam, base = search(sp, top=top, phase_on=phase_on)
     return fam, base, lag, "score" if not clear else "score (attack out of range)"
 
 
@@ -368,32 +375,37 @@ def low_end_change(sp, c):
     return score_at(lf, candidate_response(c, sp.fs, sp.freqs)) - score_at(lf, np.ones(len(sp.freqs)))
 
 
+WIDE_REACH_MS = 10.0   # how far beyond the knob the waveform score looks for a better delay (to tell the user to shift by hand)
 ATTACK_STRONG = 0.35   # the attack reading's peak above which its delay is trusted over the waveform score's (see suggest)
 
 
-def suggest(x, y, fs):
+def suggest(x, y, fs, delay_on=True, phase_on=True):
     """What ANALYSE would show: up to two options to choose from (user, 2026-10-08: the best of several close ones is a matter of
     the sound wanted). Both come from one search, chosen by how strong the attack reading is: a strong, in-reach one fixes the
     delay (the delay-first search); a weak one is not trusted and the joint (waveform score) search is used. On the user's six
     pairs that was the ear's pick every time, and the other variant was the one they rated worst twice (kick sample: joint,
     guitar: delay-first); four pairs with a clear difference, so a first guess for the threshold. Each option must also pass the
-    low-end guard. Returns (options, baseline r, attack reading, verdict); options: (name, Candidate, gain, low-end change)."""
+    low-end flag (an option that lowers the correlation below 300 Hz is kept but marked: the bass and the kick OH, where the user heard less low end). Only the stages that are on are searched (user, 2026-10-08): DELAY off keeps the delay at 0, PHASE off keeps
+    the phase off; polarity is always searched (the Ø button is its own control). So the same search answers "find the best
+    delay", "the best phase", "the best polarity" or any mix.
+    Returns (options, baseline r, attack reading, verdict); options: (name, Candidate, gain, low-end change)."""
     sp = spectra(x, y, fs)
-    fam, base, lag, how = analyse(x, y, fs, top=6)
+    fam, base, lag, how = analyse(x, y, fs, top=6, delay_on=delay_on, phase_on=phase_on)
     strong = how == "attack" and lag[2] >= ATTACK_STRONG
-    name, lst = ("delay from the attacks", fam) if strong else ("best score", search(sp, top=6)[0])
+    name, lst = ("delay from the attacks", fam) if strong else ("best score", search(sp, top=6, phase_on=phase_on, reach_ms=None if delay_on else 0.0)[0])
     options = []
     for c in lst:
         lf = low_end_change(sp, c)
-        if lf >= 0.0 and c.score - base >= MIN_GAIN:
+        if c.score - base >= MIN_GAIN:      # a lower low end (lf < 0) is flagged for the user, not hidden (kick OH, 2026-10-08)
             options.append((name, c, c.score - base, lf))
         if len(options) == 2:
             break
     if len(options) == 2 and options[0][1].score - options[1][1].score >= MIN_MARGIN:
         options = options[:1]     # a clear winner (user, 2026-10-08): one option; two only when they are close
     if options:
-        return options, base, lag, "suggest" if len(options) == 1 else "close: two options"
-    if lag[1] and MIN_DELAY_MS <= abs(lag[0]) <= MAX_DELAY_MS:
+        verdict = "suggest" if len(options) == 1 else "close: two options"
+        return options, base, lag, verdict + (" (less low end)" if any(o[3] < 0 for o in options) else "")
+    if delay_on and lag[1] and MIN_DELAY_MS <= abs(lag[0]) <= MAX_DELAY_MS:
         c = Candidate("none", False, 0.0, lag[0], False, base)
         return [("delay only", c, 0.0, low_end_change(sp, c))], base, lag, f"delay only, {lag[0]:+.2f} ms"
     return [], base, lag, "no change worth making"
@@ -406,28 +418,39 @@ def shift_samples(x, n):
     return np.concatenate([x[-n:], np.zeros(-n)])
 
 
-def suggest_with_shift(x, y, fs):
+def suggest_with_shift(x, y, fs, delay_on=True, phase_on=True):
     """suggest(), plus the case the DELAY knob can't cover (user, 2026-10-08: it is for micro adjustments; a big offset is moved
-    by hand, in samples, as DAWs work in them). When the attack reading is clear and beyond the reach, or the best option sits
-    at its edge, the message asks for a manual shift of that many samples, and the options are those for the signal once it
-    has been shifted (so they are within the knob's reach). Returns (options, baseline r, attack reading, verdict, shift in
-    samples or 0, message or "")."""
-    opts, base, lag, verdict = suggest(x, y, fs)
+    by hand, in samples, as DAWs work in them). When the attack reading is clear and beyond the reach, when the best option
+    sits at its edge, or when the waveform score has a clearly better delay beyond the reach (WIDE_REACH_MS), the message asks
+    for a manual shift of that many samples, and the options are those for the signal once it has been shifted (so within the
+    knob's reach). With DELAY off nothing is shifted; a clear attack offset is only mentioned. Returns (options, baseline r,
+    attack reading, verdict, shift in samples or 0, message or "")."""
+    opts, base, lag, verdict = suggest(x, y, fs, delay_on, phase_on)
+    if not delay_on:
+        note = ""
+        if lag[1] and abs(lag[0]) >= MIN_DELAY_MS:
+            note = f"DELAY is off: the transients are {int(round(lag[0] * 1e-3 * fs)):+d} samples apart"
+        return opts, base, lag, verdict, 0, note
     shift = 0
     if lag[1] and abs(lag[0]) > MAX_DELAY_MS:
         shift = int(round(lag[0] * 1e-3 * fs))
     elif opts and abs(opts[0][1].delay_ms) >= MAX_DELAY_MS - 0.15:
         shift = int(round(opts[0][1].delay_ms * 1e-3 * fs))
+    else:
+        wide, _ = search(spectra(x, y, fs), top=1, phase_on=phase_on, reach_ms=WIDE_REACH_MS)
+        inside = opts[0][1].score if opts else base
+        if abs(wide[0].delay_ms) > MAX_DELAY_MS and wide[0].score - inside >= MIN_GAIN:
+            shift = int(round(wide[0].delay_ms * 1e-3 * fs))
     if shift == 0:
         return opts, base, lag, verdict, 0, ""
-    opts, base2, _, verdict = suggest(shift_samples(x, shift), y, fs)
+    opts, _, _, verdict = suggest(shift_samples(x, shift), y, fs, delay_on, phase_on)
     message = f"Transient may be out of range, consider shifting {shift:+d} samples manually if needed"
     return opts, base, lag, verdict, shift, message
 
 
 MIN_GAIN = 0.03      # r gained over doing nothing below which ANALYSE says there is nothing worth changing
 MIN_DELAY_MS = 0.3   # a clear attack offset at least this large is worth a delay on its own
-MIN_MARGIN = 0.01    # r lead over the next family below which the pick is only tentative
+MIN_MARGIN = 0.01    # r lead over the next family below which two options are shown
 
 
 def verdict(fam, base, lag=None):

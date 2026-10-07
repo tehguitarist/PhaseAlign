@@ -121,6 +121,15 @@ analysis stays for ANALYSE. Tuned on the user's own stem pairs (`prototype/expor
    then the residual search says HI in 180°, -1.05 ms, not the CONSTANT 50° the ear liked at the whole -5.94 ms) and kick
    OH (within +-4 ms the best is LO in 180°, Ø, -0.70 ms; the ear's -4.94 ms pick is out of reach and no message fires,
    because the attack peak is weak and the in-reach best isn't at the edge). The user will get more stems.
+   **2026-10-08, later:** ANALYSE **respects the stage toggles** (user): `suggest(..., delay_on, phase_on)` searches only what
+   is on (DELAY off: delay stays 0 and a clear attack offset is only mentioned, "DELAY is off: the transients are N samples
+   apart"; PHASE off: phase stays off; polarity is always searched, the Ø button being its own control: an assumption to
+   confirm), so one search answers best delay, best phase, best polarity or any mix. The shift message also fires when the
+   waveform score has a clearly better delay up to 10 ms out (`WIDE_REACH_MS`; this catches the kick OH, -237 samples,
+   which the attack reading alone missed). The **low-end guard became a flag**: the kick OH's -4.94 ms pick lowers r below
+   300 Hz by 0.05 (the user heard that: more attack, less low-end solidity) and a hard reject hid it; options are now kept
+   and marked "less low end" (the bass too, -0.02). Second blind set (`analyse_shootout.py --blind2`, the ANALYSE answer
+   with the manual shift applied first, plus off and the earlier best): waiting for the user's listening.
    **Listening (user, 2026-10-07; `prototype/out/analyse/renders/`): the sum tells more than the input alone.** Kick: sum 1
    (CONSTANT 130°, Ø, +1.57 ms: the score's own top pick) was best, input 3 (LO in 180°, Ø, +1.02 ms) the best alone. Snare:
    sum 3 (HI in 157.5°, Ø, +0.95 ms) was best, input 1 (LO in 125°, Ø, +0.74 ms) the best alone, so for the snare the
