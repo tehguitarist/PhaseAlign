@@ -1345,22 +1345,23 @@ void MeterScreen::paintVector(juce::Graphics& g) const
     const auto clip = juce::Rectangle<float>(left, top - 2.0f * s, right - left, bottom - top + 4.0f * s);
     juce::Graphics::ScopedSaveState save(g);
     g.reduceClipRegion(clip.getSmallestIntegerContainer());
-    const auto drawSet = [&](const std::vector<juce::Point<float>>& points, juce::Colour colour, float size)
+    const auto drawSet = [&](const std::vector<juce::Point<float>>& points, juce::Colour colour)
     {
-        // Dots (a goniometer plots the samples, not lines between them), the older third fainter.
+        // Fine round points (a goniometer plots the samples, not lines between them), the older third fainter.
+        constexpr float size = 1.1f;
         const auto total = (int)points.size();
         for (int part = 0; part < 3; ++part) // oldest, middle, newest
         {
-            g.setColour(colour.withMultipliedAlpha(part == 0 ? 0.3f : part == 1 ? 0.55f : 1.0f));
+            g.setColour(colour.withMultipliedAlpha(part == 0 ? 0.4f : part == 1 ? 0.7f : 1.0f));
             for (int i = total * part / 3; i < total * (part + 1) / 3; ++i)
-                g.fillRect(cx + points[(size_t)i].x * scale - 0.5f * size, zero - points[(size_t)i].y * scale - 0.5f * size,
-                           size, size);
+                g.fillEllipse(cx + points[(size_t)i].x * scale - 0.5f * size, zero - points[(size_t)i].y * scale - 0.5f * size,
+                              size, size);
         }
     };
     if (shown[(size_t)Series::input])
-        drawSet(input, design::meterInput, juce::jmax(1.5f, 1.8f * s));
+        drawSet(input, design::meterInput);
     if (shown[(size_t)Series::output])
-        drawSet(output, design::phosphor, juce::jmax(1.5f, 2.0f * s));
+        drawSet(output, design::phosphor);
 
     // The correlations over the window, top left.
     const auto font = meterFont(assets, 16.0f * s, true);
