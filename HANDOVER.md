@@ -88,6 +88,14 @@ analysis stays for ANALYSE. Tuned on the user's own stem pairs (`prototype/expor
    and phase response preview (`dsp/PhaseResponse.h`, `meter/HitCapture`), and the user's stem pairs with tests.
    Findings that matter: the waveform lag is wrong for hits whose bodies differ (a kick against a kick sample read +29
    ms), the attack lag (three bands, plan R18) is right on all five pairs; the bass's attack reading is the weakest.
+   **Groundwork started (2026-10-07): `prototype/analyse.py`** (PLAN 8 step 6): whole-capture cross-spectrum, every
+   candidate (4 Hi/Lo shapes, Constant, polarity, delay ±4 ms at 0.1 sample, joint) scored in closed form as the mean
+   per-1/3-octave-band r, top families de-duplicated. Synthetic pairs with a known delay and rotation are all recovered;
+   predicted scores match the plugin's own Hi/Lo rendered (to 0.001). On the user's pairs the waveform score alone is
+   unreliable where bodies differ: kick best is LO in 172° at -3.3 ms (r 0.24 from 0.20) against the attack lag's
+   1.28 ms; snare -1.27 ms (attack 0.91); guitar and hats gain nothing; bass wants Ø. Next: combine with the attack lag
+   (delay from attacks, phase from the score at that delay), and check the sign convention of the attack lag against
+   `analyse.py`'s (positive = delay the input). Report: `prototype/out/analyse/report.md`.
 
 ## Next: needs no input
 
