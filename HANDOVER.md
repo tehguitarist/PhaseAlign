@@ -100,6 +100,19 @@ analysis stays for ANALYSE. Tuned on the user's own stem pairs (`prototype/expor
    (gain over baseline, margin over the runner-up family) so ANALYSE says "no change worth making" for guitar and hats,
    and listening to the renders; then the C++ (offline, on a background thread, reusing `dsp/PhaseResponse.h`).
    Report: `prototype/out/analyse/report.md`.
+   **Second stem set and blind shootout (user, 2026-10-07/08; `captures/stems/`, `prototype/analyse_stems.py`,
+   `analyse_shootout.py --blind`):** the user's by-ear settings mostly scored badly on the metric, but in the blind
+   listening (sums with the sidechain) the search's pick was best on 5 of 6: snare sample (CONSTANT 50°, -5.94 ms, only one
+   whose transients lined up; the user's own 4 ms pick was worst, so **the delay should reach 6 ms**, user), snare OH
+   (CONSTANT 5°, Ø, -1.85 ms), kick sample (attack-first LO in 62.5°, +1.21 ms; the joint pick's transients didn't line up),
+   kick OH (joint, LO in 140°, Ø, -4.94 ms, tied with the user's own), guitar (joint CONSTANT 110°, -0.58 ms; attack-first
+   was worst). The bass was the exception: off was best (the search's -0.42 ms LO in 27.5° had less low end, the user's
+   +4.6 ms HI out worst). Built from that, in `analyse.suggest`: (1) the **low-end guard** (a candidate must not lower r
+   below 300 Hz: the bass is the only pair it rejects), (2) **attack-first only when the attack peak is >= 0.35**, else the
+   joint search (0.39 kick sample, 0.61 snare OH vs 0.30 kick OH, 0.18 guitar: a threshold from four pairs, a first
+   guess), (3) up to **two options** to choose from (user's idea: it was a toss-up by the sound wanted). Caveat: all of this
+   was tuned on the same six pairs, so it needs new stems to mean anything; and the two options are near neighbours (50° vs
+   70°), not real alternatives. The bass now reads "delay only, -0.37 ms", which is untested by ear.
    **Listening (user, 2026-10-07; `prototype/out/analyse/renders/`): the sum tells more than the input alone.** Kick: sum 1
    (CONSTANT 130°, Ø, +1.57 ms: the score's own top pick) was best, input 3 (LO in 180°, Ø, +1.02 ms) the best alone. Snare:
    sum 3 (HI in 157.5°, Ø, +0.95 ms) was best, input 1 (LO in 125°, Ø, +0.74 ms) the best alone, so for the snare the

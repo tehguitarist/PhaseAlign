@@ -349,6 +349,54 @@ def analyse(x, y, fs, top=5):
     return fam, base, lag, "score" if not clear else "score (attack out of range)"
 
 
+LF_HZ = 300.0        # the low-end guard: a candidate must not lower the correlation below this from where it started
+
+
+def candidate_response(c, fs, freqs):
+    """G(f) of a candidate: polarity, phase stage and delay (positive delays the input)."""
+    h = stage_response(c.mode, c.wide, c.theta, fs, freqs) if c.mode != "none" else np.ones(len(freqs))
+    return (-1.0 if c.flip else 1.0) * h * np.exp(-2j * np.pi * freqs * c.delay_ms * 1e-3)
+
+
+def low_end_change(sp, c):
+    """r of the bands below LF_HZ with the candidate, minus without it. Negative means the low end got worse, which the user
+    heard on the bass pair (2026-10-08) although the whole-band score had gone up."""
+    import copy
+    lf = copy.copy(sp)
+    keep = [(e, f) for e, f in zip(sp.edges, sp.centres) if f < LF_HZ]
+    lf.edges, lf.centres = [e for e, _ in keep], [f for _, f in keep]
+    return score_at(lf, candidate_response(c, sp.fs, sp.freqs)) - score_at(lf, np.ones(len(sp.freqs)))
+
+
+ATTACK_STRONG = 0.35   # the attack reading's peak above which its delay is trusted over the waveform score's (see suggest)
+
+
+def suggest(x, y, fs):
+    """What ANALYSE would show: up to two options to choose from (user, 2026-10-08: the best of several close ones is a matter of
+    the sound wanted). Both come from one search, chosen by how strong the attack reading is: a strong, in-reach one fixes the
+    delay (the delay-first search); a weak one is not trusted and the joint (waveform score) search is used. On the user's six
+    pairs that was the ear's pick every time, and the other variant was the one they rated worst twice (kick sample: joint,
+    guitar: delay-first); four pairs with a clear difference, so a first guess for the threshold. Each option must also pass the
+    low-end guard. Returns (options, baseline r, attack reading, verdict); options: (name, Candidate, gain, low-end change)."""
+    sp = spectra(x, y, fs)
+    fam, base, lag, how = analyse(x, y, fs, top=6)
+    strong = how == "attack" and lag[2] >= ATTACK_STRONG
+    name, lst = ("delay from the attacks", fam) if strong else ("best score", search(sp, top=6)[0])
+    options = []
+    for c in lst:
+        lf = low_end_change(sp, c)
+        if lf >= 0.0 and c.score - base >= MIN_GAIN:
+            options.append((name, c, c.score - base, lf))
+        if len(options) == 2:
+            break
+    if options:
+        return options, base, lag, "suggest" if options[0][2] >= MIN_GAIN and (len(options) == 1 or options[0][1].score - options[1][1].score >= MIN_MARGIN) else "tentative"
+    if lag[1] and MIN_DELAY_MS <= abs(lag[0]) <= MAX_DELAY_MS:
+        c = Candidate("none", False, 0.0, lag[0], False, base)
+        return [("delay only", c, 0.0, low_end_change(sp, c))], base, lag, f"delay only, {lag[0]:+.2f} ms"
+    return [], base, lag, "no change worth making"
+
+
 MIN_GAIN = 0.03      # r gained over doing nothing below which ANALYSE says there is nothing worth changing
 MIN_DELAY_MS = 0.3   # a clear attack offset at least this large is worth a delay on its own
 MIN_MARGIN = 0.01    # r lead over the next family below which the pick is only tentative
