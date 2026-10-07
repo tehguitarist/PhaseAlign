@@ -27,6 +27,7 @@ OUT = Path(__file__).resolve().parent / "out" / "p3"
 RAW = OUT / "raw"
 FS = 48000
 SOURCES = ["sine100", "pink", "drums"]
+STEMS = ["kick", "snare", "bass", "guitar", "hats"]  # the user's pairs, when the render found them (captures/)
 TOP = 5
 APART_S = 0.02
 SKIP_S = 0.05  # the sources fade in over 10 ms; the onset is not a transition
@@ -107,7 +108,7 @@ def main():
         lines += [f"{s / FS:.4f}\t{lat}\t{what}" for s, lat, what in events]
         (OUT / "events" / f"{scenario}.txt").write_text("\n".join(lines) + "\n")
         listen.append(f"- **{scenario}**")
-        for source in SOURCES:
+        for source in SOURCES + [f"stem_{t}" for t in STEMS if (RAW / f"{scenario}_stem_{t}_in.f32").exists()]:
             x_in = load(RAW / f"{scenario}_{source}_in.f32")
             x_out = load(RAW / f"{scenario}_{source}_out.f32")
             sf.write(OUT / f"{scenario}_{source}_in.wav", x_in, FS, subtype="FLOAT")

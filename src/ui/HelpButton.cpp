@@ -36,7 +36,8 @@ void HelpButton::paint(juce::Graphics& g)
         for (const auto [grow, alpha] : {std::pair{6.0f, 0.12f}, std::pair{3.0f, 0.2f}})
         {
             g.setColour(design::labelGlow.withMultipliedAlpha(alpha / 0.6f));
-            g.strokePath(glyph, juce::PathStrokeType(grow * s, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            g.strokePath(glyph,
+                         juce::PathStrokeType(grow * s, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
         }
     }
     g.setColour(on ? design::labelSelected : design::labelDimmed);
@@ -60,7 +61,6 @@ std::unique_ptr<juce::AccessibilityHandler> HelpButton::createAccessibilityHandl
 {
     return std::make_unique<juce::AccessibilityHandler>(
         *this, juce::AccessibilityRole::toggleButton,
-        juce::AccessibilityActions().addAction(juce::AccessibilityActionType::toggle,
-                                               [this] { toggle(); }));
+        juce::AccessibilityActions().addAction(juce::AccessibilityActionType::toggle, [this] { toggle(); }));
 }
 } // namespace pa::ui

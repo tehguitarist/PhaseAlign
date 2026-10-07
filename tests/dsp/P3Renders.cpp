@@ -93,6 +93,56 @@ Stereo drums(double seconds)
     return x;
 }
 
+// One of the user's stem pairs (captures/<tag>_a.f32 and _b.f32, from prototype/export_pairs.py; gitignored) as a
+// stereo source, the two mics left and right, from the loudest stretch of the length asked for. Empty where the files
+// are missing.
+std::function<Stereo(double)> stemPair(const std::string& tag)
+{
+    const auto load = [](const std::string& path)
+    {
+        std::vector<float> v;
+        if (auto* f = std::fopen(path.c_str(), "rb"))
+        {
+            std::fseek(f, 0, SEEK_END);
+            v.resize((size_t)std::ftell(f) / sizeof(float));
+            std::rewind(f);
+            if (std::fread(v.data(), sizeof(float), v.size(), f) != v.size())
+                v.clear();
+            std::fclose(f);
+        }
+        return v;
+    };
+    const auto base = std::string(PA_GOLDEN_DIR) + "/../../captures/" + tag;
+    auto a = load(base + "_a.f32"), b = load(base + "_b.f32");
+    if (a.empty() || a.size() != b.size())
+        return {};
+    return [a = std::move(a), b = std::move(b)](double seconds)
+    {
+        const auto n = (size_t)(seconds * fs);
+        Stereo x(2 * n, 0.0f);
+        if (a.size() <= n)
+        {
+            for (size_t i = 0; i < a.size(); ++i)
+                x[2 * i] = a[i], x[2 * i + 1] = b[i];
+            return x;
+        }
+        // The loudest window, on a 0.25 s grid.
+        size_t best = 0;
+        double bestEnergy = -1.0;
+        for (size_t start = 0; start + n <= a.size(); start += (size_t)(0.25 * fs))
+        {
+            double e = 0.0;
+            for (size_t i = start; i < start + n; ++i)
+                e += (double)a[i] * a[i] + (double)b[i] * b[i];
+            if (e > bestEnergy)
+                bestEnergy = e, best = start;
+        }
+        for (size_t i = 0; i < n; ++i)
+            x[2 * i] = a[best + i], x[2 * i + 1] = b[best + i];
+        return x;
+    };
+}
+
 // Every source fades in over 10 ms (a path with latency replays the onset later, and an abrupt start is a step).
 Stereo fadedIn(Stereo x)
 {
@@ -331,8 +381,11 @@ TEST_CASE("P3 renders: worst-case automation through the chain", "[.][p3]")
     const auto dir = env != nullptr ? std::string(env) : std::string(PA_GOLDEN_DIR) + "/../../prototype/out/p3/raw";
     REQUIRE(juce::File(dir).createDirectory());
 
-    const std::pair<const char*, std::function<Stereo(double)>> sources[] = {
+    std::vector<std::pair<std::string, std::function<Stereo(double)>>> sources = {
         {"sine100", sine100}, {"pink", pink}, {"drums", drums}};
+    for (const auto* tag : {"kick", "snare", "bass", "guitar", "hats"})
+        if (auto stem = stemPair(tag))
+            sources.push_back({std::string("stem_") + tag, std::move(stem)});
     for (const auto& s : scenarios())
     {
         // The event list, once per scenario (the latency each setting needs, for the report's alignment).

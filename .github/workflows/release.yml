@@ -28,18 +28,38 @@ on:
         description: "Create as a draft release (review before publishing)"
         type: boolean
         default: true
+      skip_ci_check:
+        description: "Release even though CI has not passed on this commit (leave off unless you know why)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
+  actions: read # the CI check below reads the commit's CI runs
 
 jobs:
   version:
-    name: Read version
+    name: Check CI, read version
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.read.outputs.version }}
     steps:
       - uses: actions/checkout@v6
+      # Every job below needs this one, so a commit whose CI has not passed (or has not finished, or never ran) cannot
+      # be released: the release builds run with the tests off, so this is the only place the tests gate a release.
+      - name: Require a passing CI run on this commit
+        if: ${{ ! inputs.skip_ci_check }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          RESULT=$(gh run list --workflow ci.yml --commit "$GITHUB_SHA" --limit 1 --json status,conclusion,url \
+                   --jq 'if length == 0 then "none" else .[0] | "\(.status) \(.conclusion) \(.url)" end')
+          echo "Latest CI run for $GITHUB_SHA: $RESULT"
+          case "$RESULT" in
+            "completed success "*) ;;
+            none) echo "::error::CI has not run on $GITHUB_SHA: push it and wait for a green run first (or tick skip_ci_check)."; exit 1 ;;
+            *) echo "::error::The latest CI run on $GITHUB_SHA is not green ($RESULT). Wait for it or fix it (or tick skip_ci_check)."; exit 1 ;;
+          esac
       - id: read
         run: |
           VERSION=$(grep -oP '(?<=project\(PhaseAlign VERSION )[0-9]+\.[0-9]+\.[0-9]+' CMakeLists.txt)

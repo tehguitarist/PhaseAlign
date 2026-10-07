@@ -79,9 +79,9 @@ analysis stays for ANALYSE. Tuned on the user's own stem pairs (`prototype/expor
 3. **Decided (user, 2026-10-07):** HIGH with RANGE in keeps the asterisk (the tooltip explains it); the de-cramping of LOW
    with RANGE in is left; latency re-alignment per host is fine; the README no longer carries host-specific sidechain
    steps and other hosts are not going to be checked.
-4. **`release.yml`** builds with the tests off, so a release could be cut from a commit whose CI failed: run it only on a
-   green commit, or add a CI-status check to it (plan M5). The first release run also checks the Windows and Linux
-   installers' docs step.
+4. **`release.yml`** now refuses to run on a commit without a green CI run (the `version` job checks `gh run list --workflow
+   ci.yml --commit $GITHUB_SHA`; the `skip_ci_check` input overrides it). Its first real run also checks the Windows and
+   Linux installers' docs step.
 5. **ANALYSE (auto-suggest)** is next after the meter, and **the cleanup of what it doesn't use comes after that** (user,
    2026-10-07). The button is present but does nothing. What is ready for it: the waveform (PHAT) and attack lags and
    the curve and phase measures in `meter/CorrelationAnalyser` (off unless a view asks: `Needs`), the delay, polarity
@@ -94,6 +94,8 @@ analysis stays for ANALYSE. Tuned on the user's own stem pairs (`prototype/expor
 - Watch CI after any push (`gh run list --branch master`; a watcher in the background is fine) and report. The first push
   since 2026-10-06 carries all the meter work: expect the Windows and Linux numbers for the new code (nothing in it is
   platform specific, but CI has not seen it).
+- P3 with the user's stems: `PhaseAlignDspTests "[p3]"` also renders the five pairs (`stem_<tag>` sources, from `captures/`);
+  2026-10-07: all 45 renders stay within 1.08x of the stem's own worst step (to 20 kHz). Run it before a change to the fades.
 - Re-run `tools/meter_profile.py` (Instruments) once: the meter's CPU was measured with the analyser benchmark only
   (R21), not with the screen's drawing.
 - Optional CPU: the chain adds about 6 ns around the Hi/Lo stage that it didn't before, and Hi/Lo kept warm in Constant

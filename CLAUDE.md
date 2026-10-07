@@ -84,7 +84,7 @@ job, better.
         `hilo.py` changed identically.
       - Low-delay fractional kernels exist but are **off: the user kept Kaiser**.
       - Robustness tests (`tests/RobustnessTests.cpp`); the plugin runner counts allocations per thread.
-      - P3 renders and report: `PhaseAlignDspTests "[p3]"`, then `prototype/p3_report.py` → `prototype/out/p3/`.
+      - P3 renders and report: `PhaseAlignDspTests "[p3]"`, then `prototype/p3_report.py` → `prototype/out/p3/` (also the user's stem pairs from `captures/`, as `stem_<tag>`).
       - Meter: a coarse ±40 ms search, so far peaks read TRANSIENTS OUT OF DELAY RANGE.
       - DELAY tooltip latency; the `-192.0 samp` readout fix; the quick-start draft in the README.
       - High frequencies and knob travel: `prototype/hf_check.py`.
