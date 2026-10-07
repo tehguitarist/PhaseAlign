@@ -28,19 +28,11 @@ processed linked, so both channels get the same treatment.
 
 ## Quick start
 
-*Draft (2026-10-06); host routing steps still to be checked in each host.*
-
 Phase Align lines one track up with another (two mics on one source, a DI and an amp, a close and a room mic). Put
 it on one of the pair and feed the other into its **sidechain**; the meter then shows how well they agree.
 
-1. **Insert Phase Align on one track** of the pair and route the **other track to its sidechain**:
-   - Logic: the plugin window's *Side Chain* menu → the other track (with none chosen the screen says NO SIDECHAIN
-     SIGNAL).
-   - Live: in the device, set the sidechain input (*Audio From*) to the other track.
-   - Reaper: give the track 4 channels, send the other track to channels 3/4, and map them to the sidechain inputs in
-     the plugin's pin connector.
-   - Cubase/Nuendo: enable the plugin's side-chain button and add a side-chain send from the other track.
-   - Studio One and Bitwig: pick the other track in the plugin's sidechain selector.
+1. **Insert Phase Align on one track** of the pair and route the **other track to its sidechain** (how depends on your
+   host; with no sidechain the screen says NO SIDECHAIN SIGNAL).
 2. **Time first.** Switch to the **ALIGNMENT** view. It holds a hit from the sidechain and shows the waveforms on top of
    each other: the sidechain (pale), this track's INPUT (blue) and the OUTPUT (green). Turn **DELAY** on and move the
    knob until the green waveform starts where the pale one does; zoom in with the mouse wheel or the **-** and **+**

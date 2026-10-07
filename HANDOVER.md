@@ -74,23 +74,15 @@ analysis stays for ANALYSE. Tuned on the user's own stem pairs (`prototype/expor
    the knob previews; the legend toggles; and the Logic fix (a sidechain that is a copy of the input counts as none; the
    cause is the user's finding, the fix is only tested with synthetic buffers). The meter has no tuning left that doesn't
    need their ears. Bleed between mics is out of scope (user).
-2. **Listening.** (a) The 180-range A/B files in `prototype/out/range/` (current vs new; see `report.md` and
-   `fr_check.png`; only the RANGE in files differ; nothing sounding wrong means done). (b) M2 in a DAW. (c) P2: is true
-   rotation useful on real material. (d) P3 fade tuning (`prototype/out/p3/`). Real multi-mic stems are still wanted.
-3. **HIGH with RANGE in: leave the asterisk, or make the number exact?** Today it shows the first section's angle (0 to
-   90, within 6 degrees of the real phase at 75 Hz). It could instead be made exact by changing how the angle is split
-   between the two sections (a small change to the mapping, goldens and tests). Recommendation: leave it.
-4. **De-cramping of LOW with RANGE in:** its two stacked sections double the error against an analog all-pass (up to
-   4.6 degrees at 44.1 kHz and 3.9 at 48, against 0.8 to 2.8 for the others, all at 20 kHz at the worst knob position).
-   Doubling the oversampling quarters every error but adds a halfband stage (CPU and a few samples of latency, not
-   measured). Recommendation: leave it.
-5. **Host checks:** latency re-alignment per host (Hi/Lo now reports a small latency too), the quick start's sidechain
-   routing steps (the README keeps its "Draft" note, which the installer's readme copies, until they are checked), and
-   no-sidechain detection in Live and Reaper (Logic: see item 1).
-6. **`release.yml`** builds with the tests off, so a release could be cut from a commit whose CI failed: run it only on a
+2. **Listening.** Done (user, 2026-10-07): the RANGE in A/B files are good, and Constant's true rotation is useful.
+   Left: M2 in a DAW (below) and P3 fade tuning (`prototype/out/p3/`), with the user's multi-mic stems.
+3. **Decided (user, 2026-10-07):** HIGH with RANGE in keeps the asterisk (the tooltip explains it); the de-cramping of LOW
+   with RANGE in is left; latency re-alignment per host is fine; the README no longer carries host-specific sidechain
+   steps and other hosts are not going to be checked.
+4. **`release.yml`** builds with the tests off, so a release could be cut from a commit whose CI failed: run it only on a
    green commit, or add a CI-status check to it (plan M5). The first release run also checks the Windows and Linux
    installers' docs step.
-7. **ANALYSE (auto-suggest)** is next after the meter, and **the cleanup of what it doesn't use comes after that** (user,
+5. **ANALYSE (auto-suggest)** is next after the meter, and **the cleanup of what it doesn't use comes after that** (user,
    2026-10-07). The button is present but does nothing. What is ready for it: the waveform (PHAT) and attack lags and
    the curve and phase measures in `meter/CorrelationAnalyser` (off unless a view asks: `Needs`), the delay, polarity
    and phase response preview (`dsp/PhaseResponse.h`, `meter/HitCapture`), and the user's stem pairs with tests.
