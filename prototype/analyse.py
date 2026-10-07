@@ -3,7 +3,7 @@
     source .venv/bin/activate && python prototype/analyse.py          # synthetic checks, then the user's pairs
     ... python prototype/analyse.py --synthetic                         # only the known-answer checks
 
-Input = the track (what the plugin changes), sidechain = the reference. Both are captured, the cross-spectrum of the
+Input = the track (what the plugin changes), sidechain = the reference. Positive delay = delay the input. Both are captured, the cross-spectrum of the
 whole capture is taken once (Hann 8192 at 48 kHz, 75% overlap, scaled with the rate), and every candidate setting is
 scored from it in closed form: a candidate turns the input's spectrum by G(f) = s * H(f) * exp(-j 2 pi f d), where s is the
 polarity (+-1), H the phase stage's response at a static setting (the same formulas as src/dsp/PhaseResponse.h) and d the
@@ -163,16 +163,20 @@ def score_at(sp, g_k):
     return float(np.mean(r))
 
 
-def search(sp, top=6, verbose=False):
+def search(sp, top=6, verbose=False, window_ms=None):
+    """window_ms = (lo, hi) restricts the delay to that range (the attack lag's neighbourhood); None searches the knob's reach."""
     t0 = time.time()
     freqs = sp.freqs
     best = []    # (score, mode, wide, theta, delay, flip)
+    lo_s, hi_s = (-MAX_DELAY_MS, MAX_DELAY_MS) if window_ms is None else window_ms
+    lo_s, hi_s = max(lo_s, -MAX_DELAY_MS) * 1e-3 * sp.fs, min(hi_s, MAX_DELAY_MS) * 1e-3 * sp.fs
     for mode, wide, theta in settings():
         h = stage_response(mode, wide, theta, sp.fs, freqs) if mode != "none" else np.ones(len(freqs))
         r, lags = band_scores(sp, h)
         s = r.mean(0)
+        inside = (lags >= lo_s) & (lags <= hi_s)
         for flip, sign in ((False, 1.0), (True, -1.0)):
-            v = sign * s
+            v = np.where(inside, sign * s, -9.0)
             for j in np.argsort(v)[::-1][:3]:     # a few peaks per setting, so families survive de-duplication
                 best.append((v[j], mode, wide, theta, lags[j], flip))
     best.sort(key=lambda c: -c[0])
@@ -183,7 +187,7 @@ def search(sp, top=6, verbose=False):
         sign = -1.0 if flip else 1.0
         bestc = (-9.0, d)
         for dd in np.arange(d - 0.3, d + 0.3001, 0.1):
-            if abs(dd) > MAX_DELAY_MS * 1e-3 * sp.fs:
+            if dd < lo_s - 1e-9 or dd > hi_s + 1e-9:
                 continue
             g = sign * h * np.exp(-2j * np.pi * freqs * dd / sp.fs)
             bestc = max(bestc, (score_at(sp, g), dd))
@@ -201,6 +205,54 @@ def search(sp, top=6, verbose=False):
     if verbose:
         print(f"  search {time.time() - t0:.1f} s, {len(settings())} settings, {len(sp.edges)} bands")
     return families, baseline
+
+
+# --- the attack lag (plan R18, offline) ----------------------------------------------------------------------------------------
+ATTACK_BANDS = [(35.0, 150.0, 12.0), (150.0, 600.0, 5.0), (600.0, None, 1.5)]   # low Hz, high Hz, smoothing ms
+ATTACK_RUNNER_UP = 0.65     # a peak is clear when the strongest rival outside its lobe is below this fraction of it
+SEARCH_MS = 40.0
+
+
+def attack_features(x, fs):
+    """Per band: the log of the smoothed magnitude, positive differences only (log-envelope flux)."""
+    from scipy.signal import butter, sosfilt
+    feats = []
+    for lo, hi, ms in ATTACK_BANDS:
+        sos = (butter(4, [lo, min(hi, fs * 0.45)], "bandpass", fs=fs, output="sos") if hi
+               else butter(4, lo, "highpass", fs=fs, output="sos"))
+        m = np.abs(sosfilt(sos, x))
+        n = max(1, int(round(ms * 1e-3 * fs)))
+        m = np.convolve(m, np.ones(n) / n, mode="same")
+        lg = np.log(m + 1e-6)
+        feats.append(np.maximum(np.diff(lg, prepend=lg[0]), 0.0))
+    return feats
+
+
+def attack_lag(x, y, fs):
+    """The delay (ms, positive = delay the input to meet the sidechain) from the attacks, the three bands' cross-correlations
+    (each normalised) averaged. Returns (lag_ms, clear, strength, runner_up_ratio)."""
+    fx, fy = attack_features(x, fs), attack_features(y, fs)
+    reach = int(SEARCH_MS * 1e-3 * fs)
+    n = 1 << int(np.ceil(np.log2(len(x) + reach)))
+    acc = np.zeros(2 * reach + 1)
+    for a, b in zip(fx, fy):
+        a, b = a - a.mean(), b - b.mean()
+        c = np.fft.irfft(np.fft.rfft(a, n) * np.conj(np.fft.rfft(b, n)), n)    # c[m] = sum a[t+m] b[t]: positive m = a later
+        c = np.concatenate([c[-reach:], c[:reach + 1]]) / math.sqrt((a * a).sum() * (b * b).sum())
+        acc += c / len(fx)
+    acc = acc[::-1]     # c's lag m > 0 means the input is later, so the delay that aligns is d = -m; reversed, index i is d = i - reach
+    d = np.arange(-reach, reach + 1)
+    k = int(np.argmax(acc))
+    peak = acc[k]
+    lobe = int(0.004 * fs)
+    rest = np.concatenate([acc[:max(0, k - lobe)], acc[k + lobe:]])
+    runner = rest.max() / peak if peak > 0 and len(rest) else 1.0
+    frac = 0.0
+    if 0 < k < len(acc) - 1:
+        y0, y1, y2 = acc[k - 1], acc[k], acc[k + 1]
+        den = y0 - 2 * y1 + y2
+        frac = 0.5 * (y0 - y2) / den if den != 0 else 0.0
+    return (d[k] + frac) / fs * 1e3, bool(peak > 0 and runner < ATTACK_RUNNER_UP), float(peak), float(runner)
 
 
 # --- render check against the plugin's own DSP -----------------------------------------------------------------------------
@@ -283,11 +335,27 @@ def synthetic_checks(report):
 PAIRS = ["kick", "snare", "bass", "guitar", "hats"]
 
 
+def analyse(x, y, fs, top=5):
+    """The delay-first search: the attack lag fixes the delay (when it is clear and inside the knob's reach), then phase and
+    polarity are chosen at that delay (refined by up to +-0.3 ms, the score's own say). Falls back to the joint search.
+    Returns (candidates, baseline r, attack reading, which method)."""
+    sp = spectra(x, y, fs)
+    lag = attack_lag(x, y, fs)
+    ms, clear = lag[0], lag[1]
+    if clear and abs(ms) <= MAX_DELAY_MS:
+        fam, base = search(sp, top=top, window_ms=(ms - 0.3, ms + 0.3))
+        return fam, base, lag, "attack"
+    fam, base = search(sp, top=top)
+    return fam, base, lag, "score" if not clear else "score (attack out of range)"
+
+
 def user_pairs(report):
     fs = 48000
     report.append("## The user's stem pairs\n")
-    report.append("Input = the `_b` take, sidechain = the `_a` take (`prototype/export_pairs.py`). Scores are band-averaged r; "
-                  "`rendered` is the same candidate run through the plugin's Hi/Lo and an exact delay.\n")
+    report.append("Input = the `_a` take, sidechain = the `_b` take (as the meter tests read them; `prototype/export_pairs.py`). "
+                  "Positive delay = delay the input. `joint` is the first version (score alone, whole ±4 ms); `attack-first` takes "
+                  "the delay from the attack lag and chooses phase and polarity within 0.3 ms of it. `rendered` is the candidate "
+                  "run through the plugin's Hi/Lo and an exact delay.\n")
     for tag in PAIRS:
         try:
             a = np.fromfile(ROOT / "captures" / f"{tag}_a.f32", np.float32).astype(np.float64)
@@ -295,16 +363,19 @@ def user_pairs(report):
         except FileNotFoundError:
             print(f"{tag}: captures/{tag}_*.f32 missing (run prototype/export_pairs.py)")
             continue
-        sp = spectra(b, a, fs)
-        fam, base = search(sp, top=5, verbose=True)
-        print(f"\n{tag}: baseline r {base:+.3f}, {len(sp.edges)} active bands ({sp.centres[0]:.0f} to {sp.centres[-1]:.0f} Hz)")
-        report.append(f"### {tag}\n\nBaseline (everything off): r = {base:+.3f}; {len(sp.edges)} active bands, "
-                      f"{sp.centres[0]:.0f} to {sp.centres[-1]:.0f} Hz.\n")
-        report.append("| # | setting | predicted r | rendered r |\n|---|---|---|---|")
-        for i, c in enumerate(fam):
-            rend = rendered_score(b, a, fs, c)
-            print(f"  {i + 1}. {c.label():48s} predicted {c.score:+.3f}  rendered {rend:+.3f}")
-            report.append(f"| {i + 1} | {c.label()} | {c.score:+.3f} | {rend:+.3f} |")
+        sp = spectra(a, b, fs)
+        joint, base = search(sp, top=3)
+        fam, _, lag, how = analyse(a, b, fs)
+        print(f"\n{tag}: baseline r {base:+.3f}; attack lag {lag[0]:+.2f} ms ({'clear' if lag[1] else 'unclear'}, "
+              f"peak {lag[2]:.2f}, rival {lag[3]:.2f}); delay from {how}")
+        report.append(f"### {tag}\n\nBaseline r = {base:+.3f}. Attack lag {lag[0]:+.2f} ms "
+                      f"({'clear' if lag[1] else 'unclear'}; peak {lag[2]:.2f}, strongest rival {lag[3]:.2f} of it). Delay taken from: {how}.\n")
+        report.append("| version | # | setting | predicted r | rendered r |\n|---|---|---|---|---|")
+        for name, lst in (("joint", joint), ("attack-first", fam)):
+            for i, c in enumerate(lst[:3]):
+                rend = rendered_score(a, b, fs, c)
+                print(f"  {name:12s} {i + 1}. {c.label():48s} predicted {c.score:+.3f}  rendered {rend:+.3f}")
+                report.append(f"| {name} | {i + 1} | {c.label()} | {c.score:+.3f} | {rend:+.3f} |")
         report.append("")
 
 
