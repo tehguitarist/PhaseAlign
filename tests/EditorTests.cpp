@@ -377,6 +377,7 @@ TEST_CASE("meter on screen: reads +1 when aligned, and stops when off", "[.][des
     int lag = d;
     float sidechainGain = 1.0f;
     bool stereoWide = false;
+    double hitGain = 1.0, hitDecaySamples = 2400.0; // the body's decay: short, the hits are followed by digital silence
     bool hits = false; // true: a drum-like hit every 0.3 s (a click and a decaying 120 Hz body) instead of noise
     long long counter = 0;
     // Roughly real time: a block of audio, then about a block's worth of message loop.
@@ -392,8 +393,8 @@ TEST_CASE("meter on screen: reads +1 when aligned, and stops when off", "[.][des
                 if (hits)
                 {
                     const auto n = (double)(counter++ % 14400);
-                    x = (float)(0.7 * std::exp(-n / 2400.0) * std::sin(2.0 * 3.14159265 * 120.0 * n / fs)) +
-                        (n < 60.0 ? 0.4f * (rng.nextFloat() - 0.5f) * (float)(1.0 - n / 60.0) : 0.0f);
+                    x = (float)(hitGain * 0.7 * std::exp(-n / hitDecaySamples) * std::sin(2.0 * 3.14159265 * 120.0 * n / fs)) +
+                        (n < 60.0 ? (float)hitGain * 0.4f * (rng.nextFloat() - 0.5f) * (float)(1.0 - n / 60.0) : 0.0f);
                 }
                 history[h] = x;
                 const auto late = history[(h + history.size() - (size_t)lag) % history.size()] * sidechainGain;
@@ -464,6 +465,39 @@ TEST_CASE("meter on screen: reads +1 when aligned, and stops when off", "[.][des
     CHECK_FALSE(screen.isPreviewing());
     proc.getUiState().setProperty(UiProps::meterSpeed, "slow", nullptr);
     play(0.5);
+
+    // FAST on hits: the bands dip under the analysis's signal gate between hits, but the bars are held, not hidden.
+    proc.getUiState().setProperty(UiProps::meterView, "bands", nullptr);
+    proc.getUiState().setProperty(UiProps::meterSpeed, "fast", nullptr);
+    hits = true;
+    hitGain = 0.12; // quiet enough that the bands dip under the gate between hits
+    hitDecaySamples = 300.0; // 6 ms: digital silence between the hits, as in a real kick or snare take
+    play(2.0);
+    bool everMeasured[6] = {};
+    int gatedFor[6] = {}; // consecutive readings (100 ms each) that a band has been unmeasured
+    int vanished = 0, gapReadings = 0;
+    for (int i = 0; i < 40; ++i)
+    {
+        play(0.1);
+        for (int band = 0; band < 6; ++band)
+        {
+            const auto measured = ! std::isnan(screen.getAnalyser().bandsProcessed()[(size_t)band]);
+            everMeasured[band] = everMeasured[band] || measured;
+            gatedFor[band] = measured ? 0 : gatedFor[band] + 1;
+            if (everMeasured[band] && ! measured && gatedFor[band] <= 3) // in a gap of up to 0.3 s of audio (this test plays slower than real time): inside the hold
+            {
+                ++gapReadings;
+                vanished += std::isnan(screen.shownBand(band, true)); // its bar must still be there
+            }
+        }
+    }
+    CHECK(gapReadings > 20); // the analysis does drop bands under its gate between hits on FAST ...
+    CHECK(vanished == 0);    // ... and the bars hold through it
+    hitGain = 1.0;
+    hitDecaySamples = 2400.0;
+    hits = false;
+    proc.getUiState().setProperty(UiProps::meterSpeed, "slow", nullptr);
+    play(1.0);
 
     // The VECTORSCOPE's STEREO mode, on a wide stereo track: the track's own left and right.
     proc.getUiState().setProperty(UiProps::meterView, "vector", nullptr);

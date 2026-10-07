@@ -382,3 +382,74 @@ TEST_CASE("nothing is captured while the editor is closed, hidden, or the meter 
     }
     CHECK_FALSE(capture.isActive());
 }
+
+//==============================================================================
+TEST_CASE("a sidechain that is a copy of the track's own input counts as no sidechain (Logic with no source chosen)",
+          "[processor][meter]")
+{
+    const auto fs = 48000.0;
+    const auto block = 512;
+    PhaseAlignProcessor proc;
+    proc.prepareToPlay(fs, block);
+    auto& capture = proc.getMeterCapture();
+    capture.setActive(true); // what the meter screen does while it is showing
+
+    std::mt19937 rng(21);
+    std::normal_distribution<float> dist(0.0f, 0.2f);
+    juce::MidiBuffer midi;
+    const auto run = [&](double seconds, const std::function<void(juce::AudioBuffer<float>&)>& fillSidechain)
+    {
+        for (int done = 0; done < (int)(seconds * fs); done += block)
+        {
+            juce::AudioBuffer<float> b(4, block);
+            for (int ch = 0; ch < 2; ++ch)
+                for (int i = 0; i < block; ++i)
+                    b.setSample(ch, i, dist(rng));
+            fillSidechain(b);
+            proc.processBlock(b, midi);
+        }
+    };
+    const auto copyOfInput = [](juce::AudioBuffer<float>& b)
+    {
+        for (int ch = 0; ch < 2; ++ch)
+            b.copyFrom(2 + ch, 0, b, ch, 0, b.getNumSamples());
+    };
+    const auto otherSignal = [&](juce::AudioBuffer<float>& b)
+    {
+        for (int ch = 2; ch < 4; ++ch)
+            for (int i = 0; i < b.getNumSamples(); ++i)
+                b.setSample(ch, i, dist(rng));
+    };
+
+    // A real, different sidechain: present.
+    run(0.5, otherSignal);
+    CHECK(capture.hasSidechain());
+
+    // The host's copy of the track itself: not a sidechain, once it has been like that for a quarter of a second.
+    run(0.1, copyOfInput);
+    CHECK(capture.hasSidechain()); // not yet decided
+    run(0.5, copyOfInput);
+    CHECK_FALSE(capture.hasSidechain());
+
+    // A different signal again: present at once.
+    run(0.05, otherSignal);
+    CHECK(capture.hasSidechain());
+
+    // Silence in both is trivially "identical" but proves nothing: it doesn't start the count ...
+    run(0.5, copyOfInput);
+    CHECK_FALSE(capture.hasSidechain());
+    run(0.5, otherSignal);
+    CHECK(capture.hasSidechain());
+    for (int done = 0; done < (int)(1.0 * fs); done += block)
+    {
+        juce::AudioBuffer<float> silence(4, block);
+        silence.clear();
+        proc.processBlock(silence, midi);
+    }
+    CHECK(capture.hasSidechain()); // ... so a silent pair is left as it was (the screen's own silence timer handles it)
+
+    // Not capturing: nothing is tracked, and it starts from scratch.
+    capture.setActive(false);
+    run(1.0, copyOfInput);
+    CHECK(capture.hasSidechain()); // (capture off: the answer isn't used, and nothing was counted)
+}

@@ -194,7 +194,8 @@ input. Pick a view from the menu in the middle of the row under the screen.
 Six bars, one per band (20–100 Hz, 100–250, 250–630, 630 Hz–1.6k, 1.6k–4k, 4k–20k), each showing *r* for the OUTPUT with
 its number, and a blue tick for the INPUT. Two spaced mics make the low bands agree before the high ones do, so the
 ticks usually tell you which bands need work. Each bar averages everything in its band, so for two spaced mics the upper
-bars hover around 0 whatever you do (the comb averages away).
+bars hover around 0 whatever you do (the comb averages away). A band with almost no signal in it at the moment (between
+a kick's hits, say) keeps its last value for under a second and is then hidden, rather than flickering with every hit.
 
 ### VECTORSCOPE
 
@@ -203,7 +204,7 @@ bars hover around 0 whatever you do (the comb averages away).
 This track against the sidechain, as a shape: each pair of samples is a dot, the input in blue and the output in green,
 each scaled to its own level so only the *phase* shows. A **line running up and down** is in phase, a **circle** is 90°
 off, a **line across** is inverted, and a **cloud** means the two aren't related (a delay too long for the signal, say).
-The numbers are the correlation over the last 60 ms. Turn the delay and phase and watch the green shape close up.
+The numbers are the correlation over the same stretch of samples: the last quarter of a second on SLOW (so the shape and the numbers move slowly), the last 60 ms on FAST. Turn the delay and phase and watch the green shape close up.
 
 On a stereo track, the **SOURCE** label (top left of the plot) switches the vectorscope to the track's own **left and
 right**: the classic stereo goniometer.
@@ -243,7 +244,9 @@ within a couple of degrees. The delay counts as 0 when it is off.
 
 ### Messages
 
-- **NO SIDECHAIN SIGNAL**: nothing is routed to the sidechain, or it has been silent for more than a second.
+- **NO SIDECHAIN SIGNAL**: nothing is routed to the sidechain, or it has been silent for more than a second. Some hosts
+  (Logic Pro, for one) feed the track's own signal in as the sidechain when no source is chosen; the plugin notices a
+  sidechain that is an exact copy of its own input and treats it as no sidechain too.
 - **OFF**: the METER button is off.
 
 ## Which control for which problem

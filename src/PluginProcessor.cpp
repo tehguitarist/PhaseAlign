@@ -113,13 +113,49 @@ void PhaseAlignProcessor::processBlockBypassed(juce::AudioBuffer<float>& buffer,
     runChain(buffer, currentSettings().bypassed());
 }
 
+// With no sidechain source chosen, some hosts (Logic Pro, as the user found) don't give the plugin silence: they feed its
+// own input in as the sidechain. The meter would then compare the track with a perfect copy of itself and read +1. So a
+// sidechain that is sample for sample the main input, for a quarter of a second, counts as no sidechain at all. Silence
+// in both doesn't count either way (they are trivially equal), and the first sample that differs ends it at once.
+// Audio thread, before the chain overwrites the input (it runs in place); only while the meter is capturing.
+bool PhaseAlignProcessor::sidechainIsOwnInput(const juce::AudioBuffer<float>& main, const juce::AudioBuffer<float>& sidechain)
+{
+    if (! meterCapture.isActive())
+    {
+        identicalSamples = 0;
+        return false;
+    }
+    const auto n = main.getNumSamples();
+    const auto channels = std::min(main.getNumChannels(), sidechain.getNumChannels());
+    bool same = channels > 0, energy = false;
+    for (int ch = 0; ch < channels && same; ++ch)
+    {
+        const auto* a = main.getReadPointer(ch);
+        const auto* b = sidechain.getReadPointer(ch);
+        for (int i = 0; i < n; ++i)
+        {
+            if (a[i] != b[i])
+            {
+                same = false;
+                break;
+            }
+            energy = energy || a[i] != 0.0f;
+        }
+    }
+    if (! same)
+        identicalSamples = 0;
+    else if (energy) // identical and not just silence
+        identicalSamples = std::min(identicalSamples + n, 1 << 30);
+    return identicalSamples >= std::max(1, (int)(0.25 * sampleRate.load())); // a quarter of a second
+}
+
 void PhaseAlignProcessor::runChain(juce::AudioBuffer<float>& buffer, const pa::dsp::ChainSettings& settings)
 {
     juce::ScopedNoDenormals noDenormals;
     auto main = getBusBuffer(buffer, false, 0); // in place: the main input shares these channels
     const auto sidechain = getBusBuffer(buffer, true, 1);
     const auto numChannels = main.getNumChannels();
-    meterCapture.setSidechainPresent(sidechain.getNumChannels() > 0);
+    meterCapture.setSidechainPresent(sidechain.getNumChannels() > 0 && ! sidechainIsOwnInput(main, sidechain));
     meterCapture.setStereoTrack(numChannels > 1);
     {
         const auto position = getPlayHead() != nullptr ? getPlayHead()->getPosition() : juce::Optional<juce::AudioPlayHead::PositionInfo>();

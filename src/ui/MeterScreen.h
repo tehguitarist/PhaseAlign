@@ -22,7 +22,7 @@ namespace pa::ui
 // Three views, chosen from a menu that opens upwards from the bottom row's middle label (R23):
 //   - BANDS (the default): six bars of the correlation with the sidechain, output (lit segments) and input (a blue
 //     tick), their values, and the overall pair on the right.
-//   - VECTORSCOPE: a goniometer. The input and the output each against the sidechain, each scaled to its own level and
+//   - VECTORSCOPE: a goniometer (the last 0.25 s on SLOW, 60 ms on FAST). The input and the output each against the sidechain, each scaled to its own level and
 //     turned 45 degrees, so a line up and down is in phase, a circle 90 degrees off, a line across inverted.
 //   - ALIGNMENT (R19; `scope` in the code): this track, the sidechain and the output as waveforms on top of each other,
 //     each scaled to its own peak, triggered on the sidechain's loudest recent onset so a hit stays put. The mouse wheel
@@ -66,6 +66,9 @@ class MeterScreen : public DesignComponent, private juce::Timer
 
     static constexpr double noSignalSeconds = 1.0;
     static constexpr double zoomStep = 1.5; // the - and + buttons: a bit at a time
+    // A bar whose band falls under the analysis's signal gate (between a kick's hits, say) keeps its last value this long
+    // before it is hidden: on FAST the averages are short enough for a band to dip under the gate between every hit.
+    static constexpr double gateHoldMs = 800.0;
 
     MeterScreen(const SourceAssets&, meter::MeterCapture&);
     ~MeterScreen() override;
@@ -217,6 +220,9 @@ class MeterScreen : public DesignComponent, private juce::Timer
     std::unique_ptr<juce::LookAndFeel> menuLookAndFeel;
     std::array<float, meter::CorrelationAnalyser::numBands> shownBandX{}, shownBandZ{};
     float shownOverallX = 0.0f, shownOverallZ = 0.0f;
+    // How long each shown value has been unmeasured (gated), in ms: it is held that long (gateHoldMs) before it goes.
+    std::array<double, meter::CorrelationAnalyser::numBands> gatedBandX{}, gatedBandZ{};
+    double gatedOverallX = 0.0, gatedOverallZ = 0.0;
 
     bool shown[3] = {true, true, true};
     bool meterOn = false, held = false, wasFrozen = false;

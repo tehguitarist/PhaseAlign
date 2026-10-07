@@ -9,6 +9,8 @@ namespace pa::ui
 {
 namespace
 {
+// The small framed labels (CAPTURE, SOURCE): 8 clear above the capitals (12 high) and 8 below the baseline, like HOLD's frame.
+constexpr float labelBoxHeight = 28.0f, labelBoxBaseline = 20.0f;
 constexpr int segmentsPerHalf = 10;  // overall bar: one segment per 0.1 of correlation
 constexpr float segmentFill = 0.72f; // of the segment pitch (the rest is the gap)
 
@@ -299,6 +301,9 @@ void MeterScreen::updateTimer()
         shownBandX.fill(std::nanf(""));
         shownBandZ.fill(std::nanf(""));
         shownOverallX = shownOverallZ = std::nanf("");
+        gatedBandX.fill(0.0);
+        gatedBandZ.fill(0.0);
+        gatedOverallX = gatedOverallZ = 0.0;
         lastEaseMs = nowMs();
         analyser.clearPreview();
         wasFrozen = false;
@@ -365,19 +370,29 @@ MeterScreen::State MeterScreen::currentState() const
 bool MeterScreen::easeShown(double elapsedMs)
 {
     // The bars move toward what the analysis says at the screen's own pace, so they glide however the analysis moves:
-    // a time constant of 0.3 s on SLOW, 0.1 s on FAST. An unmeasured (gated) value shows at once; the first value after
-    // one jumps to it.
+    // a time constant of 0.3 s on SLOW, 0.1 s on FAST. An unmeasured (gated) value is held for gateHoldMs before it goes;
+    // the first value after one jumps to it.
     const auto tau = analyser.getSpeed() == Speed::slow ? 0.3 : 0.1;
     const auto k = (float)(1.0 - std::exp(-juce::jlimit(1.0, 200.0, elapsedMs) / 1000.0 / tau));
     bool moving = false;
-    const auto step = [&](float& shown, float target)
+    const auto step = [&](float& shown, double& gatedMs, float target)
     {
         if (std::isnan(target))
         {
-            moving = moving || ! std::isnan(shown);
-            shown = target;
+            // Not measured: hold what is shown for a while (a band dips under the gate between hits), then let it go.
+            if (! std::isnan(shown))
+            {
+                gatedMs += elapsedMs;
+                if (gatedMs >= gateHoldMs)
+                {
+                    shown = target;
+                    moving = true;
+                }
+            }
+            return;
         }
-        else if (std::isnan(shown))
+        gatedMs = 0.0;
+        if (std::isnan(shown))
         {
             shown = target;
             moving = true;
@@ -391,11 +406,11 @@ bool MeterScreen::easeShown(double elapsedMs)
     };
     for (size_t b = 0; b < shownBandX.size(); ++b)
     {
-        step(shownBandX[b], analyser.bandsProcessed()[b]);
-        step(shownBandZ[b], analyser.bandsUnprocessed()[b]);
+        step(shownBandX[b], gatedBandX[b], analyser.bandsProcessed()[b]);
+        step(shownBandZ[b], gatedBandZ[b], analyser.bandsUnprocessed()[b]);
     }
-    step(shownOverallX, analyser.overallProcessed());
-    step(shownOverallZ, analyser.overallUnprocessed());
+    step(shownOverallX, gatedOverallX, analyser.overallProcessed());
+    step(shownOverallZ, gatedOverallZ, analyser.overallUnprocessed());
     return moving;
 }
 
@@ -497,8 +512,8 @@ juce::Rectangle<float> MeterScreen::captureToggleArea() const
 {
     // Top left of the plot, under the span: only in ALIGNMENT.
     const auto s = getScale();
-    return view == View::scope ? juce::Rectangle<float>(lx(design::meterPlotLeft) + 8.0f * s, ly(design::meterPlusOneY) + 25.0f * s,
-                                                        150.0f * s, 22.0f * s)
+    return view == View::scope ? juce::Rectangle<float>(lx(design::meterPlotLeft) + 8.0f * s, ly(design::meterPlusOneY) + 36.0f * s,
+                                                        150.0f * s, labelBoxHeight * s)
                                : juce::Rectangle<float>();
 }
 
@@ -516,7 +531,8 @@ juce::Rectangle<float> MeterScreen::vectorModeArea() const
     // Top left of the plot, under the correlations: only in the VECTORSCOPE of a stereo track.
     const auto s = getScale();
     return view == View::vector && capture.isStereoTrack()
-               ? juce::Rectangle<float>(lx(design::meterPlotLeft) + 8.0f * s, ly(design::meterPlusOneY) + 62.0f * s, 200.0f * s, 22.0f * s)
+               ? juce::Rectangle<float>(lx(design::meterPlotLeft) + 8.0f * s, ly(design::meterPlusOneY) + 68.0f * s, 200.0f * s,
+                                        labelBoxHeight * s)
                : juce::Rectangle<float>();
 }
 
@@ -1075,7 +1091,7 @@ void MeterScreen::paintScope(juce::Graphics& g) const
         const auto toggle = captureToggleArea();
         const auto patchWidth = 232.0f * s;
         g.setColour(design::screenBlack.withAlpha(0.8f));
-        g.fillRect(juce::Rectangle<float>(left + 6.0f * s, top + 6.0f * s, patchWidth, captureMode ? 62.0f * s : 40.0f * s));
+        g.fillRect(juce::Rectangle<float>(left + 6.0f * s, top + 6.0f * s, patchWidth, captureMode ? 96.0f * s : 70.0f * s));
         g.setColour(design::meterAxisText.withAlpha(0.6f));
         drawTextAt(g, small, "SPAN " + juce::String(scopeSpanMs, scopeSpanMs < 10.0 ? 1 : 0) + " MS", left + 14.0f * s,
                    top + 20.0f * s, juce::Justification::left);
@@ -1094,8 +1110,8 @@ void MeterScreen::paintScope(juce::Graphics& g) const
                 g.drawLine(c.x, c.y - arm, c.x, c.y + arm, w);
         }
         g.setColour(design::meterAxisText.withAlpha(captureMode ? 0.95f : 0.45f));
-        drawTextAt(g, small, captureMode ? "CAPTURE  ON" : "CAPTURE  OFF", toggle.getX() + 8.0f * s, top + 41.0f * s,
-                   juce::Justification::left);
+        drawTextAt(g, small, captureMode ? "CAPTURE  ON" : "CAPTURE  OFF", toggle.getX() + 10.0f * s,
+                   toggle.getY() + labelBoxBaseline * s, juce::Justification::left);
         g.setColour(design::meterAxisText.withAlpha(0.45f));
         g.drawRect(juce::Rectangle<float>(toggle.getX(), toggle.getY(), textWidth(small, "CAPTURE  OFF") + 20.0f * s, toggle.getHeight()),
                    juce::jmax(1.0f, 1.0f * s));
@@ -1103,7 +1119,7 @@ void MeterScreen::paintScope(juce::Graphics& g) const
         {
             g.setColour(design::meterAxisText.withAlpha(0.6f));
             drawTextAt(g, small, held ? "OUTPUT: THIS HIT THROUGH THE KNOBS" : "WAITING FOR A HIT TO CAPTURE",
-                       left + 14.0f * s, top + 62.0f * s, juce::Justification::left);
+                       left + 14.0f * s, top + 88.0f * s, juce::Justification::left);
         }
     }
 }
@@ -1121,7 +1137,8 @@ void MeterScreen::vectorPoints(std::vector<juce::Point<float>>& input, std::vect
     const auto fs = frozenWindow ? vectorCapture.getSampleRate() : scopeBuffer.getSampleRate();
     if (fs <= 0.0)
         return;
-    const auto count = (long long)(0.06 * fs);
+    // SLOW looks at a quarter of a second of samples (the shape and its numbers move slowly), FAST at the last 60 ms.
+    const auto count = (long long)((analyser.getSpeed() == Speed::slow ? 0.25 : 0.06) * fs);
     const auto last = frozenWindow ? vectorCapture.lastIndex() : scopeBuffer.end() - 1;
     if (! frozenWindow && scopeBuffer.total() < count + 8)
         return;
@@ -1202,7 +1219,7 @@ MeterScreen::VectorReading MeterScreen::vectorReading() const
 
 void MeterScreen::paintVector(juce::Graphics& g) const
 {
-    // The input (blue) and the output (green) each against the sidechain, as paths through the last 60 ms of samples,
+    // The input (blue) and the output (green) each against the sidechain, as dots for the last 0.25 s (SLOW) or 60 ms (FAST),
     // the older part fainter. Both scaled to their own levels, so level differences don't tilt the shape: only the phase
     // relation shows.
     const auto s = getScale();
@@ -1218,7 +1235,7 @@ void MeterScreen::paintVector(juce::Graphics& g) const
         const auto small = meterFont(assets, 12.0f * s).withExtraKerningFactor(0.1f);
         const auto label = juce::String("SOURCE  ") + (isVectorStereo() ? "STEREO" : "SIDECHAIN");
         g.setColour(design::meterAxisText.withAlpha(0.95f));
-        drawTextAt(g, small, label, area.getX() + 8.0f * s, area.getY() + 15.0f * s, juce::Justification::left);
+        drawTextAt(g, small, label, area.getX() + 10.0f * s, area.getY() + labelBoxBaseline * s, juce::Justification::left);
         g.setColour(design::meterAxisText.withAlpha(0.45f));
         g.drawRect(juce::Rectangle<float>(area.getX(), area.getY(), textWidth(small, "SOURCE  SIDECHAIN") + 20.0f * s, area.getHeight()),
                    juce::jmax(1.0f, 1.0f * s));
@@ -1254,18 +1271,18 @@ void MeterScreen::paintVector(juce::Graphics& g) const
     const auto font = meterFont(assets, 16.0f * s, true);
     const auto text = [](float r) { return (r > 0.0f ? "+" : "") + juce::String(r, 2); };
     g.setColour(design::screenBlack.withAlpha(0.85f));
-    g.fillRect(juce::Rectangle<float>(left + 6.0f * s, top + 6.0f * s, 250.0f * s, 46.0f * s));
+    g.fillRect(juce::Rectangle<float>(left + 6.0f * s, top + 6.0f * s, 250.0f * s, 56.0f * s));
     const auto what = reading.stereo ? juce::String("L/R r ") : juce::String("r ");
     if (shown[(size_t)Series::output])
     {
         g.setColour(design::phosphor);
-        drawTextAt(g, font, "OUTPUT  " + what + text(reading.outputR), left + 14.0f * s, top + 24.0f * s,
+        drawTextAt(g, font, "OUTPUT  " + what + text(reading.outputR), left + 14.0f * s, top + 26.0f * s,
                    juce::Justification::left);
     }
     if (shown[(size_t)Series::input])
     {
         g.setColour(design::meterInput);
-        drawTextAt(g, font, "INPUT   " + what + text(reading.inputR), left + 14.0f * s, top + 44.0f * s,
+        drawTextAt(g, font, "INPUT   " + what + text(reading.inputR), left + 14.0f * s, top + 54.0f * s,
                    juce::Justification::left);
     }
 }
@@ -1281,7 +1298,7 @@ void MeterScreen::paintPreviewNote(juce::Graphics& g) const
         const auto ms = std::abs(analyser.previewDelayMs()) < 0.0005 ? 0.0 : analyser.previewDelayMs();
         const auto font = meterFont(assets, 16.0f * s, true);
         const auto y = view == View::bands ? ly(design::meterMinusOneY) - 14.0f * s
-                                           : ly(design::meterPlusOneY) + (view == View::scope ? 66.0f : 84.0f) * s;
+                                           : ly(design::meterPlusOneY) + (view == View::scope ? 114.0f : 108.0f) * s;
         const juce::String note = "PREVIEW  DELAY " + juce::String(ms >= 0.0 ? "+" : "") + juce::String(ms, 3) + " ms" +
                                   (analyser.isPreviewInverted() ? "  INVERTED" : "") +
                                   (analyser.previewHasPhase() && view == View::scope ? "  (PHASE NOT SHOWN HERE)" : "");
@@ -1293,7 +1310,7 @@ void MeterScreen::paintPreviewNote(juce::Graphics& g) const
     else if (isFrozen() && view == View::scope)
     {
         g.setColour(design::meterAxisText.withAlpha(0.5f));
-        drawTextAt(g, meterFont(assets, 12.0f * s), "DRAG TO SLIDE THE INPUT", x, ly(design::meterPlusOneY) + 66.0f * s,
+        drawTextAt(g, meterFont(assets, 12.0f * s), "DRAG TO SLIDE THE INPUT", x, ly(design::meterPlusOneY) + 114.0f * s,
                    juce::Justification::left);
     }
 }

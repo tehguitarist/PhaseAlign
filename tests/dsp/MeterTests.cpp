@@ -1209,3 +1209,54 @@ TEST_CASE("capture: the side streams are only filled when given, and are aligned
         CHECK(s4[(size_t)i] == 0.0f);
     }
 }
+
+// Hidden, diagnostic: how often each band is not measured (gated) or reads about 0, per speed, on the user's pairs.
+TEST_CASE("bands: how often a band is gated or near zero", "[.bandgate]")
+{
+    const auto load = [](const std::string& path)
+    {
+        std::vector<float> v;
+        if (auto* f = std::fopen(path.c_str(), "rb"))
+        {
+            std::fseek(f, 0, SEEK_END);
+            v.resize((size_t)std::ftell(f) / sizeof(float));
+            std::rewind(f);
+            REQUIRE(std::fread(v.data(), sizeof(float), v.size(), f) == v.size());
+            std::fclose(f);
+        }
+        return v;
+    };
+    const auto fs = 48000.0;
+    for (const char* name : {"kick", "snare", "bass", "guitar", "hats"})
+        for (const auto speed : {CorrelationAnalyser::Speed::slow, CorrelationAnalyser::Speed::fast})
+        {
+            const auto a1 = load(std::string("captures/") + name + "_a.f32"), a2 = load(std::string("captures/") + name + "_b.f32");
+            REQUIRE_FALSE(a1.empty());
+            CorrelationAnalyser a;
+            a.prepare(fs);
+            a.setSpeed(speed);
+            a.setNeeds({false, false, true, false});
+            int ticks = 0, gated[6] = {}, nearZero[6] = {};
+            const auto n = std::min(a1.size(), a2.size());
+            for (size_t pos = 0; pos + 1600 <= n; pos += 1600)
+            {
+                a.process(a1.data() + pos, a1.data() + pos, a2.data() + pos, 1600);
+                if (pos < (size_t)(fs * 4))
+                    continue;
+                ++ticks;
+                for (int b = 0; b < 6; ++b)
+                {
+                    const auto v = a.bandsProcessed()[(size_t)b];
+                    gated[b] += std::isnan(v);
+                    nearZero[b] += ! std::isnan(v) && std::abs(v) < 0.05f;
+                }
+            }
+            std::printf("%-6s %s  gated %%:", name, speed == CorrelationAnalyser::Speed::fast ? "fast" : "slow");
+            for (int b = 0; b < 6; ++b)
+                std::printf(" %3d", 100 * gated[b] / std::max(1, ticks));
+            std::printf("   |r|<0.05 %%:");
+            for (int b = 0; b < 6; ++b)
+                std::printf(" %3d", 100 * nearZero[b] / std::max(1, ticks));
+            std::printf("\n");
+        }
+}

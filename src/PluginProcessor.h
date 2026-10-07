@@ -107,6 +107,8 @@ class PhaseAlignProcessor : public juce::AudioProcessor,
 
     static juce::ValueTree defaultUiState();
     void restoreUiState(const juce::ValueTree& loaded);
+    bool sidechainIsOwnInput(const juce::AudioBuffer<float>& main, const juce::AudioBuffer<float>& sidechain);
+    int identicalSamples = 0; // audio thread: how long the sidechain has been a copy of the input
     void runChain(juce::AudioBuffer<float>&, const pa::dsp::ChainSettings&);
 
     juce::AudioProcessorValueTreeState parameters;
