@@ -105,8 +105,8 @@ analysis stays for ANALYSE. Tuned on the user's own stem pairs (`prototype/expor
    listening (sums with the sidechain) the search's pick was best on 5 of 6: snare sample (CONSTANT 50°, -5.94 ms, only one
    whose transients lined up; the user's own 4 ms pick was worst, so **the delay should reach 6 ms**, user), snare OH
    (CONSTANT 5°, Ø, -1.85 ms), kick sample (attack-first LO in 62.5°, +1.21 ms; the joint pick's transients didn't line up),
-   kick OH (joint, LO in 140°, Ø, -4.94 ms, tied with the user's own), guitar (joint CONSTANT 110°, -0.58 ms; attack-first
-   was worst). The bass was the exception: off was best (the search's -0.42 ms LO in 27.5° had less low end, the user's
+   kick OH (joint, LO in 140°, Ø, -4.94 ms, tied with the user's own), guitar (joint CONSTANT 110°, -0.58 ms best; then off, then the
+   user's own LO in 102.6° at 0 ms, attack-first worst). The bass was the exception: off was best (the search's -0.42 ms LO in 27.5° had less low end, the user's
    +4.6 ms HI out worst). Built from that, in `analyse.suggest`: (1) the **low-end guard** (a candidate must not lower r
    below 300 Hz: the bass is the only pair it rejects), (2) **attack-first only when the attack peak is >= 0.35**, else the
    joint search (0.39 kick sample, 0.61 snare OH vs 0.30 kick OH, 0.18 guitar: a threshold from four pairs, a first
