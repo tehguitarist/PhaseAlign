@@ -39,6 +39,7 @@ class PhaseAlignProcessor : public juce::AudioProcessor,
         static inline const juce::Identifier showOutput{"showOutput"};       // bool
         static inline const juce::Identifier showSidechain{"showSidechain"}; // bool
         static inline const juce::Identifier alignCapture{"alignCapture"}; // bool: ALIGNMENT holds the last hit
+        static inline const juce::Identifier tooltipsOn{"tooltipsOn"};     // bool: the "?" switch (off by default)
     };
     static constexpr double minUiScale = 0.6, maxUiScale = 2.0;
     static constexpr double defaultUiScale = 0.8; // 782x490 (user, 2026-10-06)

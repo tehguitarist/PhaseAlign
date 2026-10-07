@@ -46,6 +46,7 @@ set(PA_SOURCES
     src/ui/MeterScreen.cpp
     src/ui/PanelButton.cpp
     src/ui/Readout.cpp
+    src/ui/HelpButton.cpp
     src/ui/ScaleLabel.cpp
     src/ui/ToggleSwitch3.cpp
 )

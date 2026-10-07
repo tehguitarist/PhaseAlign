@@ -343,6 +343,8 @@ TEST_CASE("dimming snapshots", "[.][snapshot]")
         set(id::phaseOn, shot.phaseOn ? 1.0f : 0.0f);
         std::unique_ptr<PhaseAlignEditor> editor(dynamic_cast<PhaseAlignEditor*>(proc.createEditor()));
         REQUIRE(editor != nullptr);
+        if (std::string_view(shot.name) == "dim_both_on_100_retina.png") // also shows the "?" lit
+            editor->getHelpButton().setOn(true);
         const auto image = editor->createComponentSnapshot(editor->getLocalBounds(), true, shot.pixelScale);
         const auto file = dir.getChildFile(shot.name);
         file.deleteFile();

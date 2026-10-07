@@ -2,6 +2,7 @@
 
 #include "PluginProcessor.h"
 #include "params/Parameters.h"
+#include "ui/HelpButton.h"
 #include "ui/ImageKnob.h"
 #include "ui/MeterScreen.h"
 #include "ui/PanelButton.h"
@@ -27,6 +28,9 @@ class PhaseAlignEditor : public juce::AudioProcessorEditor,
     // Test hooks: how often the panel itself has painted, and the meter screen.
     int getPaintCount() const { return paintCount; }
     pa::ui::MeterScreen& getMeterScreen() { return meterScreen; }
+    pa::ui::HelpButton& getHelpButton() { return helpButton; }
+    // Whether the tooltip window would show this component's tip now: only the "?" does while the tooltips are off.
+    bool tooltipAllowed(const juce::Component& c) const { return tooltipWindow.allows(c); }
 
   private:
     class PanelLookAndFeel : public juce::LookAndFeel_V4
@@ -86,7 +90,27 @@ class PhaseAlignEditor : public juce::AudioProcessorEditor,
 
     juce::ParameterAttachment delayReadoutAttachment, phaseReadoutAttachment, polarityReadoutAttachment,
         rangeAttachment, modeAttachment, delayOnAttachment, phaseOnAttachment;
-    juce::TooltipWindow tooltipWindow{this, 700};
+    pa::ui::HelpButton helpButton{pa::design::helpButtonSlot};
+
+    // Tips show only while the "?" is on, except the "?"'s own. Quicker to appear than JUCE's 700 ms.
+    static constexpr int tipDelayMs = 300;
+    class TipWindow : public juce::TooltipWindow
+    {
+      public:
+        TipWindow(juce::Component* parent, const pa::ui::HelpButton& help)
+            : juce::TooltipWindow(parent, tipDelayMs), helpButton(help)
+        {
+        }
+        bool allows(const juce::Component& c) const { return helpButton.isOn() || &c == &helpButton; }
+
+      private:
+        juce::String getTipFor(juce::Component& c) override
+        {
+            return allows(c) ? juce::TooltipWindow::getTipFor(c) : juce::String();
+        }
+        const pa::ui::HelpButton& helpButton;
+    };
+    TipWindow tooltipWindow{this, helpButton};
 
     std::vector<pa::ui::DesignComponent*> designComponents;
     int paintCount = 0;

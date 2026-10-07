@@ -280,8 +280,12 @@ PhaseAlignEditor::PhaseAlignEditor(PhaseAlignProcessor& p)
                             speed == pa::ui::MeterScreen::Speed::fast ? "fast" : "slow", nullptr);
     };
 
+    helpButton.setOn((bool)uiState.getProperty(PhaseAlignProcessor::UiProps::tooltipsOn));
+    helpButton.onToggle = [this](bool on)
+    { uiState.setProperty(PhaseAlignProcessor::UiProps::tooltipsOn, on, nullptr); };
+
     designComponents = {&delayKnob,     &phaseKnob,    &unitSwitch,   &modeSwitch,  &meterButton,
-                        &analyseButton, &delayReadout, &phaseReadout, &meterScreen, &rangeLabel};
+                        &analyseButton, &delayReadout, &phaseReadout, &meterScreen, &rangeLabel, &helpButton};
     for (auto& t : toggles)
     {
         if (t.led != nullptr)
@@ -357,6 +361,10 @@ void PhaseAlignEditor::valueTreePropertyChanged(juce::ValueTree&, const juce::Id
     {
         unitSwitch.setIndex(unitPosition(delayUnit()));
         updateDelayReadout();
+    }
+    else if (property == PhaseAlignProcessor::UiProps::tooltipsOn)
+    {
+        helpButton.setOn((bool)uiState.getProperty(PhaseAlignProcessor::UiProps::tooltipsOn));
     }
     else if (property == PhaseAlignProcessor::UiProps::meterOn || property == PhaseAlignProcessor::UiProps::meterView ||
              property == PhaseAlignProcessor::UiProps::meterSpeed ||

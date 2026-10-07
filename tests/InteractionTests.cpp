@@ -310,10 +310,11 @@ TEST_CASE("meter view: the selector in the middle of the bottom row opens a menu
     REQUIRE(screen.getView() == pa::ui::MeterScreen::View::bands); // the default
     using View = pa::ui::MeterScreen::View;
 
-    // The selector sits under the plot centre; elsewhere clicks pass through. A click opens the menu (here: counted).
+    // The selector sits under the plot centre; a click opens the menu (here: counted). The rest of the screen is there for
+    // its tooltips and ignores clicks.
     const auto selector = screen.viewSelectorCentreForTesting();
     CHECK(screen.hitTest(juce::roundToInt(selector.x), juce::roundToInt(selector.y)));
-    CHECK_FALSE(screen.hitTest(screen.getWidth() / 2, screen.getHeight() / 3));
+    CHECK(screen.hitTest(screen.getWidth() / 2, screen.getHeight() / 3));
     int opened = 0;
     screen.viewMenuHook = [&] { ++opened; };
     click(screen, selector);
@@ -361,8 +362,7 @@ TEST_CASE("meter scope: the wheel zooms between 0.5 and 200 ms", "[interaction]"
 
     // They are only there in ALIGNMENT.
     screen.chooseView(pa::ui::MeterScreen::View::bands);
-    CHECK_FALSE(screen.hitTest(juce::roundToInt(screen.zoomButtonCentreForTesting(true).x),
-                               juce::roundToInt(screen.zoomButtonCentreForTesting(true).y)));
+    CHECK_FALSE(screen.tooltipAt(screen.zoomButtonCentreForTesting(true)).startsWith("Zoom"));
 }
 
 TEST_CASE("meter speed: SLOW and FAST at the left of the bottom row, kept in the UI state", "[interaction]")
@@ -507,4 +507,51 @@ TEST_CASE("meter legend: clicking INPUT, OUTPUT or SIDECHAIN hides or shows it, 
     click(screen, sidechain);
     CHECK_FALSE(screen.isShown(Series::sidechain));
     CHECK_FALSE((bool)f.proc.getUiState()[UiProps::showSidechain]);
+}
+
+TEST_CASE("tooltips: the ? switches them, off by default, and the meter has one tip per feature", "[interaction]")
+{
+    Fixture f;
+    auto& help = f.editor->getHelpButton();
+    auto& screen = f.editor->getMeterScreen();
+    using View = pa::ui::MeterScreen::View;
+
+    // Off by default; only the ? itself keeps its tip, which says how to turn them on.
+    CHECK_FALSE(help.isOn());
+    CHECK(help.getTooltip() == "Enable tooltips");
+    CHECK(f.editor->tooltipAllowed(help));
+    CHECK_FALSE(f.editor->tooltipAllowed(screen));
+    click(help, help.getLocalBounds().getCentre().toFloat());
+    CHECK(help.isOn());
+    CHECK(f.proc.getUiState()[UiProps::tooltipsOn]);
+    CHECK(f.editor->tooltipAllowed(screen));
+    CHECK(help.getTooltip() == "Disable tooltips");
+    click(help, help.getLocalBounds().getCentre().toFloat());
+    CHECK_FALSE(help.isOn());
+
+    // Each feature of each view says what it is.
+    f.proc.getUiState().setProperty(UiProps::meterOn, true, nullptr);
+    const auto tip = [&](juce::Point<float> p) { return screen.tooltipAt(p); };
+    CHECK(tip(screen.viewSelectorCentreForTesting()).startsWith("View:"));
+    CHECK(tip(screen.speedLabelCentreForTesting(pa::ui::MeterScreen::Speed::slow)).startsWith("SLOW"));
+    CHECK(tip(screen.speedLabelCentreForTesting(pa::ui::MeterScreen::Speed::fast)).startsWith("FAST"));
+    CHECK(tip(screen.holdLabelCentreForTesting()).startsWith("HOLD"));
+    CHECK(tip(screen.legendCentreForTesting(pa::ui::MeterScreen::Series::input)).startsWith("INPUT"));
+    CHECK(tip(screen.legendCentreForTesting(pa::ui::MeterScreen::Series::output)).startsWith("OUTPUT"));
+    CHECK(tip({(float)screen.getWidth() * 0.9f, (float)screen.getHeight() * 0.4f}).startsWith("ALL"));
+    CHECK(tip({(float)screen.getWidth() * 0.1f, (float)screen.getHeight() * 0.3f}).contains(" Hz: "));
+    CHECK(tip({(float)screen.getWidth() * 0.5f, (float)screen.getHeight() * 0.3f}) !=
+          tip({(float)screen.getWidth() * 0.1f, (float)screen.getHeight() * 0.3f})); // per band
+
+    screen.chooseView(View::vector);
+    CHECK(tip({(float)screen.getWidth() * 0.4f, (float)screen.getHeight() * 0.5f}).startsWith("VECTORSCOPE"));
+    screen.chooseView(View::scope);
+    CHECK(tip(screen.zoomButtonCentreForTesting(false)).startsWith("Zoom out"));
+    CHECK(tip(screen.zoomButtonCentreForTesting(true)).startsWith("Zoom in"));
+    CHECK(tip(screen.legendCentreForTesting(pa::ui::MeterScreen::Series::sidechain)).startsWith("SIDECHAIN"));
+    CHECK(tip({(float)screen.getWidth() * 0.4f, (float)screen.getHeight() * 0.5f}).startsWith("ALIGNMENT"));
+
+    // Nothing to say while the meter is off.
+    f.proc.getUiState().setProperty(UiProps::meterOn, false, nullptr);
+    CHECK(tip(screen.viewSelectorCentreForTesting()).isEmpty());
 }

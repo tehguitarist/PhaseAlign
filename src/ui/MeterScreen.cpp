@@ -30,14 +30,6 @@ MeterScreen::MeterScreen(const SourceAssets& assetsIn, meter::MeterCapture& capt
 {
     setOpaque(true);
     setInterceptsMouseClicks(true, false); // only the view labels: see hitTest
-    setTooltip("Click the middle label to choose the view: BANDS, the correlation with the sidechain in six bands "
-               "(a bar is this track after the plugin, a blue tick before it); VECTORSCOPE, this track against the "
-               "sidechain as a shape (a line up and down is in phase, a circle 90 degrees off, a line across inverted); "
-               "ALIGNMENT, the waveforms on top of each other around a captured hit (wheel or - and + to zoom; CAPTURE "
-               "holds the last hit, which the knobs then act on). SLOW or FAST sets the averaging. HOLD freezes the "
-               "screen (it also freezes while the host is stopped); frozen, turn DELAY, the polarity button or the "
-               "phase and the screen shows the result. Blue is this track before the plugin, green after it; click INPUT, "
-               "OUTPUT or SIDECHAIN at the top right to hide or show that trace.");
     for (auto& s : scratch)
         s.resize((size_t)meter::MeterCapture::capacity);
     if (capture.getSampleRate() > 0.0)
@@ -546,11 +538,114 @@ bool MeterScreen::legendHit(juce::Point<float> p) const
 
 bool MeterScreen::hitTest(int x, int y)
 {
+    // The whole screen while metering, so every feature can show its own tooltip; only the labels and the like react to
+    // clicks (the rest of the screen ignores them).
+    return state != State::off && getLocalBounds().contains(x, y);
+}
+
+juce::String MeterScreen::tooltipAt(juce::Point<float> p) const
+{
     if (state == State::off)
-        return false;
-    const auto p = juce::Point<int>(x, y).toFloat();
-    return controlAt(p) != Control::none || captureToggleArea().contains(p) || zoomButtonArea(false).contains(p) ||
-           zoomButtonArea(true).contains(p) || vectorModeArea().contains(p) || legendHit(p) || scrubArea(p);
+        return {};
+    const auto unicode = [](const char* utf8) { return juce::String::fromUTF8(utf8); };
+    const auto minus = unicode("\xe2\x88\x92");
+
+    switch (controlAt(p))
+    {
+        case Control::view:
+            return "View: click to choose BANDS (the correlation with the sidechain in six bands), VECTORSCOPE (the "
+                   "waveforms against the sidechain as a shape) or ALIGNMENT (the waveforms on top of each other).";
+        case Control::slow:
+            return "SLOW: slow, smooth averaging. Steadier readings that take a moment to follow a change; use it to "
+                   "judge the overall alignment.";
+        case Control::fast:
+            return "FAST: short averaging. Follows changes quickly but moves more; use it to see the effect of a knob "
+                   "while you turn it.";
+        case Control::hold:
+            return "HOLD: freezes the picture (it also freezes by itself while the host is stopped). While frozen, "
+                   "turning DELAY, the polarity button or the phase shows what they would do to the held picture.";
+        case Control::none: break;
+    }
+
+    for (const auto& item : legendItems())
+        if (item.area.contains(p))
+        {
+            const auto verb = juce::String(shown[(size_t)item.series] ? " Click to hide it." : " Click to show it.");
+            if (item.series == Series::input)
+                return juce::String("INPUT (blue): this track before the plugin.") + verb;
+            if (item.series == Series::sidechain)
+                return "SIDECHAIN: the signal this track is being lined up with, drawn as a faint trace." + verb;
+            if (item.text == "PREVIEW")
+                return "PREVIEW (green): what this track would be after the plugin with the knobs as they are now; "
+                       "the held picture, with DELAY, the polarity button and the phase applied." + verb;
+            return "OUTPUT (green): this track after the plugin." + verb;
+        }
+
+    if (zoomButtonArea(false).contains(p))
+        return "Zoom out: show a longer stretch of time across the screen.";
+    if (zoomButtonArea(true).contains(p))
+        return "Zoom in: show a shorter stretch of time across the screen. The mouse wheel does the same.";
+    if (captureToggleArea().contains(p))
+        return captureMode ? "CAPTURE on: the screen holds the last hit it detected and shows what the knobs do to it, "
+                             "so it sits still while you turn DELAY, the polarity button and the phase. A new hit "
+                             "replaces it after the knobs have been left alone for two seconds. Click to follow the "
+                             "live audio instead."
+                           : "CAPTURE off: the screen follows the live audio. Click to hold the last detected hit "
+                             "instead, so it stays still while you turn the knobs.";
+    if (vectorModeArea().contains(p))
+        return isVectorStereo() ? "SOURCE: the track's own left and right channels, as on a classic goniometer. "
+                                  "Click to compare this track with the sidechain instead."
+                                : "SOURCE: this track against the sidechain. Click to show the track's own left and "
+                                  "right channels instead (a classic goniometer).";
+
+    // The overall column: the same measurement over the whole signal.
+    if (p.x >= lx(design::meterSeparatorX))
+        return "ALL: the correlation with the sidechain over the whole signal (+1 in phase, 0 unrelated, " + minus +
+               "1 out of phase). The bar is this track after the plugin; the blue tick is before it.";
+
+    const auto left = lx(design::meterPlotLeft), right = lx(design::meterPlotRight);
+    const auto top = ly(design::meterPlusOneY), bottom = ly(design::meterMinusOneY);
+    const auto inPlot = p.x >= left && p.x <= right && p.y >= top && p.y <= bottom;
+
+    switch (view)
+    {
+        case View::bands:
+        {
+            // Over a band's slot (the plot and the frequency labels under it).
+            if (p.x >= left && p.x <= right && p.y >= top && p.y <= ly(design::meterFreqLabelY) + 14.0f * getScale())
+            {
+                const auto b = juce::jlimit(0, meter::CorrelationAnalyser::numBands - 1,
+                                            (int)((p.x - left) / (right - left) * (float)meter::CorrelationAnalyser::numBands));
+                return hzLabel((float)meter::CorrelationAnalyser::bandEdgesHz[b]) + " to " +
+                       hzLabel((float)meter::CorrelationAnalyser::bandEdgesHz[b + 1]) +
+                       " Hz: how well this band lines up with the sidechain, from +1 (in phase) through 0 "
+                       "(unrelated) to " + minus + "1 (out of phase). The green bar is this track after the plugin; "
+                       "the blue tick is before it.";
+            }
+            return "BANDS: the correlation with the sidechain in six frequency bands.";
+        }
+        case View::vector:
+            if (inPlot)
+                return isVectorStereo()
+                           ? "VECTORSCOPE: the track's left and right channels against each other, turned 45 degrees. "
+                             "A line up and down is a mono (in phase) signal, a circle is 90 degrees apart, a line "
+                             "across is inverted. Blue is before the plugin, green after it."
+                           : "VECTORSCOPE: this track against the sidechain, each scaled to its own level, turned 45 "
+                             "degrees. A line up and down is in phase, a circle is 90 degrees off, a line across is "
+                             "inverted. Blue is before the plugin, green after it. The numbers at the top left are "
+                             "the correlations.";
+            return "VECTORSCOPE: this track against the sidechain as a shape.";
+        case View::scope:
+            if (inPlot)
+                return scrubArea(p)
+                           ? "ALIGNMENT: the track, the sidechain and the output as waveforms on top of each other, "
+                             "each scaled to its own peak. Drag to slide the input against the sidechain and see what "
+                             "delay lines them up; the mouse wheel zooms."
+                           : "ALIGNMENT: the track, the sidechain and the output as waveforms on top of each other, "
+                             "each scaled to its own peak, around a hit. The mouse wheel zooms.";
+            return "ALIGNMENT: the waveforms on top of each other around a hit.";
+    }
+    return {};
 }
 
 void MeterScreen::scrubTo(float x)

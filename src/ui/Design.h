@@ -49,6 +49,10 @@ inline const juce::Colour readoutGreen{0xff3cf04e};
 inline const juce::Colour readoutGlow{0xa02ee040};
 inline constexpr float readoutGhostAlpha = 0.07f;
 
+// The tooltips switch, a "?" on the brushed-metal strip under the meter, at the panel's middle.
+inline const juce::Rectangle<float> helpButtonSlot{977.0f - 40.0f, 1164.0f - 40.0f, 80.0f, 80.0f};
+inline constexpr float helpCapHeight = 42.0f;
+
 // Meter screen (positions measured on the example; the band count is provisional until P4).
 inline const juce::Colour phosphor{0xff3cf04e};
 inline const juce::Colour meterAxisText{0xffd0d0cc};

@@ -140,6 +140,9 @@ class MeterScreen : public DesignComponent, private juce::Timer
     void visibilityChanged() override { updateTimer(); }
     void parentHierarchyChanged() override { updateTimer(); }
     bool hitTest(int x, int y) override;
+    // What is under the mouse, one tip per feature of the current view (also the whole screen, for the view itself).
+    juce::String getTooltip() override { return tooltipAt(getMouseXYRelative().toFloat()); }
+    juce::String tooltipAt(juce::Point<float> local) const;
     void mouseDown(const juce::MouseEvent&) override;
     void mouseDrag(const juce::MouseEvent&) override;
     void mouseWheelMove(const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
