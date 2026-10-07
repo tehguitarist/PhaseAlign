@@ -100,6 +100,12 @@ analysis stays for ANALYSE. Tuned on the user's own stem pairs (`prototype/expor
    (gain over baseline, margin over the runner-up family) so ANALYSE says "no change worth making" for guitar and hats,
    and listening to the renders; then the C++ (offline, on a background thread, reusing `dsp/PhaseResponse.h`).
    Report: `prototype/out/analyse/report.md`.
+   **Listening (user, 2026-10-07; `prototype/out/analyse/renders/`): the sum tells more than the input alone.** Kick: sum 1
+   (CONSTANT 130°, Ø, +1.57 ms: the score's own top pick) was best, input 3 (LO in 180°, Ø, +1.02 ms) the best alone. Snare:
+   sum 3 (HI in 157.5°, Ø, +0.95 ms) was best, input 1 (LO in 125°, Ø, +0.74 ms) the best alone, so for the snare the
+   score's top pick was not what the ear chose from the sum (the three scores are within 0.003). All the winners are Ø
+   plus a rotation. Judge candidates by the sum with the sidechain, not the input alone. The user is getting stems that are
+   further apart (bigger offsets) to test with next; the confidence thresholds stay as guesses until then.
 
 ## Next: needs no input
 
