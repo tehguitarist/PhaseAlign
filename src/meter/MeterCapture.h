@@ -64,6 +64,8 @@ class MeterCapture
         transportKnown.store(known, std::memory_order_relaxed);
         transportPlaying.store(playing, std::memory_order_relaxed);
     }
+    bool isTransportKnown() const { return transportKnown.load(std::memory_order_relaxed); }
+    bool isTransportPlaying() const { return transportPlaying.load(std::memory_order_relaxed); }
     bool isTransportStopped() const
     {
         return transportKnown.load(std::memory_order_relaxed) && ! transportPlaying.load(std::memory_order_relaxed);

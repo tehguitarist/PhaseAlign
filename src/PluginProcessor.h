@@ -1,5 +1,7 @@
 #pragma once
 
+#include "analyse/CaptureFifo.h"
+#include "analyse/Session.h"
 #include "dsp/Chain.h"
 #include "meter/MeterCapture.h"
 
@@ -40,6 +42,8 @@ class PhaseAlignProcessor : public juce::AudioProcessor,
         static inline const juce::Identifier showSidechain{"showSidechain"}; // bool
         static inline const juce::Identifier alignCapture{"alignCapture"}; // bool: ALIGNMENT holds the last hit
         static inline const juce::Identifier tooltipsOn{"tooltipsOn"};     // bool: the "?" switch (off by default)
+        static inline const juce::Identifier analysePreview{
+            "analysePreview"}; // "bands" / "alignment": ANALYSE's preview
     };
     static constexpr double minUiScale = 0.6, maxUiScale = 2.0;
     static constexpr double defaultUiScale = 0.8; // 782x490 (user, 2026-10-06)
@@ -94,6 +98,15 @@ class PhaseAlignProcessor : public juce::AudioProcessor,
     // The correlation meter's feed. The editor's meter screen turns it on while it is showing and the meter is on.
     pa::meter::MeterCapture& getMeterCapture() { return meterCapture; }
 
+    // ANALYSE (PLAN 3.5, plan R26): the capture, the search and the options. Message thread.
+    pa::analyse::Session& getAnalyseSession() { return *analyseSession; }
+
+    // The seven panel settings ANALYSE reads and sets (message thread). Setting them is one host gesture: every changed
+    // parameter's gesture begins, the values are set, then every gesture ends, so a host that groups overlapping
+    // gestures records one undo step (JUCE has no way to ask for a group; hosts differ).
+    pa::analyse::PanelSettings panelSettings() const;
+    void applyPanelSettings(const pa::analyse::PanelSettings&);
+
     // The chain's targets from the current parameter values (any thread).
     pa::dsp::ChainSettings currentSettings() const;
 
@@ -122,6 +135,8 @@ class PhaseAlignProcessor : public juce::AudioProcessor,
 
     pa::dsp::Chain chain;
     pa::meter::MeterCapture meterCapture;
+    pa::analyse::CaptureFifo analyseCapture;
+    std::unique_ptr<pa::analyse::Session> analyseSession;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PhaseAlignProcessor)
 };

@@ -42,7 +42,8 @@ BAND_LO, BAND_HI = 40.0, 16000.0
 ACTIVE_DB = -40.0
 STEP = 2.5              # panel degrees between angle candidates
 SHAPES = [("lo", False), ("lo", True), ("hi", False), ("hi", True)]
-FAMILY_DELAY_MS = 0.5   # two candidates with the same polarity, shape and a delay and angle this close are one family
+FAMILY_DELAY_MS = 0.5   # two candidates with delays this close and phase responses within FAMILY_DEGREES are one family
+FAMILY_DEGREES = 20.0
 
 
 # --- the cross-spectrum ----------------------------------------------------------------------------------------------
@@ -166,6 +167,29 @@ def score_at(sp, g_k):
     return float(np.mean(r))
 
 
+def same_family(f, c, sp):
+    """Two candidates are one family when they would sound alike, as the score tells it: the band-mean correlation of one's
+    output with the other's (the mean over the active bands of cos(their phase difference at the band's centre)) at least
+    cos(FAMILY_DEGREES), either for the polarity and phase stage alone with delays within FAMILY_DELAY_MS, or for the whole
+    response, delay included (a Hi/Lo turn at a small angle is close to a short delay, so LO in 2.5 with -1.89 ms is phase
+    off with -1.85 ms). 2026-10-08; it was the same mode, polarity and RANGE with knob angles within 20 degrees, which showed
+    CONSTANT 180 next to the polarity flip it equals as two options."""
+    centres = np.array(sp.centres)
+    limit = math.cos(math.radians(FAMILY_DEGREES))
+    gf = family_response(f, sp.fs, centres)
+    gc = family_response(c, sp.fs, centres)
+    if abs(f.delay_ms - c.delay_ms) < FAMILY_DELAY_MS and np.mean(np.cos(np.angle(gf * np.conj(gc)))) >= limit:
+        return True
+    shift = np.exp(-2j * np.pi * centres * (f.delay_ms - c.delay_ms) * 1e-3)
+    return bool(np.mean(np.cos(np.angle(gf * shift * np.conj(gc)))) >= limit)
+
+
+def family_response(c, fs, freqs):
+    """The polarity and the phase stage (no delay) at the given frequencies."""
+    h = stage_response(c.mode, c.wide, c.theta, fs, freqs) if c.mode != "none" else np.ones(len(freqs), complex)
+    return (-1.0 if c.flip else 1.0) * h
+
+
 def search(sp, top=6, verbose=False, window_ms=None, phase_on=True, reach_ms=None):
     """window_ms = (lo, hi) restricts the delay to that range (the attack lag's neighbourhood); None searches the knob's reach."""
     t0 = time.time()
@@ -184,13 +208,15 @@ def search(sp, top=6, verbose=False, window_ms=None, phase_on=True, reach_ms=Non
             for j in np.argsort(v)[::-1][:3]:     # a few peaks per setting, so families survive de-duplication
                 best.append((v[j], mode, wide, theta, lags[j], flip))
     best.sort(key=lambda c: -c[0])
-    # refine the leaders to 0.1 sample, then de-duplicate into families
+    # refine the leaders to 0.1 sample, on the knob's own grid (whole tenths of a sample, so the delay applied is the one
+    # scored), then de-duplicate into families
     cands = []
     for score, mode, wide, theta, d, flip in best[:200]:
         h = stage_response(mode, wide, theta, sp.fs, freqs) if mode != "none" else np.ones(len(freqs))
         sign = -1.0 if flip else 1.0
         bestc = (-9.0, d)
-        for dd in np.arange(d - 0.3, d + 0.3001, 0.1):
+        tenths = math.floor(d * 10.0 + 0.5)
+        for dd in [(tenths + i) / 10.0 for i in range(-3, 4)]:
             if dd < lo_s - 1e-9 or dd > hi_s + 1e-9:
                 continue
             g = sign * h * np.exp(-2j * np.pi * freqs * dd / sp.fs)
@@ -199,9 +225,7 @@ def search(sp, top=6, verbose=False, window_ms=None, phase_on=True, reach_ms=Non
     cands.sort(key=lambda c: -c.score)
     families = []
     for c in cands:
-        same = lambda f: (f.flip == c.flip and (f.mode, f.wide) == (c.mode, c.wide)
-                          and abs(f.delay_ms - c.delay_ms) < FAMILY_DELAY_MS and abs(f.theta - c.theta) < 20.0)
-        if not any(same(f) for f in families):
+        if not any(same_family(f, c, sp) for f in families):
             families.append(c)
         if len(families) == top:
             break

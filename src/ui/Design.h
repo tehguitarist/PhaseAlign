@@ -59,6 +59,9 @@ inline const juce::Colour meterAxisText{0xffd0d0cc};
 // This track before the plugin: a soft blue, to tell it from the output's phosphor green (user, 2026-10-07).
 inline const juce::Colour meterInput{0xff5a8fdc};
 inline const juce::Colour meterGrid{0xff5a5a58};
+// ANALYSE's advice that needs acting on (a manual shift, less low end, no sidechain): amber, apart from the traces'
+// colours.
+inline const juce::Colour meterWarning{0xffe8b04a};
 inline constexpr float meterPlotLeft = 186.0f, meterPlotRight = 1298.0f;
 inline constexpr float meterPlusOneY = 656.0f, meterZeroY = 837.0f, meterMinusOneY = 1016.0f;
 inline constexpr float meterFreqLabelY = 1051.0f, meterFreqTitleY = 1089.0f;

@@ -22,8 +22,9 @@ endif()
 add_subdirectory(libs/JUCE)
 
 # PFFFT (libs/pffft, a submodule; BSD-style licence in libs/pffft/LICENSE.txt): the real FFT where vDSP isn't available
-# (src/dsp/RealFft.h). Only its single-precision core is built; NEON on ARM, SSE on x86 (the headers pick).
-add_library(pa_pffft STATIC libs/pffft/src/pffft.c libs/pffft/src/pffft_common.c)
+# (src/dsp/RealFft.h), and its double-precision core for ANALYSE's offline search (src/analyse/Search.cpp) everywhere;
+# NEON on ARM, SSE on x86 (the headers pick).
+add_library(pa_pffft STATIC libs/pffft/src/pffft.c libs/pffft/src/pffft_double.c libs/pffft/src/pffft_common.c)
 target_include_directories(pa_pffft
     PUBLIC libs/pffft/include
     PRIVATE libs/pffft/src libs/pffft/include/pffft)
@@ -41,6 +42,9 @@ set(PA_SOURCES
     src/PluginEditor.cpp
     src/params/Parameters.cpp
     src/meter/CorrelationAnalyser.cpp
+    src/analyse/Search.cpp
+    src/analyse/Session.cpp
+    src/ui/AnalyseScreen.cpp
     src/ui/Assets.cpp
     src/ui/ImageKnob.cpp
     src/ui/MeterScreen.cpp
@@ -120,6 +124,7 @@ if (PA_BUILD_TESTS)
         tests/ProcessorTests.cpp
         tests/DimmingTests.cpp
         tests/RobustnessTests.cpp
+        tests/AnalyseFlowTests.cpp
     )
     target_include_directories(PhaseAlignTests PRIVATE src tests)
     target_compile_definitions(PhaseAlignTests PRIVATE
@@ -148,10 +153,11 @@ if (PA_BUILD_TESTS)
         tests/dsp/GoldenTests.cpp
         tests/dsp/MeterTests.cpp
         tests/dsp/P3Renders.cpp
+        tests/dsp/AnalyseTests.cpp
     )
     set_source_files_properties(tests/ParameterTests.cpp tests/StateTests.cpp tests/EditorTests.cpp
         tests/InteractionTests.cpp tests/ProcessorTests.cpp tests/DimmingTests.cpp tests/RobustnessTests.cpp
-        ${PA_DSP_TEST_SOURCES}
+        tests/AnalyseFlowTests.cpp ${PA_DSP_TEST_SOURCES}
         PROPERTIES COMPILE_OPTIONS "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wno-float-equal>")
 
     add_test(NAME PhaseAlignTests COMMAND PhaseAlignTests)
@@ -159,7 +165,8 @@ if (PA_BUILD_TESTS)
     # The light DSP runner (R8): src/dsp and src/meter with juce_dsp only, no GUI modules or plugin sources,
     # so it builds in a fraction of the time. It counts global operator new to check the real-time paths.
     juce_add_console_app(PhaseAlignDspTests PRODUCT_NAME "PhaseAlignDspTests")
-    target_sources(PhaseAlignDspTests PRIVATE ${PA_DSP_TEST_SOURCES} src/meter/CorrelationAnalyser.cpp)
+    target_sources(PhaseAlignDspTests PRIVATE ${PA_DSP_TEST_SOURCES} src/meter/CorrelationAnalyser.cpp
+        src/analyse/Search.cpp)
     target_include_directories(PhaseAlignDspTests PRIVATE src tests/dsp)
     target_compile_definitions(PhaseAlignDspTests PRIVATE
         PA_GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/golden" # prototype/golden.py writes these
