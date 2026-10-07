@@ -37,7 +37,7 @@ from oversampling import plan  # noqa: E402
 ROOT = Path(__file__).resolve().parent.parent
 OUT = Path(__file__).resolve().parent / "out" / "analyse"
 PAD = 4                 # zero-padding of the lag search (a quarter of a sample)
-MAX_DELAY_MS = 6.0      # the search's reach; the plugin's DELAY knob reaches +-4 ms today (the user wants 6, 2026-10-07)
+MAX_DELAY_MS = 4.0      # the plugin's DELAY knob reach (the user, 2026-10-08: it is for micro adjustments, a bigger offset is moved by hand)
 BAND_LO, BAND_HI = 40.0, 16000.0
 ACTIVE_DB = -40.0
 STEP = 2.5              # panel degrees between angle candidates
@@ -389,12 +389,40 @@ def suggest(x, y, fs):
             options.append((name, c, c.score - base, lf))
         if len(options) == 2:
             break
+    if len(options) == 2 and options[0][1].score - options[1][1].score >= MIN_MARGIN:
+        options = options[:1]     # a clear winner (user, 2026-10-08): one option; two only when they are close
     if options:
-        return options, base, lag, "suggest" if options[0][2] >= MIN_GAIN and (len(options) == 1 or options[0][1].score - options[1][1].score >= MIN_MARGIN) else "tentative"
+        return options, base, lag, "suggest" if len(options) == 1 else "close: two options"
     if lag[1] and MIN_DELAY_MS <= abs(lag[0]) <= MAX_DELAY_MS:
         c = Candidate("none", False, 0.0, lag[0], False, base)
         return [("delay only", c, 0.0, low_end_change(sp, c))], base, lag, f"delay only, {lag[0]:+.2f} ms"
     return [], base, lag, "no change worth making"
+
+
+def shift_samples(x, n):
+    """x delayed by n samples (n < 0 advances it), the length kept."""
+    if n >= 0:
+        return np.concatenate([np.zeros(n), x])[:len(x)]
+    return np.concatenate([x[-n:], np.zeros(-n)])
+
+
+def suggest_with_shift(x, y, fs):
+    """suggest(), plus the case the DELAY knob can't cover (user, 2026-10-08: it is for micro adjustments; a big offset is moved
+    by hand, in samples, as DAWs work in them). When the attack reading is clear and beyond the reach, or the best option sits
+    at its edge, the message asks for a manual shift of that many samples, and the options are those for the signal once it
+    has been shifted (so they are within the knob's reach). Returns (options, baseline r, attack reading, verdict, shift in
+    samples or 0, message or "")."""
+    opts, base, lag, verdict = suggest(x, y, fs)
+    shift = 0
+    if lag[1] and abs(lag[0]) > MAX_DELAY_MS:
+        shift = int(round(lag[0] * 1e-3 * fs))
+    elif opts and abs(opts[0][1].delay_ms) >= MAX_DELAY_MS - 0.15:
+        shift = int(round(opts[0][1].delay_ms * 1e-3 * fs))
+    if shift == 0:
+        return opts, base, lag, verdict, 0, ""
+    opts, base2, _, verdict = suggest(shift_samples(x, shift), y, fs)
+    message = f"Transient may be out of range, consider shifting {shift:+d} samples manually if needed"
+    return opts, base, lag, verdict, shift, message
 
 
 MIN_GAIN = 0.03      # r gained over doing nothing below which ANALYSE says there is nothing worth changing

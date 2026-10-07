@@ -113,6 +113,14 @@ analysis stays for ANALYSE. Tuned on the user's own stem pairs (`prototype/expor
    guess), (3) up to **two options** to choose from (user's idea: it was a toss-up by the sound wanted). Caveat: all of this
    was tuned on the same six pairs, so it needs new stems to mean anything; and the two options are near neighbours (50° vs
    70°), not real alternatives. The bass now reads "delay only, -0.37 ms", which is untested by ear.
+   **Decided (user, 2026-10-08): the delay stays +-4 ms** (micro adjustments; no 6 ms extension). A bigger offset is moved
+   by hand: `analyse.suggest_with_shift` says "Transient may be out of range, consider shifting +/- N samples manually if
+   needed" (N in samples, as DAWs work in them; positive delays the track) when the attack reading is clear and beyond
+   the reach, or the best option sits at the edge, and gives options for the signal after that shift. Two options only
+   when the best two are within 0.01 r, one when there is a clear winner. Untested by ear: snare sample (-284 samples,
+   then the residual search says HI in 180°, -1.05 ms, not the CONSTANT 50° the ear liked at the whole -5.94 ms) and kick
+   OH (within +-4 ms the best is LO in 180°, Ø, -0.70 ms; the ear's -4.94 ms pick is out of reach and no message fires,
+   because the attack peak is weak and the in-reach best isn't at the edge). The user will get more stems.
    **Listening (user, 2026-10-07; `prototype/out/analyse/renders/`): the sum tells more than the input alone.** Kick: sum 1
    (CONSTANT 130°, Ø, +1.57 ms: the score's own top pick) was best, input 3 (LO in 180°, Ø, +1.02 ms) the best alone. Snare:
    sum 3 (HI in 157.5°, Ø, +0.95 ms) was best, input 1 (LO in 125°, Ø, +0.74 ms) the best alone, so for the snare the
