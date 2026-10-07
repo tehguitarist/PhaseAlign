@@ -53,10 +53,9 @@ job, better.
      pushed; only 4 early CI runs exist). CI runs on master pushes, PRs and manual dispatch.
 4. **M2 first part + P4 + M4 DONE (2026-10-06, committed on `ui-build`, not pushed).** Delay, polarity, host
    bypass and the meter really work; the phase stage is an identity placeholder. One crossfade length for
-   delay/polarity/stage on-off: 50 ms (`dsp::crossfadeMs`). The meter is a frequency curve + PHAT
-   time-offset view (IMPLEMENTATION_PLAN 3, `prototype/out/p4/report.md`). The editor opens at 80% (782x490); assets
-   are 1:1 with the 1954x1224 design space. Pending from the user: verdict on the meter views in a DAW. The minimum
-   editor size is 60% (586 px, user 2026-10-06).
+   delay/polarity/stage on-off: 50 ms (`dsp::crossfadeMs`). The meter's views changed on 2026-10-07: see item 9
+   (IMPLEMENTATION_PLAN 3 and R17 to R24). The editor opens at 80% (782x490); assets are 1:1 with the 1954x1224 design
+   space. The minimum editor size is 60% (586 px, user 2026-10-06).
 5. **NEXT (user, 2026-10-06), in this order unless the user says otherwise:**
    1. **Delay -4 to +4 ms: DONE (2026-10-06, merged to master).** As built in IMPLEMENTATION_PLAN 2.1a: while on,
       the latency is the reach in whole samples plus the interpolation lookahead; `Chain` fades out, switches and fades
@@ -111,19 +110,19 @@ job, better.
       zip ships `installer/stage_docs.sh`'s readme (the README quick start) and licences. macOS releases are separate
       arm64 and Intel builds (R14); notarisation is set up (the Apple secrets are in the repo); Windows and Linux ship
       unsigned; no trademark search (open source). **Next: `HANDOVER.md`.**
-   9. **Meter v2 (user, 2026-10-07; merged to master except step 2 below; not pushed): R17 to R20 in IMPLEMENTATION_PLAN.**
-      PHASE and BANDS views, SLOW/FAST, HOLD (also while the host is stopped), a drop-up view selector (FREQUENCY, TIME
-      OFFSET, PHASE, BANDS, ALIGNMENT), the ATTACK reading in TIME OFFSET (three bands, tuned on the user's own
-      kick/snare/bass/guitar/hats pairs in `captures/`; raw copies `captures/*_a.f32`, `*_b.f32`; hidden tests
-      `[.userpairs]`), ALIGNMENT (waveform overlay, wheel zoom, slide-to-preview), and, while held, the DELAY, polarity
-      and phase knobs preview on the frozen picture (`dsp/PhaseResponse.h`). 2026-10-07, later (branch `phase-preview`,
-      not merged): the phase knob previews too (R20 step 2); only the active view's work runs (R21: the attack features
-      cost ~90% of the old 2.8% of a core and now run only in TIME OFFSET); ALIGNMENT captures a hit and renders it through
-      the knobs (R22: `meter/ScopeBuffer` scan, `meter/HitCapture`; CAPTURE toggle, default on). All merged to master
-      (2026-10-07). **Later the same day, branch `meter-v3` (R23):** three views only (BANDS default, VECTORSCOPE with a
-      STEREO source on stereo tracks, ALIGNMENT with - and + zoom buttons), blue input, slower SLOW and eased bars. The
-      analysis side (curves, PHAT and attack lags) is kept for ANALYSE and is unused by the views; **clean up what ANALYSE
-      doesn't use afterwards (user)**. Pending: the user's DAW verdict.
+   9. **Meter v2 and v3 (user, 2026-10-07; all merged to master, not pushed): R17 to R24 in IMPLEMENTATION_PLAN.** Three
+      views from a drop-up in the bottom row: **BANDS** (default), **VECTORSCOPE** (input and output each against the
+      sidechain, blue and green; on a stereo track a SOURCE toggle gives the track's own L/R) and **ALIGNMENT** (waveform
+      overlay; CAPTURE holds the last detected hit and renders it through the DELAY, polarity and phase knobs; wheel and
+      -/+ zoom). Also: SLOW (slow and smooth) / FAST, HOLD (also while the host is stopped; the knobs then preview on the
+      frozen picture, `dsp/PhaseResponse.h`), legend labels that hide a trace, input in blue (`design::meterInput`), only
+      the current view's work runs (R21), bars hold through the analysis's signal gate (R24), and a sidechain that is a
+      copy of the track's own input counts as none (the Logic bug, R24). FREQUENCY, TIME OFFSET and PHASE were removed;
+      **their analysis (curves, PHAT lag, attack lag, the preview) stays in `meter/CorrelationAnalyser` for ANALYSE, and
+      what ANALYSE doesn't use gets cleaned up afterwards (user).** The user's own stem pairs (kick, snare, bass, guitar,
+      hats; `captures/`, gitignored) tuned all of it: `prototype/export_pairs.py` makes the raw copies the hidden tests
+      read (`PhaseAlignDspTests "[.userpairs]"`, `"[.usercapture]"`, `"[.bandgate]"`; Release `"[.analysercost]"`).
+      Pending: the user's DAW verdict on all of it (and on the Logic fix, which is tested with synthetic buffers only).
    - The stem analysis and auto-suggest (ANALYSE) work is dead last. Real multi-mic stem pairs are still wanted for the
      P2/P3 listening.
    - Installing (when the user asks): `/Library/Audio/Plug-Ins/{Components,VST3}`, not ~/Library.

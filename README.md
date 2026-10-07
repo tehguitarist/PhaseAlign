@@ -34,7 +34,8 @@ Phase Align lines one track up with another (two mics on one source, a DI and an
 it on one of the pair and feed the other into its **sidechain**; the meter then shows how well they agree.
 
 1. **Insert Phase Align on one track** of the pair and route the **other track to its sidechain**:
-   - Logic: the plugin window's *Side Chain* menu → the other track.
+   - Logic: the plugin window's *Side Chain* menu → the other track (with none chosen the screen says NO SIDECHAIN
+     SIGNAL).
    - Live: in the device, set the sidechain input (*Audio From*) to the other track.
    - Reaper: give the track 4 channels, send the other track to channels 3/4, and map them to the sidechain inputs in
      the plugin's pin connector.
@@ -94,7 +95,7 @@ work, so you can set them up before switching them on).
 | Control | What it does |
 |---|---|
 | **METER button** | Turns the meter on or off. When it's off (or the window is closed) the meter does no work at all, which saves CPU. |
-| **View selector** (middle of the row under the screen) | Click it for a menu that opens upwards: BANDS (the default), VECTORSCOPE or ALIGNMENT. See [Reading the meter](#reading-the-meter). |
+| **View selector** (middle of the row under the screen) | Click it for a menu that opens upwards: BANDS (the default: correlation in six bands), VECTORSCOPE (the phase relation as a shape) or ALIGNMENT (the waveforms on top of each other). See [Reading the meter](#reading-the-meter). |
 | **SLOW / FAST** | How much the meter averages. SLOW is the steady one: it averages over a few seconds and the bars glide, so it settles in about two seconds. FAST follows your changes in about a third of a second, and its bars move more. |
 | **HOLD** | Freezes the screen so you can study it. It also freezes by itself while your DAW's transport is stopped (if the DAW reports it). Frozen, turning **DELAY**, the polarity button or the phase shows what they would do (see below). |
 | **ANALYSE** | Reserved for a future automatic-suggestion feature. It doesn't do anything yet. |
@@ -174,7 +175,7 @@ rather than jumping.
 A reasonable way in, using the BANDS view: if the two tracks only disagree in the bass, try **LOW**; if the
 disagreement carries up through the mids, try **HIGH**; press RANGE in when 90° doesn't reach far enough; use
 **CONSTANT** when you want the same angle at every frequency, or to nudge a track by a few degrees across the whole
-band. Set the **delay** first, and flip **Ø** if the curve sits near −1 everywhere.
+band. Set the **delay** first, and flip **Ø** if the bars sit near −1 everywhere.
 
 ## Reading the meter
 
@@ -186,6 +187,16 @@ The labels at the top right of the plot (INPUT, OUTPUT and, in ALIGNMENT, SIDECH
 trace (it is struck through), and again to bring it back. They are all on by default, and the choice is kept with the plugin.
 The bars on the right (**ALL**) are the single overall figure: lit green segments for the output, a blue tick for the
 input. Pick a view from the menu in the middle of the row under the screen.
+
+**The three views at a glance**
+
+| View | What it shows | Use it to |
+|---|---|---|
+| **BANDS** (default) | Six bars: how well this track agrees with the sidechain in each of six frequency bands, after Phase Align (green bars) and before it (blue ticks), plus an overall bar | See *which* frequencies are fighting, and whether phase or polarity moves them toward +1 |
+| **VECTORSCOPE** | A goniometer: this track against the sidechain as a shape (blue before, green after). On a stereo track, a SOURCE switch shows the track's own left and right | See the phase relation at a glance: a line up and down is in phase, a circle 90° off, a line across inverted |
+| **ALIGNMENT** | The waveforms of one hit on top of each other (sidechain, blue input, green output), held still, zoomable down to 0.5 ms | Set the **delay** by eye: line up where the hit starts. The green trace follows the knobs without needing more audio |
+
+All three react to the knobs while the screen is held. Click the INPUT, OUTPUT or SIDECHAIN label to hide a trace.
 
 ### BANDS (the default)
 
@@ -314,7 +325,7 @@ input and the output are analysed in overlapping FFT frames (8192 points at 44.1
 the cross-spectrum between each of the pair and the sidechain is averaged per frequency bin (a time constant of at least
 0.75 s on SLOW, 0.08 s on FAST, which also halves the frames). *r* is the normalised correlation of the two signals within
 a band, the real part of that cross-spectrum divided by the geometric mean of the two powers. The bars then glide toward
-their values at the screen's own pace. The VECTORSCOPE plots the last 60 ms of samples, each stream scaled to a standard
+their values at the screen's own pace. The VECTORSCOPE plots the last 0.25 s (SLOW) or 60 ms (FAST) of samples, each stream scaled to a standard
 deviation of 1 and turned 45 degrees. ALIGNMENT keeps four seconds of the streams, finds hits on the sidechain (the rise of
 its 0.5 ms envelope, within 12 dB of the strongest recent one, from a quiet start) and, for a captured hit, renders this
 track's input through the knobs: its spectrum times the response of the delay, the polarity flip and the phase stage (two

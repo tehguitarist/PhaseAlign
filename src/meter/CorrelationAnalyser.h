@@ -7,10 +7,16 @@
 #include <memory>
 #include <vector>
 
+// NOTE (R23, 2026-10-07): no screen view shows the curve, phase, lag or attack results any more. Only BANDS (and the overall
+// bar, which always runs) use this class's output on screen. The "frequency view", "time view" and "phase view" below name
+// what each measure was built for; they are kept, with their tests and the user's own stem pairs, for the planned ANALYSE
+// (auto-suggest), and what ANALYSE doesn't use is to be cleaned up after that work (user). `Needs` keeps them off.
+//
 // GUI side of the correlation meter (IMPLEMENTATION_PLAN 3, R6; method and numbers from P4,
 // prototype/out/p4/report.md). Hann-windowed FFT frames of the three streams (processed output x, unprocessed
 // input z, sidechain y), 75% overlap. Per bin, the cross-spectra X·Y*, Z·Y* and the powers |X|², |Z|², |Y|² are
-// smoothed by an exponential average with time constant max(0.3 s, 8 cycles of the bin's frequency). Everything
+// smoothed by an exponential average with time constant max(0.75 s, 12 cycles of the bin's frequency) on SLOW (R23; P4 used
+// 0.3 s and 8 cycles) and max(0.08 s, 3 cycles) on FAST. Everything
 // the screen shows comes from these sums:
 //
 //   - the frequency view: r(f) = Σ Re(X·Y*) / sqrt(Σ|X|² Σ|Y|²) over a 1/6-octave window around each point;
