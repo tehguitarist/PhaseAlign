@@ -31,7 +31,7 @@ first; plan sections are IMPLEMENTATION_PLAN.md. Nothing here needs code first: 
   pushed (CI: `gh run list --branch master`). **ANALYSE is on the branch `analyse`** (from
   master, not merged; merge when the user says). No worktrees.
 - The build installed in `/Library/Audio/Plug-Ins/{Components,VST3}` (when the user asks: not ~/Library) is the Release
-  build of a0c7c81 (12:59 on 2026-10-07), arm64.
+  build of the `analyse` branch (`a5ffd65`, ANALYSE in, 10:35 on 2026-10-08), arm64; auval passes.
 - Licence: GNU AGPLv3 (`LICENSE`); JUCE under its AGPLv3 option; notices in `THIRD_PARTY_NOTICES.md`.
 - Build directories (gitignored): `build-ui` (tests: `cmake -B build-ui -DPA_STANDALONE=ON`, then `cmake --build build-ui
   --target PhaseAlignTests PhaseAlignDspTests` and `ctest --test-dir build-ui`), `build-release` (benchmarks),
