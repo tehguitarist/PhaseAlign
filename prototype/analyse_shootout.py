@@ -31,7 +31,48 @@ def r_of(sp, fs, mode, wide, theta, delay_ms, flip):
     return an.score_at(sp, g)
 
 
+def blind(fs=48000):
+    """Per pair: the sum with the sidechain for everything being compared (off, the user's setting, the search's attack-first
+    and joint winners), shuffled under letters. The key is written to prototype/out/analyse/blind/key.txt; don't open it until
+    after listening. The user's delay: positive delays the track (the user, 2026-10-07)."""
+    import soundfile as sf
+    rng = np.random.default_rng(2026)
+    root = an.OUT / "blind"
+    key = []
+    for tag, track, ref in st.PAIRS:
+        a, b = st.load(track), st.load(ref)
+        n = min(len(a), len(b))
+        a, b = a[:n], b[:n]
+        fam, base, lag, how = an.analyse(a, b, fs)
+        joint, _ = an.search(an.spectra(a, b, fs), top=1)
+        mode, wide, theta, d, flip, _ = USER[tag]
+        named = [("off", an.Candidate("none", False, 0.0, 0.0, False, base)),
+                 ("user", an.Candidate(mode, wide, theta, d, flip, 0.0)),
+                 ("search attack-first", fam[0]), ("search joint", joint[0])]
+        seen, picks = set(), []
+        for name, c in named:
+            k = (c.mode, c.wide, round(c.theta, 1), round(c.delay_ms, 2), c.flip)
+            if k not in seen:
+                seen.add(k)
+                picks.append((name, c))
+        order = rng.permutation(len(picks))
+        clips = [an.render(a, fs, picks[i][1]) + b for i in order]
+        g = 0.9 / max(np.abs(c).max() for c in clips)
+        folder = root / tag
+        folder.mkdir(parents=True, exist_ok=True)
+        for f in folder.glob("*.wav"):
+            f.unlink()
+        for letter, i, clip in zip("ABCD", order, clips):
+            sf.write(folder / f"{tag}_{letter}.wav", (clip * g).astype(np.float32), fs, subtype="FLOAT")
+            key.append(f"{tag} {letter}: {picks[i][0]}: {picks[i][1].label()}")
+        key.append("")
+        print(f"{tag}: {len(picks)} files")
+    (root / "key.txt").write_text("\n".join(key) + "\n")
+
+
 def main():
+    if "--blind" in sys.argv:
+        return blind()
     if "--reach" in sys.argv:
         an.MAX_DELAY_MS = float(sys.argv[sys.argv.index("--reach") + 1])
     fs = 48000

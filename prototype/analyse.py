@@ -37,7 +37,7 @@ from oversampling import plan  # noqa: E402
 ROOT = Path(__file__).resolve().parent.parent
 OUT = Path(__file__).resolve().parent / "out" / "analyse"
 PAD = 4                 # zero-padding of the lag search (a quarter of a sample)
-MAX_DELAY_MS = 4.0      # the plugin's DELAY knob reaches +-4 ms
+MAX_DELAY_MS = 6.0      # the search's reach; the plugin's DELAY knob reaches +-4 ms today (the user wants 6, 2026-10-07)
 BAND_LO, BAND_HI = 40.0, 16000.0
 ACTIVE_DB = -40.0
 STEP = 2.5              # panel degrees between angle candidates
