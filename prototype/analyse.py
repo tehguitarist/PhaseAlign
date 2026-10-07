@@ -349,13 +349,48 @@ def analyse(x, y, fs, top=5):
     return fam, base, lag, "score" if not clear else "score (attack out of range)"
 
 
+MIN_GAIN = 0.03      # r gained over doing nothing below which ANALYSE says there is nothing worth changing
+MIN_DELAY_MS = 0.3   # a clear attack offset at least this large is worth a delay on its own
+MIN_MARGIN = 0.01    # r lead over the next family below which the pick is only tentative
+
+
+def verdict(fam, base, lag=None):
+    """(label, gain, margin): what ANALYSE would tell the user about the leading candidate."""
+    gain = fam[0].score - base
+    margin = fam[0].score - fam[1].score if len(fam) > 1 else gain
+    if gain < MIN_GAIN and lag is not None and lag[1] and MIN_DELAY_MS <= abs(lag[0]) <= MAX_DELAY_MS:
+        # the waveforms barely correlate, but the attacks clearly sit apart: the delay alone is worth suggesting
+        return f"delay only, {lag[0]:+.2f} ms (phase and polarity add nothing the score can see)", gain, margin
+    if gain < MIN_GAIN:
+        return "no change worth making", gain, margin
+    return ("suggest" if margin >= MIN_MARGIN else "tentative: several settings score alike"), gain, margin
+
+
+def write_renders(tag, a, b, fam, fs):
+    """For listening: the sidechain, the input as it is, and the input through each leading candidate, each also summed with the
+    sidechain (what two mics sound like together). One common gain, so levels compare."""
+    import soundfile as sf
+    d = OUT / "renders" / tag
+    d.mkdir(parents=True, exist_ok=True)
+    clips = {"sidechain": b, "input_off": a, "sum_off": a + b}
+    for i, c in enumerate(fam[:3]):
+        y = render(a, fs, c)
+        clips[f"input_cand{i + 1}"] = y
+        clips[f"sum_cand{i + 1}"] = y + b
+    gain = 0.9 / max(np.abs(v).max() for v in clips.values())
+    for name, v in clips.items():
+        sf.write(d / f"{name}.wav", (v * gain).astype(np.float32), int(fs), subtype="FLOAT")
+    (d / "candidates.txt").write_text("\n".join(f"cand{i + 1}: {c.label()} (r {c.score:+.3f})" for i, c in enumerate(fam[:3])) + "\n")
+
+
 def user_pairs(report):
     fs = 48000
     report.append("## The user's stem pairs\n")
     report.append("Input = the `_a` take, sidechain = the `_b` take (as the meter tests read them; `prototype/export_pairs.py`). "
                   "Positive delay = delay the input. `joint` is the first version (score alone, whole ±4 ms); `attack-first` takes "
                   "the delay from the attack lag and chooses phase and polarity within 0.3 ms of it. `rendered` is the candidate "
-                  "run through the plugin's Hi/Lo and an exact delay.\n")
+                  "run through the plugin's Hi/Lo and an exact delay. The verdict is what ANALYSE would say: nothing worth changing "
+                  f"below a gain of {MIN_GAIN}, tentative below a lead of {MIN_MARGIN}. Listening files: `renders/<pair>/`.\n")
     for tag in PAIRS:
         try:
             a = np.fromfile(ROOT / "captures" / f"{tag}_a.f32", np.float32).astype(np.float64)
@@ -370,6 +405,10 @@ def user_pairs(report):
               f"peak {lag[2]:.2f}, rival {lag[3]:.2f}); delay from {how}")
         report.append(f"### {tag}\n\nBaseline r = {base:+.3f}. Attack lag {lag[0]:+.2f} ms "
                       f"({'clear' if lag[1] else 'unclear'}; peak {lag[2]:.2f}, strongest rival {lag[3]:.2f} of it). Delay taken from: {how}.\n")
+        label, gain, margin = verdict(fam, base, lag)
+        print(f"  verdict: {label} (gain {gain:+.3f}, margin {margin:+.3f})")
+        report.append(f"**Verdict: {label}** (gain over doing nothing {gain:+.3f}, lead over the next family {margin:+.3f}).\n")
+        write_renders(tag, a, b, fam, fs)
         report.append("| version | # | setting | predicted r | rendered r |\n|---|---|---|---|---|")
         for name, lst in (("joint", joint), ("attack-first", fam)):
             for i, c in enumerate(lst[:3]):
