@@ -123,8 +123,8 @@ analysis stays for ANALYSE. Tuned on the user's own stem pairs (`prototype/expor
    because the attack peak is weak and the in-reach best isn't at the edge). The user will get more stems.
    **2026-10-08, later:** ANALYSE **respects the stage toggles** (user): `suggest(..., delay_on, phase_on)` searches only what
    is on (DELAY off: delay stays 0 and a clear attack offset is only mentioned, "DELAY is off: the transients are N samples
-   apart"; PHASE off: phase stays off; polarity is always searched, the Ø button being its own control: an assumption to
-   confirm), so one search answers best delay, best phase, best polarity or any mix. The shift message also fires when the
+   apart"; PHASE off: phase stays off; polarity is always searched, the Ø button being its own control; confirmed by the user,
+   whatever the button's state), so one search answers best delay, best phase, best polarity or any mix. The shift message also fires when the
    waveform score has a clearly better delay up to 10 ms out (`WIDE_REACH_MS`; this catches the kick OH, -237 samples,
    which the attack reading alone missed). The **low-end guard became a flag**: the kick OH's -4.94 ms pick lowers r below
    300 Hz by 0.05 (the user heard that: more attack, less low-end solidity) and a hard reject hid it; options are now kept
