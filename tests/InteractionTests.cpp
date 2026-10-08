@@ -297,10 +297,11 @@ TEST_CASE("buttons: latching toggles, METER and ANALYSE", "[interaction]")
     click(meter, meterCentre);
     CHECK((bool)f.proc.getUiState()[UiProps::meterOn] == true);
 
-    // ANALYSE presses but does nothing in v0.7, and stays unlit.
+    // ANALYSE lights while active (its flow: AnalyseFlowTests.cpp); a second press goes back.
+    click(analyse, analyse.getLocalBounds().getCentre().toFloat());
+    CHECK(analyse.isLit());
     click(analyse, analyse.getLocalBounds().getCentre().toFloat());
     CHECK_FALSE(analyse.isLit());
-    CHECK(analyse.getTooltip().contains("future version"));
 }
 
 TEST_CASE("meter view: the selector in the middle of the bottom row opens a menu; choosing sets the view", "[interaction]")

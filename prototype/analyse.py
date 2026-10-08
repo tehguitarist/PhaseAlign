@@ -42,7 +42,8 @@ BAND_LO, BAND_HI = 40.0, 16000.0
 ACTIVE_DB = -40.0
 STEP = 2.5              # panel degrees between angle candidates
 SHAPES = [("lo", False), ("lo", True), ("hi", False), ("hi", True)]
-FAMILY_DELAY_MS = 0.5   # two candidates with the same polarity, shape and a delay and angle this close are one family
+FAMILY_DELAY_MS = 0.5   # two candidates with delays this close and phase responses within FAMILY_DEGREES are one family
+FAMILY_DEGREES = 20.0
 
 
 # --- the cross-spectrum ----------------------------------------------------------------------------------------------
@@ -166,6 +167,42 @@ def score_at(sp, g_k):
     return float(np.mean(r))
 
 
+def same_family(f, c, sp):
+    """Two candidates are one family when they would sound alike on this capture: the correlation of one's output with
+    the other's, band by band as the score counts it (every bin of each active band, weighted by this track's own
+    spectrum Sxx, so within-band turns count and empty bins don't), its band mean at least cos(FAMILY_DEGREES). Either for
+    the polarity and phase stage alone with delays within FAMILY_DELAY_MS, or for the whole response, delay included (a
+    Hi/Lo turn at a small angle is close to a short delay). 2026-10-08: first the same mode within 20 degrees (CONSTANT 180
+    showed beside the polarity flip it equals), then the phase difference at each band's centre alone."""
+    limit = math.cos(math.radians(FAMILY_DEGREES))
+    k = active_bins(sp)
+    gf, gc = family_response(f, sp.fs, sp.freqs[k]), family_response(c, sp.fs, sp.freqs[k])
+    if abs(f.delay_ms - c.delay_ms) < FAMILY_DELAY_MS and outputs_alike(sp, k, gf, gc, 0.0) >= limit:
+        return True
+    return bool(outputs_alike(sp, k, gf, gc, f.delay_ms - c.delay_ms) >= limit)
+
+
+def active_bins(sp):
+    return np.concatenate([np.arange(a, b) for a, b in sp.edges])
+
+
+def outputs_alike(sp, k, gf, gc, delay_ms):
+    """The band mean of the correlation between the input through gf (and delay_ms more) and the input through gc."""
+    turn = np.real(gf * np.exp(-2j * np.pi * sp.freqs[k] * delay_ms * 1e-3) * np.conj(gc)) * sp.sxx[k]
+    r, i = [], 0
+    for a, b in sp.edges:
+        n = b - a
+        r.append(turn[i:i + n].sum() / sp.sxx[a:b].sum())
+        i += n
+    return float(np.mean(r))
+
+
+def family_response(c, fs, freqs):
+    """The polarity and the phase stage (no delay) at the given frequencies."""
+    h = stage_response(c.mode, c.wide, c.theta, fs, freqs) if c.mode != "none" else np.ones(len(freqs), complex)
+    return (-1.0 if c.flip else 1.0) * h
+
+
 def search(sp, top=6, verbose=False, window_ms=None, phase_on=True, reach_ms=None):
     """window_ms = (lo, hi) restricts the delay to that range (the attack lag's neighbourhood); None searches the knob's reach."""
     t0 = time.time()
@@ -184,13 +221,15 @@ def search(sp, top=6, verbose=False, window_ms=None, phase_on=True, reach_ms=Non
             for j in np.argsort(v)[::-1][:3]:     # a few peaks per setting, so families survive de-duplication
                 best.append((v[j], mode, wide, theta, lags[j], flip))
     best.sort(key=lambda c: -c[0])
-    # refine the leaders to 0.1 sample, then de-duplicate into families
+    # refine the leaders to 0.1 sample, on the knob's own grid (whole tenths of a sample, so the delay applied is the one
+    # scored), then de-duplicate into families
     cands = []
     for score, mode, wide, theta, d, flip in best[:200]:
         h = stage_response(mode, wide, theta, sp.fs, freqs) if mode != "none" else np.ones(len(freqs))
         sign = -1.0 if flip else 1.0
         bestc = (-9.0, d)
-        for dd in np.arange(d - 0.3, d + 0.3001, 0.1):
+        tenths = math.floor(d * 10.0 + 0.5)
+        for dd in [(tenths + i) / 10.0 for i in range(-3, 4)]:
             if dd < lo_s - 1e-9 or dd > hi_s + 1e-9:
                 continue
             g = sign * h * np.exp(-2j * np.pi * freqs * dd / sp.fs)
@@ -199,9 +238,7 @@ def search(sp, top=6, verbose=False, window_ms=None, phase_on=True, reach_ms=Non
     cands.sort(key=lambda c: -c.score)
     families = []
     for c in cands:
-        same = lambda f: (f.flip == c.flip and (f.mode, f.wide) == (c.mode, c.wide)
-                          and abs(f.delay_ms - c.delay_ms) < FAMILY_DELAY_MS and abs(f.theta - c.theta) < 20.0)
-        if not any(same(f) for f in families):
+        if not any(same_family(f, c, sp) for f in families):
             families.append(c)
         if len(families) == top:
             break
@@ -214,6 +251,9 @@ def search(sp, top=6, verbose=False, window_ms=None, phase_on=True, reach_ms=Non
 # --- the attack lag (plan R18, offline) ----------------------------------------------------------------------------------------
 ATTACK_BANDS = [(35.0, 150.0, 12.0), (150.0, 600.0, 5.0), (600.0, None, 1.5)]   # low Hz, high Hz, smoothing ms
 ATTACK_RUNNER_UP = 0.65     # a peak is clear when the strongest rival outside its lobe is below this fraction of it
+ATTACK_MIN_PEAK = 0.15      # ... and at least this high (2026-10-08: the user's genuine pairs peak at 0.17 to 0.88; unrelated
+                            # instruments read "clear" at 0.01 to 0.12, bass against kick, hats against snare, and gave a
+                            # delay-only option and a manual-shift message)
 SEARCH_MS = 40.0
 
 
@@ -256,7 +296,7 @@ def attack_lag(x, y, fs):
         y0, y1, y2 = acc[k - 1], acc[k], acc[k + 1]
         den = y0 - 2 * y1 + y2
         frac = 0.5 * (y0 - y2) / den if den != 0 else 0.0
-    return (d[k] + frac) / fs * 1e3, bool(peak > 0 and runner < ATTACK_RUNNER_UP), float(peak), float(runner)
+    return (d[k] + frac) / fs * 1e3, bool(peak >= ATTACK_MIN_PEAK and runner < ATTACK_RUNNER_UP), float(peak), float(runner)
 
 
 # --- render check against the plugin's own DSP -----------------------------------------------------------------------------
@@ -424,13 +464,19 @@ def suggest_with_shift(x, y, fs, delay_on=True, phase_on=True):
     sits at its edge, or when the waveform score has a clearly better delay beyond the reach (WIDE_REACH_MS), the message asks
     for a manual shift of that many samples, and the options are those for the signal once it has been shifted (so within the
     knob's reach). With DELAY off nothing is shifted; a clear attack offset is only mentioned. Returns (options, baseline r,
-    attack reading, verdict, shift in samples or 0, message or "")."""
+    attack reading, verdict, shift in samples or 0, message or ""). The match flags (match_flags) are worked out once, for
+    the options returned (2026-10-08: so the chance test isn't run for options a shift replaces)."""
+    def flagged(xx, opts, verdict):
+        if opts and not verdict.startswith("delay only"):
+            return verdict + match_flags(xx, y, fs, opts, delay_on, phase_on)
+        return verdict
+
     opts, base, lag, verdict = suggest(x, y, fs, delay_on, phase_on)
     if not delay_on:
         note = ""
         if lag[1] and abs(lag[0]) >= MIN_DELAY_MS:
             note = f"DELAY is off: the transients are {int(round(lag[0] * 1e-3 * fs)):+d} samples apart"
-        return opts, base, lag, verdict, 0, note
+        return opts, base, lag, flagged(x, opts, verdict), 0, note
     shift = 0
     if lag[1] and abs(lag[0]) > MAX_DELAY_MS:
         shift = int(round(lag[0] * 1e-3 * fs))
@@ -442,13 +488,45 @@ def suggest_with_shift(x, y, fs, delay_on=True, phase_on=True):
         if abs(wide[0].delay_ms) > MAX_DELAY_MS and wide[0].score - inside >= MIN_GAIN:
             shift = int(round(wide[0].delay_ms * 1e-3 * fs))
     if shift == 0:
-        return opts, base, lag, verdict, 0, ""
-    opts, _, _, verdict = suggest(shift_samples(x, shift), y, fs, delay_on, phase_on)
+        return opts, base, lag, flagged(x, opts, verdict), 0, ""
+    shifted = shift_samples(x, shift)
+    opts, _, _, verdict = suggest(shifted, y, fs, delay_on, phase_on)
     message = f"Transient may be out of range, consider shifting {shift:+d} samples manually if needed"
-    return opts, base, lag, verdict, shift, message
+    return opts, base, lag, flagged(shifted, opts, verdict), shift, message
 
 
 MIN_GAIN = 0.03      # r gained over doing nothing below which ANALYSE says there is nothing worth changing
+CHANCE_SHIFTS = (0.37, 0.61)  # the chance test turns the sidechain round by these fractions of the capture
+CHANCE_MARGIN = 0.02          # an option's gain must beat the chance test's by this, or it is flagged "chance level"
+WEAK_MATCH = 0.12             # an option whose r stays under this is flagged "weak match"
+# From the user's pairs (2026-10-08): genuine ones beat the chance test by +0.037 (set 1 kick) to +0.53, GTR 1 against
+# Bass DI (both ways, unrelated) by +0.016 and +0.007; guitar against bass playing one part beat it by +0.09 and +0.14 (a
+# real but weak link: r 0.075 and 0.082 after the best option, where every genuine pair reached 0.13 or more). The set 1
+# hats show why the smaller of the two shifts: one landed on a repeat of the pattern (+0.066 against +0.002).
+
+
+def chance_gain(x, y, fs, delay_on=True, phase_on=True):
+    """What the search gains by chance on this material: the same search with the sidechain circularly shifted (which
+    keeps both signals' spectra and breaks their relationship), at CHANCE_SHIFTS of the capture, the smaller of the two
+    (a shift that lands on a repeat of the music would make the copy genuinely related). User, 2026-10-08: unrelated
+    material should be flagged, not hidden (guitar and bass playing one part may still want lining up)."""
+    gains = []
+    for frac in CHANCE_SHIFTS:
+        sp = spectra(x, np.roll(y, int(frac * len(y))), fs)
+        fam, base = search(sp, top=1, phase_on=phase_on, reach_ms=None if delay_on else 0.0)
+        gains.append(fam[0].score - base if fam else 0.0)
+    return min(gains)
+
+
+def match_flags(x, y, fs, options, delay_on, phase_on):
+    """" (chance level)" when the best option doesn't beat the chance test by CHANCE_MARGIN, " (weak match)" when its r
+    stays under WEAK_MATCH: warnings on the screen, the options still shown."""
+    flags = ""
+    if options[0][2] - chance_gain(x, y, fs, delay_on, phase_on) < CHANCE_MARGIN:
+        flags += " (chance level)"
+    if options[0][1].score < WEAK_MATCH:
+        flags += " (weak match)"
+    return flags
 MIN_DELAY_MS = 0.3   # a clear attack offset at least this large is worth a delay on its own
 MIN_MARGIN = 0.01    # r lead over the next family below which two options are shown
 

@@ -80,6 +80,20 @@ class HitCapture
         renderedSide = raw[inputSide];
     }
 
+    // Holds a window kept elsewhere (ANALYSE's strongest hit): input and sidechain from index 0, the onset at
+    // `onsetIn`.
+    void captureFrom(const std::vector<float>& in, const std::vector<float>& sc, int onsetIn, double sampleRate)
+    {
+        fs = sampleRate;
+        first = 0;
+        onset = onsetIn;
+        raw[input] = in;
+        raw[sidechain] = sc;
+        raw[inputSide].assign(in.size(), 0.0f);
+        rendered = raw[input];
+        renderedSide = raw[inputSide];
+    }
+
     long long onsetIndex() const { return onset; }
     long long lastIndex() const { return first + (long long)raw[input].size() - 1; }
     double getSampleRate() const { return fs; }

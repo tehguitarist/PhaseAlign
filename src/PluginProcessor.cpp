@@ -28,10 +28,25 @@ PhaseAlignProcessor::PhaseAlignProcessor()
     phaseModeParameter = parameters.getParameter(id::phaseMode);
     delayOnParameter->addListener(this);
     phaseModeParameter->addListener(this);
+
+    pa::analyse::Session::Host host;
+    host.sampleRate = [this] { return sampleRate.load(); };
+    host.scope = [this]
+    {
+        const auto s = panelSettings();
+        return pa::analyse::Scope{s.delayOn, s.phaseOn};
+    };
+    host.settings = [this] { return panelSettings(); };
+    host.apply = [this](const pa::analyse::PanelSettings& s) { applyPanelSettings(s); };
+    host.sidechainPresent = [this] { return meterCapture.hasSidechain(); };
+    host.transportKnown = [this] { return meterCapture.isTransportKnown(); };
+    host.transportPlaying = [this] { return meterCapture.isTransportPlaying(); };
+    analyseSession = std::make_unique<pa::analyse::Session>(analyseCapture, std::move(host));
 }
 
 PhaseAlignProcessor::~PhaseAlignProcessor()
 {
+    analyseSession.reset(); // stops its search thread and the capture first
     delayOnParameter->removeListener(this);
     phaseModeParameter->removeListener(this);
     cancelPendingUpdate();
@@ -91,6 +106,51 @@ pa::dsp::ChainSettings PhaseAlignProcessor::currentSettings() const
     return s;
 }
 
+pa::analyse::PanelSettings PhaseAlignProcessor::panelSettings() const
+{
+    namespace id = pa::params::id;
+    const auto value = [this](const char* paramId)
+    {
+        const auto* p = parameters.getParameter(paramId);
+        return (double)p->convertFrom0to1(p->getValue());
+    };
+    pa::analyse::PanelSettings s;
+    s.delayOn = value(id::delayOn) >= 0.5;
+    s.delayMs = value(id::delayMs);
+    s.polarity = value(id::polarity) >= 0.5;
+    s.phaseOn = value(id::phaseOn) >= 0.5;
+    s.phaseMode = juce::jlimit(0, 2, juce::roundToInt(value(id::phaseMode)));
+    s.range180 = value(id::phaseRange) >= 0.5;
+    s.phase = value(id::phase);
+    return s;
+}
+
+void PhaseAlignProcessor::applyPanelSettings(const pa::analyse::PanelSettings& s)
+{
+    namespace id = pa::params::id;
+    const std::pair<const char*, double> values[] = {{id::delayOn, s.delayOn ? 1.0 : 0.0},
+                                                     {id::delayMs, s.delayMs},
+                                                     {id::polarity, s.polarity ? 1.0 : 0.0},
+                                                     {id::phaseOn, s.phaseOn ? 1.0 : 0.0},
+                                                     {id::phaseMode, (double)s.phaseMode},
+                                                     {id::phaseRange, s.range180 ? 1.0 : 0.0},
+                                                     {id::phase, s.phase}};
+    std::vector<std::pair<juce::RangedAudioParameter*, float>> changes;
+    for (const auto& [paramId, value] : values)
+    {
+        auto* p = parameters.getParameter(paramId);
+        const auto normalised = p->convertTo0to1((float)value);
+        if (std::abs(normalised - p->getValue()) > 1e-7f)
+            changes.push_back({p, normalised});
+    }
+    for (auto& [p, v] : changes)
+        p->beginChangeGesture();
+    for (auto& [p, v] : changes)
+        p->setValueNotifyingHost(v);
+    for (auto& [p, v] : changes)
+        p->endChangeGesture();
+}
+
 bool PhaseAlignProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const
 {
     const auto mainOut = layouts.getMainOutputChannelSet();
@@ -113,14 +173,15 @@ void PhaseAlignProcessor::processBlockBypassed(juce::AudioBuffer<float>& buffer,
     runChain(buffer, currentSettings().bypassed());
 }
 
-// With no sidechain source chosen, some hosts (Logic Pro, as the user found) don't give the plugin silence: they feed its
-// own input in as the sidechain. The meter would then compare the track with a perfect copy of itself and read +1. So a
-// sidechain that is sample for sample the main input, for a quarter of a second, counts as no sidechain at all. Silence
-// in both doesn't count either way (they are trivially equal), and the first sample that differs ends it at once.
-// Audio thread, before the chain overwrites the input (it runs in place); only while the meter is capturing.
+// With no sidechain source chosen, some hosts (Logic Pro, as the user found) don't give the plugin silence: they feed
+// its own input in as the sidechain. The meter would then compare the track with a perfect copy of itself and read +1.
+// So a sidechain that is sample for sample the main input, for a quarter of a second, counts as no sidechain at all.
+// Silence in both doesn't count either way (they are trivially equal), and the first sample that differs ends it at
+// once. Audio thread, before the chain overwrites the input (it runs in place); only while the meter or ANALYSE is
+// capturing.
 bool PhaseAlignProcessor::sidechainIsOwnInput(const juce::AudioBuffer<float>& main, const juce::AudioBuffer<float>& sidechain)
 {
-    if (! meterCapture.isActive())
+    if (! meterCapture.isActive() && ! analyseCapture.isActive())
     {
         identicalSamples = 0;
         return false;
@@ -163,17 +224,19 @@ void PhaseAlignProcessor::runChain(juce::AudioBuffer<float>& buffer, const pa::d
     }
     chain.setSettings(settings);
 
-    if (! meterCapture.isActive())
+    const auto metering = meterCapture.isActive(), analysing = analyseCapture.isActive();
+    if (! metering && ! analysing)
     {
         chain.process(main.getArrayOfWritePointers(), numChannels, main.getNumSamples());
         return;
     }
 
     // Metering: mono sums of the input, output and sidechain, a sub-block at a time (no scratch to size). The capture
-    // delays the input and sidechain by the chain's current latency, so all three line up.
+    // delays the input and sidechain by the chain's current latency, so all three line up. ANALYSE takes the input and
+    // sidechain as they arrive (already lined up with each other).
     constexpr int sub = pa::dsp::Chain::subBlockSize;
     float in[sub], out[sub], sc[sub], inSide[sub], outSide[sub];
-    const auto withSide = numChannels > 1 && meterCapture.wantsSide();
+    const auto withSide = metering && numChannels > 1 && meterCapture.wantsSide();
     float* channels[pa::dsp::Chain::maxChannels];
     const auto mono = [](const juce::AudioBuffer<float>& b, int start, int n, float* dest)
     {
@@ -200,9 +263,13 @@ void PhaseAlignProcessor::runChain(juce::AudioBuffer<float>& buffer, const pa::d
         if (withSide)
             side(main, start, n, inSide);
         mono(sidechain, start, n, sc);
+        if (analysing)
+            analyseCapture.push(in, sc, n);
         for (int ch = 0; ch < std::min(numChannels, pa::dsp::Chain::maxChannels); ++ch)
             channels[ch] = main.getWritePointer(ch, start);
         chain.process(channels, std::min(numChannels, pa::dsp::Chain::maxChannels), n);
+        if (! metering)
+            continue;
         mono(main, start, n, out);
         if (withSide)
             side(main, start, n, outSide);
@@ -246,7 +313,8 @@ juce::ValueTree PhaseAlignProcessor::defaultUiState()
                                            {UiProps::vectorStereo, false},
                                            {UiProps::showInput, true},
                                            {UiProps::showOutput, true},
-                                           {UiProps::showSidechain, true}});
+                                           {UiProps::showSidechain, true},
+                                           {UiProps::analysePreview, "bands"}});
 }
 
 void PhaseAlignProcessor::restoreUiState(const juce::ValueTree& loaded)
@@ -269,6 +337,8 @@ void PhaseAlignProcessor::restoreUiState(const juce::ValueTree& loaded)
     uiState.setProperty(UiProps::vectorStereo, (bool)get(UiProps::vectorStereo), nullptr);
     for (const auto& id : {UiProps::showInput, UiProps::showOutput, UiProps::showSidechain})
         uiState.setProperty(id, (bool)get(id), nullptr);
+    uiState.setProperty(UiProps::analysePreview,
+                        get(UiProps::analysePreview).toString() == "alignment" ? "alignment" : "bands", nullptr);
 }
 
 void PhaseAlignProcessor::getStateInformation(juce::MemoryBlock& destData)

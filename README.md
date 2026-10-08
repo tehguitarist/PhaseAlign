@@ -33,6 +33,9 @@ it on one of the pair and feed the other into its **sidechain**; the meter then 
 
 1. **Insert Phase Align on one track** of the pair and route the **other track to its sidechain** (how depends on your
    host; with no sidechain the screen says NO SIDECHAIN SIGNAL).
+   **Or let ANALYSE suggest a setting:** press **ANALYSE**, play a section where both tracks play (at least 10 s; 30 s
+   is best) and stop. The screen offers one or two settings to try by ear, and ORIGINAL to go back; see
+   [ANALYSE](#analyse-auto-suggest). The steps below are the manual way, and the way to fine-tune what it suggests.
 2. **Time first.** Switch to the **ALIGNMENT** view. It holds a hit from the sidechain and shows the waveforms on top of
    each other: the sidechain (pale), this track's INPUT (blue) and the OUTPUT (green). Turn **DELAY** on and move the
    knob until the green waveform starts where the pale one does; zoom in with the mouse wheel or the **-** and **+**
@@ -90,7 +93,7 @@ work, so you can set them up before switching them on).
 | **View selector** (middle of the row under the screen) | Click it for a menu that opens upwards: BANDS (the default: correlation in six bands), VECTORSCOPE (the phase relation as a shape) or ALIGNMENT (the waveforms on top of each other). See [Reading the meter](#reading-the-meter). |
 | **SLOW / FAST** | How much the meter averages. SLOW is the steady one: it averages over a few seconds and the bars glide, so it settles in about two seconds. FAST follows your changes in about a third of a second, and its bars move more. |
 | **HOLD** | Freezes the screen so you can study it. It also freezes by itself while your DAW's transport is stopped (if the DAW reports it). Frozen, turning **DELAY**, the polarity button or the phase shows what they would do (see below). |
-| **ANALYSE** | Reserved for a future automatic-suggestion feature. It doesn't do anything yet. |
+| **ANALYSE** | Suggests the delay, polarity and phase that line this track up with the sidechain, from a few seconds of the two playing. The screen shows it while the button is lit; press it again to go back to the meter. See [ANALYSE](#analyse-auto-suggest). |
 
 ### Using the knobs
 
@@ -252,6 +255,53 @@ within a couple of degrees. The delay counts as 0 when it is off.
   sidechain that is an exact copy of its own input and treats it as no sidechain too.
 - **OFF**: the METER button is off.
 
+## ANALYSE (auto-suggest)
+
+ANALYSE listens to this track and the sidechain playing together and suggests the settings that make them agree best. It
+is a suggestion: the setting that measures best is not always the one that sounds best, so it offers up to two to try by
+ear, and ORIGINAL (what you had before) to go back to.
+
+1. **Press ANALYSE.** It lights, and the screen shows what it is searching and how much audio it has.
+2. **Play** a section typical of the song where both tracks play. Only the stretches where both have signal count, and
+   only while the transport plays. It needs **at least 10 s**; 30 s is best, especially for sustained parts
+   (bass, guitars), whose best setting changes with the notes played. Shorter captures can make tracks that have little
+   in common look related by chance. Past 30 s it keeps the most recent 30 s.
+3. **Stop** the transport: it analyses at once (well under a second; the screen shows ANALYSING and a progress bar). Stopped too early, it says how much it has and
+   keeps it for the next play. **ANALYSE NOW** does the same without stopping (for hosts that don't report their
+   transport, and the standalone app); **CLEAR** starts the capture again.
+4. **Choose.** Click an option to apply it, then play to hear it; click the other, or **ORIGINAL**, to compare. The arrow
+   marks the row the panel has now. Beside the rows, the chosen option against ORIGINAL over the captured audio: the
+   six **BANDS** (ORIGINAL as the blue tick, the option as the green bar) or **ALIGNMENT** (the strongest captured hit:
+   the sidechain pale, ORIGINAL blue, the option green). **AGAIN** captures anew.
+5. **Press ANALYSE** again to go back to the meter. What you applied stays; fine-tune it with the knobs if you like.
+
+**What it searches.** Only what is switched on: with **DELAY** on, the delay (within the knob's −4 to +4 ms); with
+**PHASE** on, HIGH, LOW (both RANGEs) and CONSTANT over their whole travel; the polarity always. So turn DELAY off to
+find the best phase and polarity for the delay you have set, or PHASE off for the best delay and polarity alone. An
+option that leaves the phase out switches **PHASE** off, so the next ANALYSE won't search it until you switch it back on
+(the screen's top line always says what is being searched).
+
+**Each option** shows its settings as the panel will read them, **r** (how well this track then matches the sidechain
+over the capture, averaged over 1/3-octave bands so the low end doesn't dominate; +1 would be identical) and the change
+from ORIGINAL. Notes:
+
+- **LESS LOW END**: the option lowers the match below 300 Hz although it raises it overall; listen to the low end.
+- **DELAY ONLY**: the waveforms barely match, but the transients clearly sit apart, so a delay alone is suggested.
+- **Two close options**: the two score within 0.01 of each other; the choice is a matter of the sound you want.
+- **Nothing worth changing**: no setting improves the match by 0.03 or more.
+- **Transient may be out of range, consider shifting N samples manually if needed**: the tracks are further apart
+  than the delay reaches. Move this track's clip by N samples in the DAW (positive moves it later); the options shown
+  are for after that shift.
+- **DELAY is off: the transients are N samples apart**: with DELAY off, where the transients sit, for information.
+- **The audio seems unrelated** (amber): the best option is no better than what the search finds by chance on this
+  material (it checks by running again with the sidechain moved a few seconds out of step). The sidechain may be the
+  wrong track, or the section too short. The options are still shown, to try by ear.
+- **A weak match** (amber): the best option still leaves the tracks matching only a little (*r* under 0.12), as with
+  different instruments playing the same part, which you may still want in phase. Choose by ear.
+
+Choosing an option sets up to seven parameters at once, as one gesture. Some hosts undo that in one step and some in
+several; ORIGINAL always goes back. The capture and the options stay while the plugin window is closed and opened again.
+
 ## Which control for which problem
 
 - **Two mics at different distances** (close and room, a stereo pair against a spot mic): a *time* difference. Use the
@@ -321,9 +371,17 @@ their values at the screen's own pace. The VECTORSCOPE plots the last 0.25 s (SL
 deviation of 1 and turned 45 degrees. ALIGNMENT keeps four seconds of the streams, finds hits on the sidechain (the rise of
 its 0.5 ms envelope, within 12 dB of the strongest recent one, from a quiet start) and, for a captured hit, renders this
 track's input through the knobs: its spectrum times the response of the delay, the polarity flip and the phase stage (two
-first-order all-passes for HIGH and LOW, a rotation for CONSTANT), back to the time domain. The meter's analysis also
-measures delays and rotations (a PHAT lag function and an attack-based lag, kept for the automatic suggestion that is
-planned) but no view shows them.
+first-order all-passes for HIGH and LOW, a rotation for CONSTANT), back to the time domain.
+
+**ANALYSE.** While it captures, the audio thread copies this track's input and the sidechain into a buffer; everything
+else happens off the audio thread. The search takes one cross-spectrum of the whole capture (8192-point Hann frames at
+44.1 and 48 kHz, 75% overlap) and scores every candidate in closed form: the delay, the polarity and the phase stage's
+exact response (the same formulas the plugin runs) applied to the cross-spectrum, and the mean of *r* over the active
+1/3-octave bands from 40 Hz to 16 kHz. HIGH and LOW are tried in both RANGEs and CONSTANT from 0 to 180° in 2.5° steps,
+each at every delay in reach to a quarter of a sample (one inverse FFT per setting), then refined to the knob's 0.1
+sample. When the transients line up clearly (an attack-based lag over the whole capture), the delay comes from them and
+the phase and polarity are chosen within 0.3 ms of it. Options that would sound alike are merged. It runs on its own
+thread in a fraction of a second.
 
 **Efficiency.** On an Apple M1, a stereo frame costs about 18 to 23 ns in HIGH or LOW and about 30 ns in CONSTANT at
 48 kHz. The FFT is vDSP on macOS and [PFFFT](https://bitbucket.org/jpommier/pffft) on Windows and Linux. Nothing

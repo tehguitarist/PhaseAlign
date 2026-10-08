@@ -135,19 +135,19 @@ PhaseAlignEditor::PhaseAlignEditor(PhaseAlignProcessor& p)
       meterButton(
           images, layout::meterButton.bounds(),
           {layout::Image::meterInOff, layout::Image::meterInOn, layout::Image::meterOutOff, layout::Image::meterOutOn}),
-      // ANALYSE is not functional in v0.7: always unlit, but it still presses (IMPLEMENTATION_PLAN 4.3).
+      // Lit while ANALYSE is active (plan R26).
       analyseButton(images, layout::analyseButton.bounds(),
-                    {layout::Image::analyseInOff, layout::Image::analyseInOff, layout::Image::analyseOutOff,
-                     layout::Image::analyseOutOff}),
+                    {layout::Image::analyseInOff, layout::Image::analyseInOn, layout::Image::analyseOutOff,
+                     layout::Image::analyseOutOn}),
       delayReadout(images.source(), layout::delayDisplay.bounds(), pa::design::delayReadoutInterior),
       phaseReadout(images.source(), layout::phaseDisplay.bounds(), pa::design::phaseReadoutInterior),
-      meterScreen(images.source(), p.getMeterCapture()), rangeLabel(layout::upperRangeLabel.bounds()),
-      delayReadoutAttachment(parameter(id::delayMs),
-                             [this](float)
-                             {
-                                 updateDelayReadout();
-                                 updateHeldPreview();
-                             }),
+      meterScreen(images.source(), p.getMeterCapture()), analyseScreen(images.source(), p.getAnalyseSession()),
+      rangeLabel(layout::upperRangeLabel.bounds()), delayReadoutAttachment(parameter(id::delayMs),
+                                                                           [this](float)
+                                                                           {
+                                                                               updateDelayReadout();
+                                                                               updateHeldPreview();
+                                                                           }),
       phaseReadoutAttachment(parameter(id::phase),
                              [this](float)
                              {
@@ -180,11 +180,11 @@ PhaseAlignEditor::PhaseAlignEditor(PhaseAlignProcessor& p)
                             updateHeldPreview();
                         }),
       phaseOnAttachment(parameter(id::phaseOn),
-                       [this](float)
-                       {
-                           updateDimming();
-                           updateHeldPreview();
-                       })
+                        [this](float)
+                        {
+                            updateDimming();
+                            updateHeldPreview();
+                        })
 {
     setLookAndFeel(&lookAndFeel);
     setOpaque(true);
@@ -253,7 +253,26 @@ PhaseAlignEditor::PhaseAlignEditor(PhaseAlignProcessor& p)
                                "only runs while this window is open."));
     meterButton.onClick = [this]
     { uiState.setProperty(PhaseAlignProcessor::UiProps::meterOn, ! meterButton.isLit(), nullptr); };
-    analyseButton.setTooltip("Auto-suggest: coming in a future version");
+    analyseButton.setTooltip(
+        "ANALYSE: suggests the delay, polarity and phase that line this track up with the sidechain. Press it, play a "
+        "section where both play (at least " +
+        juce::String((int)pa::analyse::Session::minSeconds) +
+        " s), and stop: it shows up to two options to try by ear, and ORIGINAL to go back. Only what is switched on "
+        "is searched (DELAY, PHASE; polarity always). Press it again to go back to the meter.");
+    analyseButton.onClick = [this]
+    {
+        auto& session = audioProcessor.getAnalyseSession();
+        if (session.isActive())
+            session.stop();
+        else
+            session.start();
+    };
+    audioProcessor.getAnalyseSession().onChange = [this] { updateAnalyse(); };
+    analyseScreen.onPreviewSelected = [this](pa::ui::AnalyseScreen::Preview choice)
+    {
+        uiState.setProperty(PhaseAlignProcessor::UiProps::analysePreview,
+                            choice == pa::ui::AnalyseScreen::Preview::alignment ? "alignment" : "bands", nullptr);
+    };
     meterScreen.onViewSelected = [this](pa::ui::MeterScreen::View v)
     {
         uiState.setProperty(PhaseAlignProcessor::UiProps::meterView,
@@ -284,8 +303,8 @@ PhaseAlignEditor::PhaseAlignEditor(PhaseAlignProcessor& p)
     helpButton.onToggle = [this](bool on)
     { uiState.setProperty(PhaseAlignProcessor::UiProps::tooltipsOn, on, nullptr); };
 
-    designComponents = {&delayKnob,     &phaseKnob,    &unitSwitch,   &modeSwitch,  &meterButton,
-                        &analyseButton, &delayReadout, &phaseReadout, &meterScreen, &rangeLabel, &helpButton};
+    designComponents = {&delayKnob,    &phaseKnob,    &unitSwitch,  &modeSwitch,    &meterButton, &analyseButton,
+                        &delayReadout, &phaseReadout, &meterScreen, &analyseScreen, &rangeLabel,  &helpButton};
     for (auto& t : toggles)
     {
         if (t.led != nullptr)
@@ -302,7 +321,9 @@ PhaseAlignEditor::PhaseAlignEditor(PhaseAlignProcessor& p)
     updateDimming(); // also draws the phase readout
     updateHeldPreview();
     unitSwitch.setIndex(unitPosition(delayUnit()));
+    analyseScreen.setDelayUnit(delayUnit());
     updateMeter();
+    updateAnalyse();
 
     uiState.addListener(this);
     audioProcessor.addChangeListener(this);
@@ -324,6 +345,7 @@ PhaseAlignEditor::PhaseAlignEditor(PhaseAlignProcessor& p)
 
 PhaseAlignEditor::~PhaseAlignEditor()
 {
+    audioProcessor.getAnalyseSession().onChange = nullptr;
     audioProcessor.removeChangeListener(this);
     uiState.removeListener(this);
     setLookAndFeel(nullptr);
@@ -360,7 +382,12 @@ void PhaseAlignEditor::valueTreePropertyChanged(juce::ValueTree&, const juce::Id
     if (property == PhaseAlignProcessor::UiProps::delayUnit)
     {
         unitSwitch.setIndex(unitPosition(delayUnit()));
+        analyseScreen.setDelayUnit(delayUnit());
         updateDelayReadout();
+    }
+    else if (property == PhaseAlignProcessor::UiProps::analysePreview)
+    {
+        updateAnalyse();
     }
     else if (property == PhaseAlignProcessor::UiProps::tooltipsOn)
     {
@@ -486,6 +513,18 @@ void PhaseAlignEditor::updateRangeUi()
     updatePhaseReadout();
 }
 
+void PhaseAlignEditor::updateAnalyse()
+{
+    const auto active = audioProcessor.getAnalyseSession().isActive();
+    analyseButton.setLit(active);
+    meterScreen.setVisible(! active); // hidden, the meter stops (and stops capturing) by itself
+    analyseScreen.setVisible(active);
+    analyseScreen.setPreview(uiState.getProperty(PhaseAlignProcessor::UiProps::analysePreview).toString() == "alignment"
+                                 ? pa::ui::AnalyseScreen::Preview::alignment
+                                 : pa::ui::AnalyseScreen::Preview::bands);
+    analyseScreen.sessionChanged();
+}
+
 void PhaseAlignEditor::updateMeter()
 {
     const auto on = (bool)uiState.getProperty(PhaseAlignProcessor::UiProps::meterOn);
@@ -523,6 +562,7 @@ void PhaseAlignEditor::updateHeldPreview()
     if (settings.phaseOn)
         response = [settings, fs = sampleRate()](double hz) { return pa::dsp::phaseStageResponse(settings, fs, hz); };
     meterScreen.setHeldSettings(settings.delayOn ? value(id::delayMs) : 0.0, settings.polarityInverted, response);
+    analyseScreen.settingsChanged(); // the row the panel matches, and its preview
 }
 
 void PhaseAlignEditor::updateDimming()

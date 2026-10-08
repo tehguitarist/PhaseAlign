@@ -1,8 +1,8 @@
 # Handover: where things stand, and what's next
 
-Updated 2026-10-07, at the end of the session that rebuilt the meter (R17 to R24) after the RANGE redesign. Read CLAUDE.md
-first; plan sections are IMPLEMENTATION_PLAN.md. Nothing here needs code first: what's left is decisions and listening
-(the meter above all).
+Updated 2026-10-08, at the end of the session that built ANALYSE into the plugin (plan R26) and merged it to master.
+Read CLAUDE.md first; plan sections and R-numbers are IMPLEMENTATION_PLAN.md. The plugin is feature-complete for now:
+what's left is the user's verdicts, their new stems, and a push.
 
 ## Ground rules (from the user)
 
@@ -13,10 +13,13 @@ first; plan sections are IMPLEMENTATION_PLAN.md. Nothing here needs code first: 
   message broke this once and history was rewritten to fix it, so check first.
 - Don't change the Hi/Lo mapping (plan 2.3: the four shapes and their reference frequencies), the 4097-tap Hilbert or the
   fade and glide lengths without asking.
-- The goldens must match within 1e-6. If a Python reference changes, change the C++ identically, regenerate with
-  `prototype/golden.py`, and say why.
-- Anything the user would hear goes to them, with numbers, before it merges. (In the 2026-10-07 session the user asked for
-  each commit, merge and install to /Library explicitly, and tried builds in a DAW between rounds.)
+- The Python references are the specs: the C++ must match its goldens (the DSP within 1e-6, ANALYSE's scores within
+  1e-9). If a reference changes, change the C++ identically, regenerate (`prototype/golden.py`,
+  `prototype/analyse_golden.py`), and say why.
+- **Don't change ANALYSE's search until the user's new stems are in** (user, 2026-10-08: "wait for more samples for a
+  really comprehensive check before modifying too much").
+- Anything the user would hear goes to them, with numbers, before it merges. The user asks for each commit, merge and
+  install to /Library explicitly, and tries builds in a DAW between rounds.
 - Keep CPU and latency as low as possible, but working matters more (user, 2026-10-06).
 - Budgets per stereo frame (`PhaseAlignDspTests "chain cost per stereo frame"`, Release): Hi/Lo < 50 ns, Constant
   < 150 ns. Hi/Lo at 44.1 kHz over 50 ns on the Windows/Linux CI runners is accepted (user, 2026-10-06).
@@ -26,190 +29,104 @@ first; plan sections are IMPLEMENTATION_PLAN.md. Nothing here needs code first: 
 
 ## State
 
-- **master is `a0c7c81`** (plus the commit of this handover cleanup), 16 or more commits ahead of GitHub: **nothing from
-  2026-10-07 is pushed** (the last pushed commit, `7a9a676`, was green in CI on all three platforms: `gh run list
-  --branch master`). Master is the only branch, locally and on GitHub. No worktrees.
+- **Everything is on master**; the `analyse` branch was merged on 2026-10-08 and deleted. GitHub has master up to
+  `8f906f0` (green in CI on all three platforms, with all the meter work); **nothing after it is pushed**: the ANALYSE
+  groundwork (prototype only) and ANALYSE itself. No worktrees.
 - The build installed in `/Library/Audio/Plug-Ins/{Components,VST3}` (when the user asks: not ~/Library) is the Release
-  build of a0c7c81 (12:59 on 2026-10-07), arm64.
+  build of `cb3df41` (ANALYSE with its warnings and progress bar), arm64; auval passes. Master differs from it only in
+  ways nobody would see or hear: the option merging measured over every bin (no result changed on any pair), the
+  CorrelationAnalyser cleanup, docs.
 - Licence: GNU AGPLv3 (`LICENSE`); JUCE under its AGPLv3 option; notices in `THIRD_PARTY_NOTICES.md`.
 - Build directories (gitignored): `build-ui` (tests: `cmake -B build-ui -DPA_STANDALONE=ON`, then `cmake --build build-ui
-  --target PhaseAlignTests PhaseAlignDspTests` and `ctest --test-dir build-ui`), `build-release` (benchmarks),
-  `build-simd` (the convolver's `Simd.h` path forced on with `-DPA_CONVOLVER_SIMD=1`, to test it off Windows).
+  --target PhaseAlignTests PhaseAlignDspTests` and `ctest --test-dir build-ui`), `build-release` (benchmarks, the
+  installed plugin), `build-simd` (the convolver's `Simd.h` path forced on with `-DPA_CONVOLVER_SIMD=1`, to test it off
+  Windows).
 
-## Done in the last two sessions (details in the plan)
+## Waiting for the user
 
-**2026-10-07, the meter (plan R17 to R24; CLAUDE.md item 9):** BANDS (default), VECTORSCOPE (with STEREO) and ALIGNMENT
-(CAPTURE, zoom buttons), SLOW/FAST, HOLD with the knobs previewing on the frozen picture (delay, polarity and the phase
-stage's closed-form response, checked against the real Chain to 2 degrees), blue input, hideable traces, per-view CPU
-(2.8% of a core down to about 0.25%), and fixes from the user's DAW use: the Logic no-sidechain copy, bands vanishing on
-FAST, the vectorscope ignoring SLOW/FAST. The old FREQUENCY, TIME OFFSET and PHASE views are gone from the UI; their
-analysis stays for ANALYSE. Tuned on the user's own stem pairs (`prototype/export_pairs.py`).
+1. **ANALYSE in a DAW** (plan R26, README "ANALYSE"): the flow (capture to 10 s, stop, the analysing bar, the options at
+   the real size), applying and A/B by ear with ORIGINAL, how their host's undo treats the seven-parameter gesture (one
+   step or several; JUCE can't ask for a group), the warnings on unrelated material, and Logic with no sidechain chosen
+   (the capture should stay at 0 s).
+2. **The meter in a DAW** (plan R17 to R24): the drop-up and the three views; SLOW against FAST; the vectorscope on a real
+   stereo track and its SOURCE toggle; ALIGNMENT's captured hit following the knobs, the 2 s hold-off, wheel and -/+ zoom;
+   HOLD and the knob previews; the legend toggles; the Logic fix (a sidechain that is a copy of the input counts as none;
+   tested with synthetic buffers only). Bleed between mics is out of scope (user).
+3. **New stems, then a comprehensive check of ANALYSE** (see "ANALYSE: the check that waits for the new stems" below).
+4. **Listening:** M2 in a DAW (the delay and phase as built) and P3 fade tuning (`prototype/out/p3/`) on multi-mic stems;
+   the second blind set (`prototype/out/analyse/blind2/`, key in `key.txt`, opened after listening).
+5. **A push** when the user says: master's ANALYSE work goes to GitHub, and CI's first look at it (below).
 
-**2026-10-06 and 07, before that (the RANGE redesign):**
-
-1. **RANGE redesign (plan 2.3, R15, R16).** Each (mode, range) is its own shape built from the reference unit's measured
-   geometries (nothing invented): LOW out 75.1 Hz; LOW in two stacked at 150.1 Hz; HIGH out 150.1 Hz; HIGH in 75.1 Hz
-   and 1502 Hz. RANGE out is unchanged from before; only RANGE in changed. Fitted against the measurements each
-   shape is within about 2° rms (`prototype/range_ab.py` renders the A/B files).
-2. **Names:** LOW centres the turn lower down, HIGH higher up, in both ranges (the frequency where half the full turn has
-   happened at full knob: 75 / 150 Hz for LOW out / in, 150 / about 336 Hz for HIGH). With RANGE in HIGH is also more
-   spread out. NARROW / WIDE was rejected: with RANGE out both modes have the same width. README "Where the turn sits".
-3. **The number on the panel is the real phase.** At full knob the scale label, the readout and the measured phase agree
-   in every state, tested end to end through the processor (`tests/EditorTests.cpp`, "the phase readout is the phase the
-   plugin applies"). The one exception is HIGH with RANGE in, which shows 0 to 90 with an asterisk.
-4. **Glide bug found by CI and fixed (plan 2.3 "Switching shape").** The glide state is a weight on each of the four
-   shapes. The step test runs several seeds because the random sequences differ between standard libraries.
-5. **Windows Constant 193 ns to 53 ns** (MSVC wasn't vectorising the convolver; under `_MSC_VER` only it now uses
-   `Simd.h`; plan 2.6 L). pluginval passes on all three platforms and gates the Windows and Linux CI jobs.
-6. **UI and docs:** minimum editor size 60% (586 px); the README is a manual with screenshots (`docs/images/`, the meter
-   ones made from the desktop test's snapshots) and a phase modes section with a figure (`prototype/modes_figure.py`);
-   dimming alpha 0.4 approved.
-7. **Frequency-response check of the A/B sums** (`prototype/range_fr_check.py`, plot in `prototype/out/range/fr_check.png`).
-
-## Next: needs the user (decisions and listening)
-
-1. **The meter (plan R17 to R24): the user's verdict in a DAW is outstanding.** Things to hear or see there: the drop-up
-   menu and the three views; SLOW (slow and smooth) against FAST; the vectorscope on a real stereo track and its SOURCE
-   toggle; ALIGNMENT's captured hit following the DELAY and phase knobs, the 2 s hold-off, wheel and -/+ zoom; HOLD and
-   the knob previews; the legend toggles; and the Logic fix (a sidechain that is a copy of the input counts as none; the
-   cause is the user's finding, the fix is only tested with synthetic buffers). The meter has no tuning left that doesn't
-   need their ears. Bleed between mics is out of scope (user).
-2. **Listening.** Done (user, 2026-10-07): the RANGE in A/B files are good, and Constant's true rotation is useful.
-   Left: M2 in a DAW (below) and P3 fade tuning (`prototype/out/p3/`), with the user's multi-mic stems.
-3. **Decided (user, 2026-10-07):** HIGH with RANGE in keeps the asterisk (the tooltip explains it); the de-cramping of LOW
-   with RANGE in is left; latency re-alignment per host is fine; the README no longer carries host-specific sidechain
-   steps and other hosts are not going to be checked.
-4. **`release.yml`** now refuses to run on a commit without a green CI run (the `version` job checks `gh run list --workflow
-   ci.yml --commit $GITHUB_SHA`; the `skip_ci_check` input overrides it). Its first real run also checks the Windows and
-   Linux installers' docs step.
-5. **ANALYSE (auto-suggest)**: see "ANALYSE: build it into the plugin" below for the build; it is next after the meter, and **the cleanup of what it doesn't use comes after that** (user,
-   2026-10-07). The button is present but does nothing. What is ready for it: the waveform (PHAT) and attack lags and
-   the curve and phase measures in `meter/CorrelationAnalyser` (off unless a view asks: `Needs`), the delay, polarity
-   and phase response preview (`dsp/PhaseResponse.h`, `meter/HitCapture`), and the user's stem pairs with tests.
-   Findings that matter: the waveform lag is wrong for hits whose bodies differ (a kick against a kick sample read +29
-   ms), the attack lag (three bands, plan R18) is right on all five pairs; the bass's attack reading is the weakest.
-   **Groundwork (2026-10-07): `prototype/analyse.py`** (PLAN 8 step 6). Whole-capture cross-spectrum; every candidate
-   (4 Hi/Lo shapes, Constant, polarity, delay ±4 ms at 0.1 sample) scored in closed form as the mean per-1/3-octave-band
-   r; top families de-duplicated. Synthetic pairs with a known delay and rotation are all recovered, and predicted scores
-   match the plugin's own Hi/Lo rendered (to 0.003). Version 2 is attack-first: `attack_lag` (a Python port of R18; its
-   readings equal the C++'s on the five pairs, input = `_a`, positive = delay the input) fixes the delay when clear and
-   in reach, and phase and polarity are chosen within 0.3 ms of it. Result: delays are now right (kick +1.57 ms where the
-   score alone said +3.2; snare +0.74; bass, guitar, hats ~0), but **the phase and polarity choice is weakly supported on
-   these pairs** (r gains of 0.00 to 0.07 over doing nothing; kick's top three settings are within 0.001 of each other
-   and the kick wants Ø, which two differently-recorded kicks may simply not justify). Next: a confidence measure
-   (gain over baseline, margin over the runner-up family) so ANALYSE says "no change worth making" for guitar and hats,
-   and listening to the renders; then the C++ (offline, on a background thread, reusing `dsp/PhaseResponse.h`).
-   Report: `prototype/out/analyse/report.md`.
-   **Second stem set and blind shootout (user, 2026-10-07/08; `captures/stems/`, `prototype/analyse_stems.py`,
-   `analyse_shootout.py --blind`):** the user's by-ear settings mostly scored badly on the metric, but in the blind
-   listening (sums with the sidechain) the search's pick was best on 5 of 6: snare sample (CONSTANT 50°, -5.94 ms, only one
-   whose transients lined up; the user's own 4 ms pick was worst, so **the delay should reach 6 ms**, user), snare OH
-   (CONSTANT 5°, Ø, -1.85 ms), kick sample (attack-first LO in 62.5°, +1.21 ms; the joint pick's transients didn't line up),
-   kick OH (joint, LO in 140°, Ø, -4.94 ms, tied with the user's own), guitar (joint CONSTANT 110°, -0.58 ms best; then off, then the
-   user's own LO in 102.6° at 0 ms, attack-first worst). The bass was the exception: off was best (the search's -0.42 ms LO in 27.5° had less low end, the user's
-   +4.6 ms HI out worst). Built from that, in `analyse.suggest`: (1) the **low-end guard** (a candidate must not lower r
-   below 300 Hz: the bass is the only pair it rejects), (2) **attack-first only when the attack peak is >= 0.35**, else the
-   joint search (0.39 kick sample, 0.61 snare OH vs 0.30 kick OH, 0.18 guitar: a threshold from four pairs, a first
-   guess), (3) up to **two options** to choose from (user's idea: it was a toss-up by the sound wanted). Caveat: all of this
-   was tuned on the same six pairs, so it needs new stems to mean anything; and the two options are near neighbours (50° vs
-   70°), not real alternatives. The bass now reads "delay only, -0.37 ms", which is untested by ear.
-   **Decided (user, 2026-10-08): the delay stays +-4 ms** (micro adjustments; no 6 ms extension). A bigger offset is moved
-   by hand: `analyse.suggest_with_shift` says "Transient may be out of range, consider shifting +/- N samples manually if
-   needed" (N in samples, as DAWs work in them; positive delays the track) when the attack reading is clear and beyond
-   the reach, or the best option sits at the edge, and gives options for the signal after that shift. Two options only
-   when the best two are within 0.01 r, one when there is a clear winner. Untested by ear: snare sample (-284 samples,
-   then the residual search says HI in 180°, -1.05 ms, not the CONSTANT 50° the ear liked at the whole -5.94 ms) and kick
-   OH (within +-4 ms the best is LO in 180°, Ø, -0.70 ms; the ear's -4.94 ms pick is out of reach and no message fires,
-   because the attack peak is weak and the in-reach best isn't at the edge). The user will get more stems.
-   **2026-10-08, later:** ANALYSE **respects the stage toggles** (user): `suggest(..., delay_on, phase_on)` searches only what
-   is on (DELAY off: delay stays 0 and a clear attack offset is only mentioned, "DELAY is off: the transients are N samples
-   apart"; PHASE off: phase stays off; polarity is always searched, the Ø button being its own control; confirmed by the user,
-   whatever the button's state), so one search answers best delay, best phase, best polarity or any mix. The shift message also fires when the
-   waveform score has a clearly better delay up to 10 ms out (`WIDE_REACH_MS`; this catches the kick OH, -237 samples,
-   which the attack reading alone missed). The **low-end guard became a flag**: the kick OH's -4.94 ms pick lowers r below
-   300 Hz by 0.05 (the user heard that: more attack, less low-end solidity) and a hard reject hid it; options are now kept
-   and marked "less low end" (the bass too, -0.02). Second blind set (`analyse_shootout.py --blind2`, the ANALYSE answer
-   with the manual shift applied first, plus off and the earlier best): waiting for the user's listening.
-   **Listening (user, 2026-10-07; `prototype/out/analyse/renders/`): the sum tells more than the input alone.** Kick: sum 1
-   (CONSTANT 130°, Ø, +1.57 ms: the score's own top pick) was best, input 3 (LO in 180°, Ø, +1.02 ms) the best alone. Snare:
-   sum 3 (HI in 157.5°, Ø, +0.95 ms) was best, input 1 (LO in 125°, Ø, +0.74 ms) the best alone, so for the snare the
-   score's top pick was not what the ear chose from the sum (the three scores are within 0.003). All the winners are Ø
-   plus a rotation. Judge candidates by the sum with the sidechain, not the input alone. The user is getting stems that are
-   further apart (bigger offsets) to test with next; the confidence thresholds stay as guesses until then.
-
-## ANALYSE: build it into the plugin (start here; user, 2026-10-08)
-
-**The plan the user agreed:** put the algorithm as it stands into the plugin end to end, then refine it (more stems, the
-second blind listening) afterwards. So build it behind the existing ANALYSE button, keep the search in one place
-(`src/meter/` or a new `src/analyse/`, juce_dsp only, like the rest of the DSP, plan R8), and keep
-`prototype/analyse.py` as the reference the C++ is tested against (goldens, as `prototype/golden.py` does for the DSP).
-The user is listening to `prototype/out/analyse/blind2/` (key in `key.txt`, which they open after) and collecting more
-stems; their verdicts come into the refinement, not this build. Everything below is settled unless marked **open**.
-
-**What ANALYSE does (all decided with the user; the Python is the spec, see `analyse.suggest_with_shift`):**
-1. Captures the input and the sidechain (mono sums, latency-aligned, as `MeterCapture` already delivers them) while the
-   user plays a representative section, then analyses on a background thread, never the audio thread (PLAN 3.5). Capture
-   is independent of the meter (PLAN section 3.5); about 10 s. `MeterCapture`'s ring is 1.4 s and `ScopeBuffer` keeps 4 s,
-   so ANALYSE needs its own accumulation buffer, allocated on the message thread when the button is pressed (plan v0.8).
-2. One cross-spectrum of the whole capture (`spectra`: Hann 8192 at 48 kHz, 75% overlap, scaled with the rate), 1/3-octave
-   bands 40 Hz to 16 kHz, a band active when both signals are within 40 dB of their loudest band.
-3. Every candidate scored in closed form (`candidate_response`, `score_at`: mean over bands of Re(sum G Sxy) /
-   sqrt(Sxx Syy)), G = polarity x phase response x exp(-j w d). **Use `dsp::phaseStageResponse` (src/dsp/PhaseResponse.h)
-   for the phase response**: `analyse.stage_response` is the same formulas, the C++ must not carry a third copy. The lag
-   search is one inverse FFT per band and setting (`band_scores`, zero-padded 4x, so 1/4 sample), refined to 0.1 sample
-   (the knob's step). Settings searched: Hi/Lo in both ranges over their travel in 2.5 degree steps (`settings`), and
-   Constant 0 to 180. The scores match the plugin's own Hi/Lo rendered to 0.003 (checked in Python, `rendered_score`).
-4. Delay: `attack_lag` is a port of the C++ attack lag of R18 (same readings on the user's pairs) run offline over the
-   whole capture; **the C++ can reuse `CorrelationAnalyser`'s own attack code or the Python's whole-capture form: choose and
-   say which in the commit**. When its peak is >= 0.35 (`ATTACK_STRONG`) the delay comes from the attacks and phase and
-   polarity are chosen within 0.3 ms of it; otherwise from the joint waveform-score search.
-5. **Respects the stage toggles (user):** DELAY off keeps the delay at 0 (a clear attack offset is only mentioned: "DELAY
-   is off: the transients are N samples apart"); PHASE off keeps the phase off; **polarity is always searched, whatever the
-   Ø button says (user)**. So one search is "best delay", "best phase", "best polarity" or any mix.
-6. **Out of reach:** the DELAY knob stays at +-4 ms (micro adjustments; no 6 ms, user). When the attack reading is clear
-   and beyond the reach, the best option sits at the edge, or the waveform score has a clearly better delay up to 10 ms out
-   (`WIDE_REACH_MS`), the message is exactly "Transient may be out of range, consider shifting +/- N samples manually if
-   needed", N in samples (DAWs work in samples; positive delays the track), and the options are those for the signal once
-   shifted. (This replaces v0.8's "put Phase Align on the other track": delay is bipolar now.)
-7. Options: **one when there is a clear winner, two when the best two are within 0.01 r** (user); nothing when the gain
-   over doing nothing is under 0.03 ("no change worth making"); "delay only" when the waveforms barely correlate but a
-   clear attack offset is there; an option that lowers the correlation below 300 Hz is kept and **marked "less low end"**
-   (`low_end_change`; a flag, not a reject: the kick OH and bass pairs). Thresholds are first guesses from six pairs.
-8. Choosing an option applies it: delayOn/delayMs, polarity, phaseOn/phaseMode/phaseRange/phase (knob position =
-   angle / `params::rangeDegrees`; HIGH with RANGE in shows the first section's angle with an asterisk, plan 2.3: build the
-   `ChainSettings` from the candidate and convert with the editor's existing code, do not redo the mapping), **as one
-   host-undoable change** (PLAN 3.5). The user can audition others or discard.
-
-**Open (ask the user, don't guess):** the screen's look for the three states (capturing, processing, candidates), where
-the shift message goes, whether a second press stops the capture early or only the timeout does, how auditioning an
-option is shown (the ALIGNMENT view's capture and preview, R19/R22, already render a held hit through the knobs and may be
-reused), and whether the single host-undoable change is achievable with begin/end gestures on seven parameters (it may
-need a different approach per host; say what you find).
-
-**Suggested order:** (1) the search as a headless class with the Python as golden (`prototype/golden.py` pattern: a script
-that writes the pair and the expected `suggest_with_shift` output to `tests/golden/`; hidden tests on `captures/stems` like
-`[.userpairs]`); (2) the capture buffer and background thread, with the allocation counters in the tests; (3) the screen
-states and the button (it is built, unlit, tooltip "coming in a future version": plan 4.3 and `PluginEditor.cpp:138`);
-(4) applying the result; (5) docs: README quick start, tooltips (R25), plan R-entry, CLAUDE.md status. Cost: the Python
-search takes about 1.5 s per pair, mostly the 289 settings x 24 bands of inverse FFTs; the C++ budget is "no audible glitch
-on the audio thread", so it only has to finish in seconds on a background thread, but measure it and say so.
-
-**After ANALYSE works:** refine the algorithm (the thresholds above, the attack-strength switch, truly different second
-options), then **clean up what ANALYSE doesn't use in `meter/CorrelationAnalyser`** (the user's standing request).
-`captures/stems/` (the user's second set, gitignored; pairs listed in `prototype/analyse_stems.py`) and the blind sets
-(`analyse_shootout.py --blind`, `--blind2`) are the test material. The user's listening findings so far are in item 5 above.
+**Decided (user):** HIGH with RANGE in keeps the asterisk (the tooltip explains it); the de-cramping of LOW with RANGE in
+is left; latency re-alignment per host is fine; no host-specific sidechain steps in the README, and other hosts are not
+going to be checked; the RANGE in A/B renders are good and Constant's true rotation is useful (2026-10-07).
 
 ## Next: needs no input
 
-- Watch CI after any push (`gh run list --branch master`; a watcher in the background is fine) and report. The first push
-  since 2026-10-06 carries all the meter work: expect the Windows and Linux numbers for the new code (nothing in it is
-  platform specific, but CI has not seen it).
-- P3 with the user's stems: `PhaseAlignDspTests "[p3]"` also renders the five pairs (`stem_<tag>` sources, from `captures/`);
-  2026-10-07: all 45 renders stay within 1.08x of the stem's own worst step (to 20 kHz). Run it before a change to the fades.
-- Re-run `tools/meter_profile.py` (Instruments) once: the meter's CPU was measured with the analyser benchmark only
-  (R21), not with the screen's drawing.
+- **After the next push, watch CI** (`gh run list --branch master`; a watcher in the background is fine) and report. It
+  is the first time Windows and Linux build `src/analyse` and PFFFT's double-precision engine (`pffft_double.c`, SSE2 on
+  x86); nothing in it is platform specific, but CI hasn't seen it. `release.yml` refuses a commit without a green CI run
+  (`skip_ci_check` overrides); its first real run also checks the Windows and Linux installers' docs step.
+- Re-run `tools/meter_profile.py` (Instruments) once: the meter's CPU was measured with the analyser benchmark only (R21,
+  about 0.2% of a core), not with the screen's drawing.
+- P3 with the user's stems: `PhaseAlignDspTests "[p3]"` also renders the five pairs (`stem_<tag>` sources, from
+  `captures/`); all 45 renders stayed within 1.08x of the stem's own worst step (to 20 kHz). Run it before a change to the
+  fades.
 - Optional CPU: the chain adds about 6 ns around the Hi/Lo stage that it didn't before, and Hi/Lo kept warm in Constant
   costs about 13 ns there (plan 2.6 J). Neither is over budget.
+
+## ANALYSE: what was built (plan R26 has the details and numbers)
+
+- **The search** (`src/analyse/Search`), a port of `prototype/analyse.py` `suggest_with_shift`, which stays the spec:
+  one cross-spectrum of the whole capture, every candidate (HIGH and LOW in both RANGEs and CONSTANT in 2.5° steps,
+  polarity, the delay to a quarter of a sample, refined to the knob's 0.1 sample) scored in closed form as the mean
+  1/3-octave band r; the attack lag decides the delay when its peak is strong (>= 0.35); options merged when they would
+  sound alike on the capture; up to two options, two only when within 0.01; a manual shift in samples when the offset is
+  beyond ±4 ms; only the stages switched on are searched, polarity always. 0.03 to 0.7 s in Release for 3 to 27 s of
+  audio. Golden-tested: `prototype/analyse_golden.py` writes `tests/golden/analyse_*` (six synthetic cases, committed)
+  and `captures/analyse_user_expected.txt` (the user's 11 pairs in three scopes, for the hidden `"[.useranalyse]"`).
+- **Robustness** (2026-10-08, from cross-instrument pairs of the user's stems): an attack reading is clear only with a
+  peak of at least 0.15; a chance test (the search again with the sidechain circularly shifted by 0.37 and 0.61 of the
+  capture, the smaller gain kept) flags options that don't beat it by 0.02 as "the audio seems unrelated"; options whose
+  r stays under 0.12 are flagged "a weak match". Warnings, not rejections (user: guitar and bass playing one part may
+  still want lining up). Kick against snare, bass against kick, hats against snare: nothing worth changing.
+- **The capture and the session** (`src/analyse/Session`, `CaptureFifo`, in the processor, so they outlive the editor):
+  10 ms stretches where both play above -60 dBFS and differ, while the transport plays; a 10 s minimum, 30 s
+  recommended and kept (user); the transport stopping analyses; the search on its own thread, cancellable, reporting
+  its progress.
+- **The screen** (`src/ui/AnalyseScreen`, in the meter's place while the button is lit): capturing (what is searched,
+  the seconds against the minimum, the levels; CLEAR, ANALYSE NOW), analysing (cycling dots and a bar, at least 0.6 s),
+  results (up to two options and ORIGINAL; a click applies one as one gesture; a BANDS or ALIGNMENT before/after preview
+  over the capture; AGAIN). A second press of the button goes back to the meter, leaving what is applied.
+- Known behaviour to mention if asked: an option whose phase is "off" switches PHASE off, so the next ANALYSE doesn't
+  search the phase (the screen's header says what is searched).
+
+## ANALYSE: the check that waits for the new stems
+
+Run all of this together once the user's new stems are in (export them like the second set: `prototype/analyse_stems.py`
+lists the pairs; `prototype/analyse_golden.py` writes their raw copies and the expected results):
+
+1. **The thresholds**, all first guesses from the user's 19 pairs, some with small margins: `ATTACK_STRONG` 0.35,
+   `ATTACK_MIN_PEAK` 0.15 (genuine pairs 0.17 to 0.88, unrelated 0.01 to 0.12), `MIN_GAIN` 0.03, `MIN_MARGIN` 0.01,
+   `CHANCE_MARGIN` 0.02 (genuine pairs beat the chance test by +0.037 to +0.53, unrelated ones by +0.016 and +0.007),
+   `WEAK_MATCH` 0.12 (genuine pairs 0.13 or more, guitar against bass 0.075 and 0.082).
+2. **The scoring measure:** `prototype/analyse_metrics.py` scores the candidates the user compared by ear with five
+   measures; the current one (mean band r) agrees with 14 of 21 verdicts, as well as any (a loudness-weighted sum gain
+   also 14, the others 12 or 13). The misses are transient timing (handled by the attack-first/joint switch), the bass's
+   low end (the "less low end" flag) and near-ties within 0.003 (the two-option display). Add the new verdicts to its
+   `PREFS` before changing the measure. A finer angle grid gains nothing (at most 0.0001 r at 0.5°).
+3. **To hear** (a proposed third blind set, sums with the sidechain, with `analyse_shootout.py`): the set 1 kick, where
+   ANALYSE now picks LO in 72.5° Ø at +3.19 ms (its attack peak, 0.27, is under `ATTACK_STRONG`, so the waveform score
+   sets the delay) although the user preferred +1.57 ms in the first listening and the attack reading says +1.28 ms
+   (+3.19 was never heard); snare sample after its −284 sample shift (HI in 180°, −1.05 ms) against CONSTANT 50° at the
+   whole −5.94 ms, which the ear liked; the bass amp's pick against off.
+4. **Optional, the user's call:** a note when the best setting swings between parts of the capture (split into thirds).
+   ANALYSE keeps giving the averaged best option, which is what the user wants.
+
+What the groundwork's listening found, for context: judge candidates by the sum with the sidechain, not the track alone;
+in the first blind shootout the search's pick was best on 5 of 6 pairs (the bass the exception, where off was best:
+hence "less low end"); all the kick and snare winners were Ø plus a rotation. The full history is in git (this file
+before 2026-10-08) and plan R26.
 
 ## Gotchas that cost time
 
@@ -219,12 +136,15 @@ options), then **clean up what ANALYSE doesn't use in `meter/CorrelationAnalyser
 - The reference unit's measurements live in `captures/` (gitignored; never name the unit in the repo). The analysis
   scripts that read them were one-offs; the findings are in plan 2.3.
 - After rewriting history, `git filter-branch` leaves a backup ref under `refs/original`: delete it once the push is done.
-- The hidden meter tests (`[.userpairs]`, `[.usercapture]`, `[.bandgate]`) need `captures/*_a.f32` and `*_b.f32`:
-  `source .venv/bin/activate && python prototype/export_pairs.py` makes them from the user's wavs. `[.analysercost]` wants
-  a Release build (`build-release`).
+- The hidden tests on the user's pairs need files in `captures/` (gitignored): `[.usercapture]` and `[.bandgate]` want
+  `captures/*_a.f32` and `*_b.f32` (`python prototype/export_pairs.py`); `[.useranalyse]` wants
+  `captures/analyse_user_expected.txt` and `captures/stems/*_a.f32` (`python prototype/analyse_golden.py`, a few minutes:
+  the Python search runs 33 times). `[.analysercost]` and `[.analysecost]` want a Release build (`build-release`).
+- Python's output to a file is buffered: a long `analyse_golden.py` run shows nothing until it ends.
 - `tests/EditorTests.cpp` "meter on screen" plays audio slower than real time and uses wall-clock timers (the 2 s capture
   hold-off, the 0.8 s bar hold), so its timing checks are written around that: touch a knob right before checking a
-  hold-off, and don't assume 0.1 s of audio is 0.1 s of wall time.
+  hold-off, and don't assume 0.1 s of audio is 0.1 s of wall time. ANALYSE's flow tests drive the session with
+  `tickForTesting()` and `waitForAnalysisForTesting()` instead of its timer.
 - Restoring a file with `mv` keeps its old timestamp, so make does not rebuild it: `touch` it.
 - `juce::AudioProcessor::getSampleRate()` is 0 in tests that call `prepareToPlay` directly; use the processor's own
   `sampleRate` atomic.

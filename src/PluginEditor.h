@@ -2,6 +2,7 @@
 
 #include "PluginProcessor.h"
 #include "params/Parameters.h"
+#include "ui/AnalyseScreen.h"
 #include "ui/HelpButton.h"
 #include "ui/ImageKnob.h"
 #include "ui/MeterScreen.h"
@@ -28,6 +29,8 @@ class PhaseAlignEditor : public juce::AudioProcessorEditor,
     // Test hooks: how often the panel itself has painted, and the meter screen.
     int getPaintCount() const { return paintCount; }
     pa::ui::MeterScreen& getMeterScreen() { return meterScreen; }
+    pa::ui::AnalyseScreen& getAnalyseScreen() { return analyseScreen; }
+    pa::ui::SquareButton& getAnalyseButton() { return analyseButton; }
     pa::ui::HelpButton& getHelpButton() { return helpButton; }
     // Whether the tooltip window would show this component's tip now: only the "?" does while the tooltips are off.
     bool tooltipAllowed(const juce::Component& c) const { return tooltipWindow.allows(c); }
@@ -71,6 +74,9 @@ class PhaseAlignEditor : public juce::AudioProcessorEditor,
     // The scale label, its asterisk, and the tooltips that describe the current mode and range.
     void updateRangeUi();
     void updateMeter();
+    // ANALYSE's button and screen follow the session (in the processor): lit, and its screen in the meter's place,
+    // while it is active.
+    void updateAnalyse();
     // Dims or restores the delay and phase sections with their on/off parameters (IMPLEMENTATION_PLAN 4.5).
     void updateDimming();
 
@@ -85,6 +91,7 @@ class PhaseAlignEditor : public juce::AudioProcessorEditor,
     pa::ui::SquareButton meterButton, analyseButton;
     pa::ui::Readout delayReadout, phaseReadout;
     pa::ui::MeterScreen meterScreen;
+    pa::ui::AnalyseScreen analyseScreen;
     pa::ui::ScaleLabel rangeLabel;
     pa::ui::PanelButton* rangeButton = nullptr; // one of `toggles`; dims with the phase section
 

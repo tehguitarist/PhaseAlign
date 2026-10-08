@@ -8,8 +8,6 @@ namespace pa::meter
 {
 namespace
 {
-constexpr float attackMinValue = 0.03f; // below this a peak is too weak to be an offset, however it compares
-constexpr float attackRunnerUpRatio = 0.65f; // the runner-up outside the main lobe may be this much of the peak
 constexpr float notMeasured = std::numeric_limits<float>::quiet_NaN();
 }
 
@@ -52,94 +50,15 @@ void CorrelationAnalyser::prepare(double sampleRate)
     binHi = std::min((int)std::floor(maxHz / binHz), numBins - 2);
 
     setAlpha();
-    for (auto* v : {&xyRe, &xyIm, &zyRe, &zyIm, &xx, &zz, &yy})
+    for (auto* v : {&xyRe, &zyRe, &zyIm, &xx, &zz, &yy})
         v->assign((size_t)numBins, 0.0);
 
-    // Curve points, each covering the bins within 1/12 octave either side (the nearest bin if none).
-    const auto top = std::min(maxHz, binHi * binHz);
-    const auto half = std::pow(2.0, curveSmoothingOctaves / 2.0);
-    curveHz.resize(curvePoints);
-    curveLo.resize(curvePoints);
-    curveHi.resize(curvePoints);
-    phaseLo.resize(curvePoints);
-    phaseHi.resize(curvePoints);
-    const auto phaseHalf = std::pow(2.0, phaseSmoothingOctaves / 2.0);
-    const auto windowFor = [&](double f, double halfWidth, std::vector<int>& los, std::vector<int>& his, int i)
-    {
-        auto lo = (int)std::ceil(f / halfWidth / binHz);
-        auto hi = (int)std::ceil(f * halfWidth / binHz) - 1;
-        if (hi < lo)
-            lo = hi = juce::roundToInt(f / binHz);
-        los[(size_t)i] = juce::jlimit(binLo, binHi, lo);
-        his[(size_t)i] = juce::jlimit(binLo, binHi, hi);
-    };
-    for (int i = 0; i < curvePoints; ++i)
-    {
-        const auto f = minHz * std::pow(top / minHz, (double)i / (curvePoints - 1));
-        curveHz[(size_t)i] = (float)f;
-        windowFor(f, half, curveLo, curveHi, i);
-        windowFor(f, phaseHalf, phaseLo, phaseHi, i);
-    }
     for (int b = 0; b < numBands; ++b)
     {
         bandLo[b] = juce::jlimit(binLo, binHi, (int)std::ceil(bandEdgesHz[b] / binHz));
         bandHi[b] = juce::jlimit(binLo, binHi, (int)std::ceil(bandEdgesHz[b + 1] / binHz) - 1);
     }
-    // Attack features: per band, a 4th-order Butterworth high-pass (and low-pass, where the band has a top) as RBJ
-    // biquads, and a moving average of |x| whose length is the band's smoothing.
-    {
-        const auto pi = juce::MathConstants<double>::pi;
-        const auto design = [&](double hz, bool high, double q)
-        {
-            const auto w0 = 2.0 * pi * hz / fs;
-            const auto cw = std::cos(w0), sw = std::sin(w0), alphaQ = sw / (2.0 * q), a0 = 1.0 + alphaQ;
-            Biquad bq;
-            bq.b0 = (high ? (1.0 + cw) : (1.0 - cw)) / 2.0 / a0;
-            bq.b1 = (high ? -(1.0 + cw) : (1.0 - cw)) / a0;
-            bq.b2 = bq.b0;
-            bq.a1 = -2.0 * cw / a0;
-            bq.a2 = (1.0 - alphaQ) / a0;
-            return bq;
-        };
-        for (int band = 0; band < numAttackBands; ++band)
-        {
-            const auto& spec = attackBands[band];
-            auto& sections = attackSections[band];
-            sections.clear();
-            for (const auto q : {0.5411961, 1.3065630})
-                sections.push_back(design(spec.lowHz, true, q));
-            if (spec.highHz > 0.0)
-                for (const auto q : {0.5411961, 1.3065630})
-                    sections.push_back(design(std::min(spec.highHz, 0.45 * fs), false, q));
-            const auto length = std::max(1, juce::roundToInt(spec.smoothMs * 1.0e-3 * fs));
-            for (int stream = 0; stream < 3; ++stream)
-            {
-                auto& ch = attackChannel[stream][band];
-                ch.s1.assign(sections.size(), 0.0);
-                ch.s2.assign(sections.size(), 0.0);
-                ch.ring.assign((size_t)length, 0.0);
-                featHistory[stream][band].assign((size_t)fftSize, 0.0f);
-            }
-            for (auto* v : {&fxyRe[band], &fxyIm[band], &fzyRe[band], &fzyIm[band]})
-                v->assign((size_t)numBins, 0.0);
-        }
-        // Attacks only arrive with the hits, a few a second: the average has to span several of them.
-        attackAlpha = 1.0 - std::exp(-(hop / fs) / (speed == Speed::slow ? 1.0 : 0.4));
-        attackMix.assign((size_t)fftSize, 0.0f);
-    }
     previewRe.assign((size_t)numBins, 0.0);
-    previewIm.assign((size_t)numBins, 0.0);
-
-    // The time view's scale: a pure delay (unit cross-spectrum in every band bin) peaks at exactly 1.
-    lagHalf = juce::roundToInt(lagRangeMs * fs / 1000.0);
-    wideHalf = std::min(juce::roundToInt(wideLagRangeMs * fs / 1000.0), fftSize / 4);
-    std::fill(fftData.begin(), fftData.end(), 0.0f);
-    for (int k = binLo; k <= binHi; ++k)
-        fftData[(size_t)(2 * k)] = 1.0f;
-    fft->performRealOnlyInverseTransform(fftData.data());
-    lagNorm = fftData[0];
-    lagUnit = lagNorm / (double)(binHi - binLo + 1);
-    lagWeight.assign((size_t)numBins, 0.0);
 
     reset();
 }
@@ -150,17 +69,11 @@ void CorrelationAnalyser::setAlpha()
     const auto floor = speed == Speed::slow ? tauFloorSeconds : fastTauFloorSeconds;
     const auto cycles = speed == Speed::slow ? tauCycles : fastTauCycles;
     alpha.resize((size_t)numBins);
-    lagFloor.resize((size_t)numBins);
     for (int k = 0; k < numBins; ++k)
     {
         const auto tau = std::max(floor, cycles / std::max(k * binHz, 1.0e-3));
         const auto a = 1.0 - std::exp(-hopSeconds / tau);
         alpha[(size_t)k] = a;
-        // Unrelated signals still show a coherence of about 0.9 / sqrt(n) over n independent frames averaged (the
-        // exponential average spans (2 - a) / a frames, a pair of 75%-overlapped ones being about one): the lag
-        // function counts a bin only above 1.2 times that.
-        const auto independent = std::max(1.0, 0.5 * (2.0 - a) / a);
-        lagFloor[(size_t)k] = std::min(0.9, 1.06 / std::sqrt(independent));
     }
 }
 
@@ -199,50 +112,11 @@ void CorrelationAnalyser::clearPreview()
         updateResults();
 }
 
-float CorrelationAnalyser::lagUnprocessedAt(double ms) const
-{
-    if (lagZ.empty())
-        return 0.0f;
-    const auto j = juce::jlimit(0, (int)lagZ.size() - 1, juce::roundToInt(ms * fs / 1000.0) + lagHalf);
-    return lagZ[(size_t)j];
-}
-
-void CorrelationAnalyser::resetAttack()
-{
-    for (int band = 0; band < numAttackBands; ++band)
-    {
-        for (int stream = 0; stream < 3; ++stream)
-        {
-            auto& ch = attackChannel[stream][band];
-            std::fill(ch.s1.begin(), ch.s1.end(), 0.0);
-            std::fill(ch.s2.begin(), ch.s2.end(), 0.0);
-            std::fill(ch.ring.begin(), ch.ring.end(), 0.0);
-            ch.sum = 0.0;
-            ch.pos = 0;
-            ch.previousLog = std::log(1.0e-4);
-            std::fill(featHistory[stream][band].begin(), featHistory[stream][band].end(), 0.0f);
-        }
-        for (auto* v : {&fxyRe[band], &fxyIm[band], &fzyRe[band], &fzyIm[band]})
-            std::fill(v->begin(), v->end(), 0.0);
-        fxx[band] = fzz[band] = fyy[band] = 0.0;
-    }
-    attackLagX.assign((size_t)(2 * lagHalf + 1), 0.0f);
-    attackLagZ.assign((size_t)(2 * lagHalf + 1), 0.0f);
-    attackX = attackZ = attackWideZ = {};
-    steadyX = steadyZ = steadyWideZ = {};
-}
-
 void CorrelationAnalyser::setNeeds(const Needs& wanted)
 {
-    const auto newAttack = wanted.attack && ! needs.attack;
-    const auto newResults = (wanted.curve && ! needs.curve) || (wanted.phase && ! needs.phase) ||
-                            (wanted.bands && ! needs.bands);
+    const auto newResults = wanted.bands && ! needs.bands;
     needs = wanted;
-    if (fft == nullptr)
-        return;
-    if (newAttack)
-        resetAttack(); // its filters and averages weren't running: start from nothing
-    if (newResults)
+    if (fft != nullptr && newResults)
         updateResults(); // from the averages, which always run
 }
 
@@ -250,22 +124,12 @@ void CorrelationAnalyser::reset()
 {
     for (int s = 0; s < 3; ++s)
         std::fill(history[s].begin(), history[s].end(), 0.0f);
-    for (auto* v : {&xyRe, &xyIm, &zyRe, &zyIm, &xx, &zz, &yy})
+    for (auto* v : {&xyRe, &zyRe, &zyIm, &xx, &zz, &yy})
         std::fill(v->begin(), v->end(), 0.0);
-    resetAttack();
     writePos = sinceFrame = filled = 0;
-    curveX.assign((size_t)curvePoints, notMeasured);
-    curveZ.assign((size_t)curvePoints, notMeasured);
-    phaseX.assign((size_t)curvePoints, notMeasured);
-    phaseZ.assign((size_t)curvePoints, notMeasured);
     bandX.assign((size_t)numBands, notMeasured);
     bandZ.assign((size_t)numBands, notMeasured);
-    cohX.assign((size_t)curvePoints, 0.0f);
-    cohZ.assign((size_t)curvePoints, 0.0f);
     overallX = overallZ = notMeasured;
-    lagX.assign((size_t)(2 * lagHalf + 1), 0.0f);
-    lagZ.assign((size_t)(2 * lagHalf + 1), 0.0f);
-    peakX = peakZ = wideZ = {};
     silentSeconds = 0.0;
 }
 
@@ -280,12 +144,6 @@ int CorrelationAnalyser::process(const float* in, const float* out, const float*
         history[0][(size_t)writePos] = in[i];
         history[1][(size_t)writePos] = out[i];
         history[2][(size_t)writePos] = sc[i];
-        for (int band = 0; needs.attack && band < numAttackBands; ++band)
-        {
-            featHistory[0][band][(size_t)writePos] = attackFeature(0, band, in[i]);
-            featHistory[1][band][(size_t)writePos] = attackFeature(1, band, out[i]);
-            featHistory[2][band][(size_t)writePos] = attackFeature(2, band, sc[i]);
-        }
         writePos = (writePos + 1) % fftSize;
         filled = std::min(filled + 1, fftSize);
         if (++sinceFrame >= hop && filled == fftSize)
@@ -298,29 +156,6 @@ int CorrelationAnalyser::process(const float* in, const float* out, const float*
     if (frames > 0)
         updateResults();
     return frames;
-}
-
-float CorrelationAnalyser::attackFeature(int stream, int band, float xIn)
-{
-    auto& ch = attackChannel[stream][band];
-    const auto& sections = attackSections[band];
-    auto x = (double)xIn;
-    for (size_t b = 0; b < sections.size(); ++b) // transposed direct form II
-    {
-        const auto& q = sections[b];
-        const auto y = q.b0 * x + ch.s1[b];
-        ch.s1[b] = q.b1 * x - q.a1 * y + ch.s2[b];
-        ch.s2[b] = q.b2 * x - q.a2 * y;
-        x = y;
-    }
-    auto& slot = ch.ring[(size_t)ch.pos];
-    ch.sum += std::abs(x) - slot;
-    slot = std::abs(x);
-    ch.pos = (ch.pos + 1) % (int)ch.ring.size();
-    const auto level = std::log(std::max(ch.sum, 0.0) / (double)ch.ring.size() + 1.0e-4);
-    const auto rise = std::max(level - ch.previousLog, 0.0);
-    ch.previousLog = level;
-    return (float)rise;
 }
 
 void CorrelationAnalyser::analyseFrame()
@@ -346,46 +181,13 @@ void CorrelationAnalyser::analyseFrame()
         const auto a = alpha[(size_t)k];
         const auto kk = (size_t)k;
         const auto py = yr * yr + yi * yi;
-        xyRe[kk] += a * (xr * yr + xi * yi - xyRe[kk]); // X·Y*
-        xyIm[kk] += a * (xi * yr - xr * yi - xyIm[kk]);
+        xyRe[kk] += a * (xr * yr + xi * yi - xyRe[kk]); // Re(X·Y*): only its real part is read
         zyRe[kk] += a * (zr * yr + zi * yi - zyRe[kk]);
         zyIm[kk] += a * (zi * yr - zr * yi - zyIm[kk]);
         xx[kk] += a * (xr * xr + xi * xi - xx[kk]);
         zz[kk] += a * (zr * zr + zi * zi - zz[kk]);
         yy[kk] += a * (py - yy[kk]);
         framePowerY += py;
-    }
-
-    // The feature signals through the same frame: cross-spectra with the sidechain's, for the attack lag.
-    for (int band = 0; needs.attack && band < numAttackBands; ++band)
-    {
-        std::vector<float>* spec[3] = {&work[0], &work[1], &work[2]}; // free again: the audio's are summed
-        for (int s = 0; s < 3; ++s)
-        {
-            for (int n = 0; n < fftSize; ++n)
-                fftData[(size_t)n] = featHistory[s][band][(size_t)((writePos + n) % fftSize)] * window[(size_t)n];
-            std::fill(fftData.begin() + fftSize, fftData.end(), 0.0f);
-            fft->performRealOnlyForwardTransform(fftData.data(), true);
-            std::copy(fftData.begin(), fftData.begin() + 2 * numBins, spec[s]->begin());
-        }
-        double px = 0.0, pz = 0.0, py = 0.0;
-        for (int k = 3; k <= binHi; ++k) // clear of DC (the features are all positive) and Nyquist
-        {
-            const auto re = (size_t)(2 * k), im = re + 1;
-            const double zr = (*spec[0])[re], zi = (*spec[0])[im], xr = (*spec[1])[re], xi = (*spec[1])[im],
-                         yr = (*spec[2])[re], yi = (*spec[2])[im];
-            const auto kk = (size_t)k;
-            fxyRe[band][kk] += attackAlpha * (xr * yr + xi * yi - fxyRe[band][kk]);
-            fxyIm[band][kk] += attackAlpha * (xi * yr - xr * yi - fxyIm[band][kk]);
-            fzyRe[band][kk] += attackAlpha * (zr * yr + zi * yi - fzyRe[band][kk]);
-            fzyIm[band][kk] += attackAlpha * (zi * yr - zr * yi - fzyIm[band][kk]);
-            px += xr * xr + xi * xi;
-            pz += zr * zr + zi * zi;
-            py += yr * yr + yi * yi;
-        }
-        fxx[band] += attackAlpha * (px - fxx[band]);
-        fzz[band] += attackAlpha * (pz - fzz[band]);
-        fyy[band] += attackAlpha * (py - fyy[band]);
     }
 
     if (windowLevelDb(framePowerY) < gateDb)
@@ -404,7 +206,6 @@ void CorrelationAnalyser::updateResults()
     // Processed results come from the output's cross-spectrum, or, while previewing, from the input's turned by a
     // delay of previewMs: Z·Y* · e^(-jwt) is the cross-spectrum of the input delayed by t.
     const std::vector<double>* pRe = &xyRe;
-    const std::vector<double>* pIm = &xyIm;
     const std::vector<double>* pPow = &xx;
     if (previewActive)
     {
@@ -414,17 +215,16 @@ void CorrelationAnalyser::updateResults()
             const auto w = 2.0 * juce::MathConstants<double>::pi * k / fftSize * samples;
             const auto c = std::cos(w), s = std::sin(w);
             const auto kk = (size_t)k;
-            // The input's cross-spectrum turned by the delay, then by the phase stage and a polarity flip (180 degrees).
+            // The input's cross-spectrum turned by the delay, then by the phase stage and a polarity flip (180
+            // degrees).
             std::complex<double> turned(zyRe[kk] * c + zyIm[kk] * s, zyIm[kk] * c - zyRe[kk] * s);
             if (previewPhase)
                 turned *= previewPhase(k * fs / fftSize);
             if (previewInverted)
                 turned = -turned;
             previewRe[kk] = turned.real();
-            previewIm[kk] = turned.imag();
         }
         pRe = &previewRe;
-        pIm = &previewIm;
         pPow = &zz;
     }
 
@@ -443,43 +243,6 @@ void CorrelationAnalyser::updateResults()
         return (float)juce::jlimit(-1.0, 1.0, sc / std::sqrt(sp * sy));
     };
 
-    // The angle of the cross-spectrum summed over bins lo..hi, and its coherence.
-    const auto phase = [this](const std::vector<double>& re, const std::vector<double>& im,
-                              const std::vector<double>& power, int lo, int hi, float& angle, float& coherence)
-    {
-        double sr = 0.0, si = 0.0, sp = 0.0, sy = 0.0;
-        for (int k = lo; k <= hi; ++k)
-        {
-            sr += re[(size_t)k];
-            si += im[(size_t)k];
-            sp += power[(size_t)k];
-            sy += yy[(size_t)k];
-        }
-        coherence = 0.0f;
-        angle = notMeasured;
-        if (windowLevelDb(std::min(sp, sy)) < gateDb)
-            return;
-        coherence = (float)juce::jlimit(0.0, 1.0, std::hypot(sr, si) / std::sqrt(sp * sy));
-        // Uncorrelated signals still read about 0.9 / sqrt(n) over n independent averages (a few frames of each bin
-        // in the window), so a window of only a bin or two needs more than a wide one to count as a real angle.
-        const auto floor = std::max((double)minPhaseCoherence, 1.2 / std::sqrt(6.0 * (hi - lo + 1)));
-        if (coherence >= floor)
-            angle = (float)(std::atan2(si, sr) * 180.0 / juce::MathConstants<double>::pi);
-    };
-
-    for (size_t i = 0; i < (size_t)curvePoints; ++i)
-    {
-        if (needs.curve)
-        {
-            curveX[i] = correlation(*pRe, *pPow, curveLo[i], curveHi[i]);
-            curveZ[i] = correlation(zyRe, zz, curveLo[i], curveHi[i]);
-        }
-        if (needs.phase)
-        {
-            phase(*pRe, *pIm, *pPow, phaseLo[i], phaseHi[i], phaseX[i], cohX[i]);
-            phase(zyRe, zyIm, zz, phaseLo[i], phaseHi[i], phaseZ[i], cohZ[i]);
-        }
-    }
     for (int b = 0; needs.bands && b < numBands; ++b)
     {
         bandX[(size_t)b] = correlation(*pRe, *pPow, bandLo[b], bandHi[b]);
@@ -487,284 +250,5 @@ void CorrelationAnalyser::updateResults()
     }
     overallX = correlation(*pRe, *pPow, binLo, binHi);
     overallZ = correlation(zyRe, zz, binLo, binHi);
-}
-
-bool CorrelationAnalyser::Steadiness::update(Peak& peak, bool settled)
-{
-    lag[pos] = peak.lagMs;
-    clear[pos] = peak.clear;
-    pos = (pos + 1) % steadyCount;
-    count = std::min(count + 1, steadyCount);
-    if (settled) // all it has is this one picture
-    {
-        for (int i = 0; i < steadyCount; ++i)
-        {
-            lag[i] = peak.lagMs;
-            clear[i] = peak.clear;
-        }
-        count = steadyCount;
-    }
-    ++sinceShown;
-    if (count < steadyCount)
-        return false;
-    double values[steadyCount];
-    int n = 0;
-    for (int i = 0; i < steadyCount; ++i)
-        if (clear[i])
-            values[n++] = lag[i];
-    if (n < steadyNeeded)
-        return false;
-    std::sort(values, values + n);
-    const auto median = values[n / 2];
-    int near = 0;
-    for (int i = 0; i < n; ++i)
-        near += std::abs(values[i] - median) <= steadyMs;
-    if (near < steadyNeeded)
-        return false;
-    peak.lagMs = median;
-    lastLag = median;
-    sinceShown = 0;
-    return true;
-}
-
-void CorrelationAnalyser::computeLag(bool settled)
-{
-    if (fft == nullptr)
-        return;
-    lagFunction(xyRe, xyIm, xx, lagX, peakX);
-    lagFunction(zyRe, zyIm, zz, lagZ, peakZ, &wideZ);
-    if (! needs.attack)
-        return;
-    attackFunction(true, attackLagX, attackX, nullptr, steadyX, steadyX);
-    attackFunction(false, attackLagZ, attackZ, &attackWideZ, steadyZ, steadyWideZ);
-    attackX.clear = steadyX.update(attackX, settled);
-    attackZ.clear = steadyZ.update(attackZ, settled);
-    attackWideZ.clear = steadyWideZ.update(attackWideZ, settled);
-}
-
-CorrelationAnalyser::Peak CorrelationAnalyser::inputPeak() const
-{
-    return wideZ.clear && std::abs(wideZ.lagMs) > lagRangeMs ? wideZ : peakZ;
-}
-
-bool CorrelationAnalyser::inputOutOfReach(double maxMs) const
-{
-    // The attacks are what the message is about; the waveform's peak stands in where there are none to read.
-    const auto attack = attackInput();
-    const auto peak = attack.clear ? attack : inputPeak();
-    const auto halfStepMs = 0.05 * 1000.0 / fs;
-    return peak.clear && std::abs(peak.lagMs) > maxMs + halfStepMs;
-}
-
-void CorrelationAnalyser::attackFunction(bool processed, std::vector<float>& out, Peak& peak, Peak* wide,
-                                         const Steadiness& steady, const Steadiness& steadyWide)
-{
-    // Per band, the plain normalised cross-correlation of the feature signals: conj of A·B* at every bin, inverse FFT,
-    // divided by sqrt(Pa Pb) (lagUnit: one unit bin's value at lag 0), so identical signals peak at 1. The bands'
-    // functions are averaged, so a band with no attacks in it (a bass note's top) adds nothing but a little noise.
-    std::fill(out.begin(), out.end(), 0.0f);
-    std::fill(attackMix.begin(), attackMix.end(), 0.0f);
-    peak = {};
-    if (wide != nullptr)
-        *wide = {};
-    int used = 0;
-    for (int band = 0; band < numAttackBands; ++band)
-    {
-        const auto& re = processed ? fxyRe[band] : fzyRe[band];
-        const auto& im = processed ? fxyIm[band] : fzyIm[band];
-        const auto powerA = processed ? fxx[band] : fzz[band], powerB = fyy[band];
-        if (powerA <= 1.0e-12 || powerB <= 1.0e-12)
-            continue;
-        std::fill(fftData.begin(), fftData.end(), 0.0f);
-        for (int k = 3; k <= binHi; ++k)
-        {
-            fftData[(size_t)(2 * k)] = (float)re[(size_t)k];
-            fftData[(size_t)(2 * k + 1)] = (float)-im[(size_t)k];
-        }
-        fft->performRealOnlyInverseTransform(fftData.data());
-        const auto scale = 1.0 / (lagUnit * std::sqrt(powerA * powerB));
-        for (int n = 0; n < fftSize; ++n)
-            attackMix[(size_t)n] += (float)(fftData[(size_t)n] * scale);
-        ++used;
-    }
-    if (used == 0)
-        return;
-    const auto mixScale = 1.0f / (float)used;
-    const auto at = [&](int lag) { return attackMix[(size_t)((lag + fftSize) % fftSize)] * mixScale; };
-    const auto apart = juce::roundToInt(0.1e-3 * fs);
-
-    // The strongest lag in a range, and whether it is clear: strong, and well above everything outside its main lobe.
-    const auto find = [&](int half, Peak& result, const Steadiness& incumbent)
-    {
-        int best = 0;
-        for (int lag = -half; lag <= half; ++lag)
-            if (at(lag) > at(best)) // attacks only line up positively
-                best = lag;
-        // The peak we have been showing keeps the position unless a rival is clearly stronger (by a third): two
-        // peaks of about the same strength shouldn't take turns.
-        if (incumbent.incumbent())
-        {
-            const auto held = juce::roundToInt(incumbent.lastLag * fs / 1000.0);
-            if (std::abs(held) <= half && at(held) > 0.0f && at(held) * 1.33f >= at(best))
-                best = held;
-        }
-        int lo = best, hi = best;
-        while (lo > -half && at(lo - 1) > 0.0f)
-            --lo;
-        while (hi < half && at(hi + 1) > 0.0f)
-            ++hi;
-        lo = std::min(lo, best - apart);
-        hi = std::max(hi, best + apart);
-        float runnerUp = 0.0f;
-        for (int lag = -half; lag <= half; ++lag)
-            if (lag < lo || lag > hi)
-                runnerUp = std::max(runnerUp, std::abs(at(lag)));
-        // Parabola on the three samples round the peak.
-        auto offset = 0.0;
-        const double a = at(best - 1), b = at(best), c = at(best + 1);
-        if (a - 2.0 * b + c < 0.0)
-            offset = juce::jlimit(-0.5, 0.5, 0.5 * (a - c) / (a - 2.0 * b + c));
-        result.lagMs = (best + offset) * 1000.0 / fs;
-        result.value = at(best);
-        result.runnerUp = runnerUp;
-        result.clear = result.value >= attackMinValue && runnerUp <= attackRunnerUpRatio * result.value;
-    };
-
-    for (int j = 0; j <= 2 * lagHalf; ++j)
-        out[(size_t)j] = at(j - lagHalf);
-    find(lagHalf, peak, steady);
-    if (wide != nullptr)
-    {
-        find(wideHalf, *wide, steadyWide);
-        wide->coarse = true;
-    }
-}
-
-void CorrelationAnalyser::lagFunction(const std::vector<double>& re, const std::vector<double>& im,
-                                      const std::vector<double>& power, std::vector<float>& out, Peak& peak,
-                                      Peak* wide)
-{
-    // PHAT: conj(X·Y*) = X*·Y at unit magnitude, so a sidechain that is later by d peaks at +d. Each bin counts in
-    // proportion to its squared coherence, |X·Y*|² / (|X|²|Y|²): a bin the two signals share nothing in is noise, and
-    // there can be a thousand of those against a few that carry the signal.
-    std::fill(fftData.begin(), fftData.end(), 0.0f);
-    double weightSum = 0.0;
-    for (int k = binLo; k <= binHi; ++k)
-    {
-        const auto kk = (size_t)k;
-        const auto r = re[kk], i = -im[kk];
-        const auto mag2 = r * r + i * i;
-        const auto denominator = power[kk] * yy[kk];
-        // Weight 0 at the bin's noise floor of coherence (see setAlpha), 1 at full coherence, squared.
-        const auto coherenceFloor = lagFloor[kk];
-        const auto coherence = mag2 > 0.0 && denominator > 0.0 ? std::sqrt(std::min(1.0, mag2 / denominator)) : 0.0;
-        const auto w = coherence > coherenceFloor ? std::pow((coherence - coherenceFloor) / (1.0 - coherenceFloor), 2.0) : 0.0;
-        lagWeight[kk] = w;
-        weightSum += w;
-        if (w > 0.0)
-        {
-            const auto mag = std::sqrt(mag2);
-            fftData[(size_t)(2 * k)] = (float)(w * r / mag);
-            fftData[(size_t)(2 * k + 1)] = (float)(w * i / mag);
-        }
-    }
-    fft->performRealOnlyInverseTransform(fftData.data());
-    const auto norm = std::max(lagUnit * weightSum, 1.0e-30);
-
-    // The coarse wide search: the strongest lag within +-wideHalf samples, whole samples only, with the same test for
-    // being clear. Beyond the time view's range, it is what says the delay can't reach (plan 2.1a).
-    const auto apart = juce::roundToInt(0.1e-3 * fs);
-    if (wide != nullptr)
-    {
-        const auto at = [&](int lag) { return (float)(fftData[(size_t)((lag + fftSize) % fftSize)] / norm); };
-        int bestLag = 0;
-        for (int lag = -wideHalf; lag <= wideHalf; ++lag)
-            if (std::abs(at(lag)) > std::abs(at(bestLag)))
-                bestLag = lag;
-        // The runner-up is the strongest value outside the peak's main lobe (to where it first crosses zero, and at
-        // least 0.1 ms either side): a band-limited peak, a kick's, is wide and has side lobes of its own.
-        const auto sign = at(bestLag) < 0.0f ? -1.0f : 1.0f;
-        int lobeLo = bestLag, lobeHi = bestLag;
-        while (lobeLo > -wideHalf && sign * at(lobeLo - 1) > 0.0f)
-            --lobeLo;
-        while (lobeHi < wideHalf && sign * at(lobeHi + 1) > 0.0f)
-            ++lobeHi;
-        lobeLo = std::min(lobeLo, bestLag - apart);
-        lobeHi = std::max(lobeHi, bestLag + apart);
-        float runnerUp = 0.0f;
-        for (int lag = -wideHalf; lag <= wideHalf; ++lag)
-            if (lag < lobeLo || lag > lobeHi)
-                runnerUp = std::max(runnerUp, std::abs(at(lag)));
-        wide->lagMs = bestLag * 1000.0 / fs;
-        wide->value = at(bestLag);
-        wide->clear = std::abs(wide->value) >= 0.3f && runnerUp <= 0.5f * std::abs(wide->value);
-        wide->coarse = true;
-    }
-
-    int best = 0;
-    for (int j = 0; j <= 2 * lagHalf; ++j)
-    {
-        const auto lag = j - lagHalf;
-        out[(size_t)j] = (float)(fftData[(size_t)((lag + fftSize) % fftSize)] / norm);
-        if (std::abs(out[(size_t)j]) > std::abs(out[(size_t)best]))
-            best = j;
-    }
-
-    // Parabolic interpolation on |value| for a first sub-sample estimate...
-    auto offset = 0.0;
-    if (best > 0 && best < 2 * lagHalf)
-    {
-        const double a = std::abs(out[(size_t)best - 1]), b = std::abs(out[(size_t)best]),
-                     c = std::abs(out[(size_t)best + 1]);
-        const auto denominator = a - 2.0 * b + c;
-        if (denominator < 0.0)
-            offset = juce::jlimit(-0.5, 0.5, 0.5 * (a - c) / denominator);
-    }
-
-    // ...then Newton steps on the lag function itself, which is band-limited, so it can be evaluated exactly between
-    // samples: r(t) = sum over bins of a cos(wt) - b sin(wt), with a + jb the whitened bin. The parabola alone is
-    // biased by up to about 0.1 sample on this peak shape; the delay knob steps by 0.1 sample (plan 2.1a).
-    const auto centre = (double)(best - lagHalf);
-    auto t = centre + offset;
-    const auto sign = out[(size_t)best] < 0.0f ? -1.0 : 1.0;
-    for (int iteration = 0; iteration < 4; ++iteration)
-    {
-        double d1 = 0.0, d2 = 0.0;
-        for (int k = binLo; k <= binHi; ++k)
-        {
-            const auto weight = lagWeight[(size_t)k];
-            const auto r = re[(size_t)k], i = -im[(size_t)k];
-            const auto mag = std::sqrt(r * r + i * i);
-            if (weight <= 0.0 || mag <= 0.0)
-                continue;
-            const auto w = 2.0 * juce::MathConstants<double>::pi * k / fftSize;
-            const auto c = std::cos(w * t), sn = std::sin(w * t);
-            d1 += -weight * w * (r * sn + i * c) / mag;
-            d2 += -weight * w * w * (r * c - i * sn) / mag;
-        }
-        d1 *= sign;
-        d2 *= sign;
-        if (d2 >= 0.0) // not at a maximum: keep the last estimate
-            break;
-        t = juce::jlimit(centre - 1.0, centre + 1.0, t - d1 / d2);
-    }
-    offset = t - centre;
-
-    const auto peakSign = out[(size_t)best] < 0.0f ? -1.0f : 1.0f;
-    int lobeLo = best, lobeHi = best;
-    while (lobeLo > 0 && peakSign * out[(size_t)lobeLo - 1] > 0.0f)
-        --lobeLo;
-    while (lobeHi < 2 * lagHalf && peakSign * out[(size_t)lobeHi + 1] > 0.0f)
-        ++lobeHi;
-    lobeLo = std::min(lobeLo, best - apart);
-    lobeHi = std::max(lobeHi, best + apart);
-    float next = 0.0f;
-    for (int j = 0; j <= 2 * lagHalf; ++j)
-        if (j < lobeLo || j > lobeHi)
-            next = std::max(next, std::abs(out[(size_t)j]));
-
-    peak.lagMs = lagMsAt(best) + offset * 1000.0 / fs;
-    peak.value = out[(size_t)best];
-    peak.clear = std::abs(peak.value) >= 0.3f && next <= 0.5f * std::abs(peak.value);
 }
 } // namespace pa::meter
