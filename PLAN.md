@@ -1,6 +1,7 @@
 # Phase Align: Project Plan
 
-**Status:** planning complete, prototyping not started **Milestones:** v0.7 is the core feature set (sections 3.1 to 3.4). Record and compare (section 3.5) is planned as the next milestone, and v0.7 is structured to support it (section 4.9). **Framework:** JUCE (C++), AU and VST3, macOS first **Goal:** a low-CPU phase alignment utility. This is a utility, not an analogue emulation.
+**Status:** v0.7 and record and compare (section 3.5) are built; this is the original design spec, and how it was built,
+with every deviation, is in IMPLEMENTATION_PLAN.md (where things stand: HANDOVER.md). **Milestones:** v0.7 is the core feature set (sections 3.1 to 3.4). Record and compare (section 3.5) is planned as the next milestone, and v0.7 is structured to support it (section 4.9). **Framework:** JUCE (C++), AU and VST3, macOS first **Goal:** a low-CPU phase alignment utility. This is a utility, not an analogue emulation.
 
 ---
 
@@ -78,6 +79,12 @@ The RANGE button is the hardware's 90°/180° switch: 90 runs one all-pass secti
 - Zero reported latency.
 
 ### 3.5 Record and compare (auto-suggest)
+
+**As built (2026-10-08): IMPLEMENTATION_PLAN R26.** The main differences from what follows: the search scores every
+candidate in closed form from one cross-spectrum of the capture (no GCC-PHAT, no offline renders), takes the delay from the
+attacks when they are clear, searches only the stages switched on, and asks for a manual shift in samples beyond ±4 ms;
+the capture ends when the transport stops (10 s minimum, 30 s recommended); clicking an option applies it, with ORIGINAL
+to go back.
 
 Planned as the milestone after v0.7. The output is a **suggestion only**: the setting with the highest measured correlation is not necessarily the one that sounds best, so the user decides by ear.
 
