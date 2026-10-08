@@ -9,7 +9,7 @@
 #include <random>
 #include <vector>
 
-// Robustness through the plugin's real entry points (IMPLEMENTATION_PLAN M5): mono buses, sample-rate and block-size
+// Robustness through the plugin's real entry points: mono buses, sample-rate and block-size
 // changes, offline rendering, host bypass during a latency switch, a mode change during a delay crossfade, state
 // recall into a running instance, and no allocation in the audio callbacks, in every mode.
 using namespace pa::params;

@@ -11,7 +11,7 @@
 #include "ui/ScaleLabel.h"
 #include "ui/ToggleSwitch3.h"
 
-// The panel (IMPLEMENTATION_PLAN 4): baked artwork plus image controls laid out from ui/ui-info.csv.
+// The panel: baked artwork plus image controls laid out from ui/ui-info.csv.
 // Resizable 60% to 200% of 977x612 with a locked aspect ratio; the size is kept in the ui state. Nothing
 // repaints while idle: every control repaints only when its value changes, and the meter screen is
 // opaque and repaints only itself.
@@ -77,7 +77,7 @@ class PhaseAlignEditor : public juce::AudioProcessorEditor,
     // ANALYSE's button and screen follow the session (in the processor): lit, and its screen in the meter's place,
     // while it is active.
     void updateAnalyse();
-    // Dims or restores the delay and phase sections with their on/off parameters (IMPLEMENTATION_PLAN 4.5).
+    // Dims or restores the delay and phase sections with their on/off parameters.
     void updateDimming();
 
     PhaseAlignProcessor& audioProcessor;

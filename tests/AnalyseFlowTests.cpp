@@ -9,7 +9,7 @@
 #include <cmath>
 #include <random>
 
-// ANALYSE end to end (plan R26): the processor's capture, the session's gating and triggers, applying an option, and
+// ANALYSE end to end: the processor's capture, the session's gating and triggers, applying an option, and
 // the editor's button and screen. The search itself is tested against its Python spec in tests/dsp/AnalyseTests.cpp.
 using namespace pa::params;
 using Catch::Approx;
@@ -40,7 +40,7 @@ struct Player
     int lag = 30;
     bool inverted = true;
     float sidechainGain = 1.0f;
-    bool sidechainIsTrack = false; // the sidechain carries the track's own input (the Logic case, plan R24)
+    bool sidechainIsTrack = false; // the sidechain carries the track's own input (the Logic case)
     bool unrelated = false;        // the track is other bursts, from their own generator, at another tempo
     std::mt19937 rng{5}, other{17};
     long long otherCounter = 0;

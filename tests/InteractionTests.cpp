@@ -1,5 +1,5 @@
-// Drives the controls with synthesised mouse, wheel and key events, so every gesture in
-// IMPLEMENTATION_PLAN 4.4 is checked against the parameter or ui state it should change.
+// Drives the controls with synthesised mouse, wheel and key events, so every gesture
+// is checked against the parameter or ui state it should change.
 
 #include "PluginEditor.h"
 #include "PluginProcessor.h"
@@ -257,7 +257,7 @@ TEST_CASE("buttons: latching toggles, METER and ANALYSE", "[interaction]")
     CHECK(f.param(id::polarity) == 0.0f);
     click(*buttons[0], centre);
     CHECK(f.param(id::delayOn) == 1.0f); // off by default
-    // The compensated latency it adds (plan 4.4), as the chain reports it.
+    // The compensated latency it adds, as the chain reports it.
     const auto delayMs44 = 1000.0 * pa::dsp::Chain::delayLatencyFor(44100.0, maxDelayTenths(44100.0)) / 44100.0;
     CHECK(buttons[0]->getTooltip().contains(juce::String(delayMs44, 1) + " ms of latency at 44.1 kHz"));
     click(*buttons[2], centre);

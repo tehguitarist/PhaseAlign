@@ -29,7 +29,6 @@ phase switch,toggle-switch-up,1487,352,77,194,"text right aligned, to the left o
 delay display,,251,507,282,100,"on base image already, to hold delay value text"
 phase display,,1710,507,282,100,"on base image already, to hold phase value text"
 meter display,,827,859,1480,555,"on base image already, to hold metering and analysis options"
-full example,full example,,,,,example of full layout - illustrative purposes only
 delay knob,knobs,253,272,,,rotate on centre of image
 phase knob,knobs,1710,272,245,245,rotate on centre of image
 range button,button-in,1487,205,77,77,range 180

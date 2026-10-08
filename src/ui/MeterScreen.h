@@ -12,25 +12,26 @@
 
 namespace pa::ui
 {
-// The correlation meter screen (IMPLEMENTATION_PLAN 3 and 4.4). Opaque, with bounds exactly the black screen interior,
+// The correlation meter screen. Opaque, with bounds exactly the black screen interior,
 // so its repaints never reach the panel behind it.
 //
 // While the meter is on and the screen is showing (and only then) it turns the processor's capture on, pulls the
 // samples at 30 Hz, and repaints itself while something moves. Otherwise nothing runs: no capture on the audio thread,
-// no timer, no analysis. Only the current view's work runs (R21).
+// no timer, no analysis. Only the current view's work runs.
 //
-// Three views, chosen from a menu that opens upwards from the bottom row's middle label (R23):
+// Three views, chosen from a menu that opens upwards from the bottom row's middle label:
 //   - BANDS (the default): six bars of the correlation with the sidechain, output (lit segments) and input (a blue
 //     tick), their values, and the overall pair on the right.
-//   - VECTORSCOPE: a goniometer (the last 0.25 s on SLOW, 60 ms on FAST). The input and the output each against the sidechain, each scaled to its own level and
+//   - VECTORSCOPE: a goniometer (the last 0.25 s on SLOW, 60 ms on FAST). The input and the output each against the
+//   sidechain, each scaled to its own level and
 //     turned 45 degrees, so a line up and down is in phase, a circle 90 degrees off, a line across inverted.
-//   - ALIGNMENT (R19; `scope` in the code): this track, the sidechain and the output as waveforms on top of each other,
-//     each scaled to its own peak, triggered on the sidechain's loudest recent onset so a hit stays put. The mouse wheel
-//     and the - and + buttons zoom (0.5 to 200 ms across). With CAPTURE on (the default) it holds the last hit it
+//   - ALIGNMENT (`scope` in the code): this track, the sidechain and the output as waveforms on top of each other,
+//     each scaled to its own peak, triggered on the sidechain's loudest recent onset so a hit stays put. The mouse
+//     wheel and the - and + buttons zoom (0.5 to 200 ms across). With CAPTURE on (the default) it holds the last hit it
 //     detected (within 12 dB of the strongest recent one) and shows the output the knobs would give for it, rendered
 //     from the captured input (`meter/HitCapture`), so the picture sits still while the DELAY, polarity and phase are
-//     turned; a new hit replaces it after the knobs have been left alone for two seconds. With CAPTURE off it follows the
-//     live audio, and, frozen, dragging slides the input against the sidechain.
+//     turned; a new hit replaces it after the knobs have been left alone for two seconds. With CAPTURE off it follows
+//     the live audio, and, frozen, dragging slides the input against the sidechain.
 //
 // The bars ease toward their values at the screen's own pace (a time constant of 0.3 s on SLOW, 0.1 s on FAST), so
 // they move smoothly whatever the analysis does.
@@ -87,7 +88,7 @@ class MeterScreen : public DesignComponent, private juce::Timer
     Speed getSpeed() const { return analyser.getSpeed(); }
     std::function<void(Speed)> onSpeedSelected; // a click on SLOW or FAST
 
-    // HOLD: frozen by the user (the label), or by a stopped host transport. Releasing HOLD clears the preview.
+    // HOLD: frozen by the HOLD label, or by a stopped host transport. Releasing HOLD clears the preview.
     void setHeld(bool);
     bool isHeld() const { return held; }
     bool isFrozen() const;
@@ -182,7 +183,7 @@ class MeterScreen : public DesignComponent, private juce::Timer
     void freezeChanged();
     void showViewMenu();
     void refreshTrigger(bool force);
-    void applyNeeds(); // only the current view's work runs in the analyser (plan R21)
+    void applyNeeds(); // only the current view's work runs in the analyser
 
     void paintStatic(juce::Graphics&, float pixelScale) const;
     void paintGrid(juce::Graphics&) const;

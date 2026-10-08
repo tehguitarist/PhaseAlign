@@ -12,7 +12,7 @@
 #include <string>
 #include <vector>
 
-// The phase stage (IMPLEMENTATION_PLAN 2.3, 2.4, M2): Hi/Lo is flat, its readout is the knob angle and its sections are
+// The phase stage: Hi/Lo is flat, its readout is the knob angle and its sections are
 // within 2.5 degrees of analog ones to 20 kHz (oversampled, latency Lh); Constant is a true rotation, exact at 0 and
 // 180 degrees, with latency L.
 using namespace pa::dsp;
@@ -100,7 +100,7 @@ std::vector<double> testFrequencies(double fs)
 }
 } // namespace
 
-// Analog first-order sections with the mapping's lag at each reference frequency (plan 2.3): what Hi/Lo approaches.
+// Analog first-order sections with the mapping's lag at each reference frequency: what Hi/Lo approaches.
 static double analogLagDegrees(const mapping::Shape& shape, double theta, double f)
 {
     const auto r = mapping::references(shape);
@@ -124,11 +124,11 @@ TEST_CASE("Hi/Lo is flat within 0.1 dB to 20 kHz, its readout is the knob angle 
             {
                 INFO("fs " << fs << ", " << c.name() << " " << theta);
                 const auto h = impulseResponse(fs, phaseOnly(c.mode, theta, c.wide), (int)(0.4 * fs));
-                // The halfbands' passband ripple (prototype/oversampling.py: within 0.09 dB end to end).
+                // The halfbands' passband ripple (reference/oversampling.py: within 0.09 dB end to end).
                 for (const auto f : testFrequencies(fs))
                     REQUIRE(std::abs(20.0 * std::log10(std::abs(response(h, f, fs, latency)))) < 0.1);
 
-                // The readout (plan 2.3): the lag at the first section's reference frequency is the panel angle in
+                // The readout: the lag at the first section's reference frequency is the panel angle in
                 // LOW 90, HIGH 90 and LOW 180. HIGH 180 reads the first section's angle (theta / 2) instead, as the
                 // closed form says (section 2's small lag at 75.1 Hz adds to it).
                 const auto r = mapping::references(c.shape());
@@ -144,7 +144,7 @@ TEST_CASE("Hi/Lo is flat within 0.1 dB to 20 kHz, its readout is the knob angle 
 TEST_CASE("Hi/Lo is within 2.5 degrees of analog sections to 20 kHz at every rate (de-cramped)", "[dsp][phase]")
 {
     // Settings just past 0 and 90 degrees are the worst: a corner far up, which a zero-latency section cramps by up to
-    // 80 degrees at 16-20 kHz at 44.1 kHz (plan 2.3, prototype/out/hf/report.md).
+    // 80 degrees at 16-20 kHz at 44.1 kHz.
     for (const auto fs : {44100.0, 48000.0, 88200.0, 96000.0, 192000.0})
         for (const auto& c : shapeCases(true))
             for (const auto theta : c.thetas)
@@ -226,7 +226,7 @@ TEST_CASE("Constant: exact at 0 and 180 degrees, 90 degrees within 0.5 from 20 H
                 REQUIRE(h[(size_t)i] == (i == latency ? (theta > 0.0 ? -1.0f : 1.0f) : 0.0f));
         }
 
-        // 90 and 45: the angle relative to the delayed input, and the level (plan 2.4: 4097 taps at 48 kHz).
+        // 90 and 45: the angle relative to the delayed input, and the level (4097 taps at 48 kHz).
         for (const auto theta : {90.0, 45.0, 135.0})
         {
             INFO(theta << " degrees");
@@ -354,7 +354,7 @@ TEST_CASE("leaving 0 or 90 degrees on broadband input releases no burst", "[dsp]
 {
     // At identity a section's pole is just inside z = -1. Run as a TPT structure, its state held a near-lossless
     // resonance at Nyquist driven by the input's top end, which came out when the knob moved: white noise at +-0.5
-    // peaked at over 4 (plan 2.3). Rotated and band-limited noise is nearly Gaussian, with the input's sigma (0.29), so
+    // peaked at over 4. Rotated and band-limited noise is nearly Gaussian, with the input's sigma (0.29), so
     // it legitimately peaks at about 4 sigma over this length (1.15; 1.02 here while a corner sweeps down from far
     // above 20 kHz just past 0 degrees), so the peak limit is 1.25. A burst also adds energy, which a moving all-pass
     // doesn't: every 1024-sample window's RMS stays within 1.5 dB of the input's over the same window (the estimate's
@@ -422,8 +422,8 @@ TEST_CASE("leaving 0 or 90 degrees on broadband input releases no burst", "[dsp]
 
 TEST_CASE("a RANGE toggle or a mode switch mid-signal keeps the energy and makes no step", "[dsp][phase]")
 {
-    // The shape glides (R3) like a mode switch always did: the sections stay all-pass, so white noise keeps its energy
-    // and the output never steps more than the plain input does (like the checks in prototype/hilo.py).
+    // The shape glides like a mode switch: the sections stay all-pass, so white noise keeps its energy
+    // and the output never steps more than the plain input does (like the checks in reference/hilo.py).
     struct Case
     {
         PhaseMode mode;

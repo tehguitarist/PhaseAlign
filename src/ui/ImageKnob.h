@@ -6,7 +6,7 @@
 
 namespace pa::ui
 {
-// A knob whose cap image (baked lighting included) rotates over the ring dots (IMPLEMENTATION_PLAN 4.4):
+// A knob whose cap image (baked lighting included) rotates over the ring dots:
 // vertical drag, Shift = fine (x0.1), wheel and arrow keys = one step (the step function decides what a
 // step is), Cmd- or Alt-click = reset, double-click = onEditRequest. Repaints only on value change.
 class ImageKnob : public DesignComponent

@@ -9,13 +9,14 @@
 #include <atomic>
 #include <vector>
 
-// Audio side of the correlation meter (IMPLEMENTATION_PLAN 3, R6): a lock-free single-producer, single-consumer
-// FIFO of mono streams (input, output, sidechain, and, when asked for, the input's and output's side signals). The audio thread pushes only while the meter is active
-// (editor showing AND meter on); otherwise push() returns at once. If the GUI falls behind, samples are dropped
-// from all three streams together, so the streams stay aligned with each other.
+// Audio side of the correlation meter: a lock-free single-producer, single-consumer
+// FIFO of mono streams (input, output, sidechain, and, when asked for, the input's and output's side signals). The
+// audio thread pushes only while the meter is active (editor showing AND meter on); otherwise push() returns at once.
+// If the GUI falls behind, samples are dropped from all three streams together, so the streams stay aligned with each
+// other.
 //
-// Latency alignment: the output is later than the input by the chain's latency (4 ms while the delay is on, plan 2.1a;
-// later also Constant's, 2.4), so push() delays the input and sidechain by that much before queueing them. The
+// Latency alignment: the output is later than the input by the chain's latency (4 ms while the delay is on;
+// later also Constant's), so push() delays the input and sidechain by that much before queueing them. The
 // alignment history is cleared each time capture starts, and it is not written while capture is off.
 namespace pa::meter
 {

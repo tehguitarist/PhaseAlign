@@ -5,11 +5,11 @@
 
 #include <algorithm>
 
-// Hi/Lo as built since the de-cramping (IMPLEMENTATION_PLAN 2.3; reference prototype/hilo.py, HiLoOversampled): the
+// Hi/Lo (see reference/hilo.py, HiLoOversampled): the
 // cascade at M times the session rate between the oversampler's halfbands, so its sections are within 2.5 degrees of
-// analog ones to 20 kHz at every rate. That can't be done at zero latency (Foster's reactance theorem, plan 2.3), so
+// analog ones to 20 kHz at every rate. That can't be done at zero latency (Foster's reactance theorem), so
 // it costs getLatency() samples: 32 at 44.1 kHz, 18 at 48, 5 at 88.2 and 96, 0 from 176.4 kHz up. The coefficient grid
-// stays 32 session samples long, so the angle and glide move exactly as before.
+// is 32 session samples long.
 namespace pa::dsp
 {
 class HiLoStage
@@ -59,7 +59,7 @@ class HiLoStage
         oversampler.down(osPtr, io, numChannels, n);
     }
 
-    // Keeps the stage warm while its output isn't heard (R2): the same state afterwards as process(), for less (the
+    // Keeps the stage warm while its output isn't heard: the same state afterwards as process(), for less (the
     // outer down-filter only keeps its history). The input is left as it is.
     void processUnheard(const float* const* in, int numChannels, int n)
     {

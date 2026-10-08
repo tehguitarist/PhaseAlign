@@ -11,7 +11,7 @@
 #include <thread>
 #include <vector>
 
-// ANALYSE from the button's press to the options (PLAN 3.5; IMPLEMENTATION_PLAN R26). Lives in the processor, so a
+// ANALYSE from the button's press to the options Lives in the processor, so a
 // capture or a result survives the editor being closed and opened again; message thread only, except the search, which
 // runs on its own thread.
 //
@@ -23,8 +23,8 @@
 // Capturing keeps only what can be compared: stretches of 10 ms where both this track and the sidechain have signal
 // (above -60 dBFS rms) and differ, while the host's transport plays (when it says), with a sidechain connected. Both
 // streams are cut at the same places, so they stay lined up. At least minSeconds of it is needed and idealSeconds is
-// recommended (user, 2026-10-08): on 5 s of unrelated material the search's chance gain reached +0.05, over its 0.03
-// minimum, against about +0.02 at 10 s and +0.005 at 20 s; on the user's pairs drums settled within 3 to 5 s, while
+// recommended: on 5 s of unrelated material the search's chance gain reached +0.05, over its 0.03
+// minimum, against about +0.02 at 10 s and +0.005 at 20 s; on real pairs drums settled within 3 to 5 s, while
 // sustained parts kept changing with the section played. Past maxSeconds the oldest is dropped. When a host that
 // reports its transport stops, the session analyses if it has enough, and otherwise says so and keeps what it has for
 // the next play.

@@ -4,7 +4,7 @@
 #include "dsp/FractionalDelay.h"
 #include "dsp/Ramp.h"
 
-// Delay in steps of 0.1 sample (IMPLEMENTATION_PLAN 2.1, 2.1a) with a dual-tap crossfade on every change. Taps are in
+// Delay in steps of 0.1 sample with a dual-tap crossfade on every change. Taps are in
 // tenths of a sample: a whole number of samples is a plain read (bit-exact), anything else goes through an
 // interpolation kernel (FractionalDelay.h), which reads FractionalKernels::lookaheadFor() samples ahead of the tap, so
 // a fractional tap must be at least that many samples. The buffer is always written, so a tap that comes back into use

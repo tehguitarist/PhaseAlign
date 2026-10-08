@@ -4,10 +4,9 @@
     .venv/bin/python tools/ui_layout.py header   # regenerate src/ui/Layout.h
     .venv/bin/python tools/ui_layout.py assets   # "<file> <width> <height>" per image, for build_assets.sh
 
-CSV conventions (IMPLEMENTATION_PLAN 4.1): x/y are image CENTRES in the 1954x1224 design space. A row
+CSV conventions: x/y are image CENTRES in the 1954x1224 design space. A row
 without x/y covers the whole design space (the base image). A row without w/h borrows the size of
-another row of the same image (the delay knob uses the phase knob's 245x245). The "full example" row is
-illustrative only and is skipped.
+another row of the same image (the delay knob uses the phase knob's 245x245).
 
 Adding a control: add its CSV rows, run tools/build_assets.sh, and add one entry to the editor's control
 table (src/PluginEditor.cpp). Slot names are the CSV component names in camelCase.
@@ -23,9 +22,8 @@ CSV_PATH = ROOT / "ui" / "ui-info.csv"
 HEADER_PATH = ROOT / "src" / "ui" / "Layout.h"
 
 DESIGN_W, DESIGN_H = 1954, 1224
-DEFAULT_SCALE = 0.4   # a new editor opens at 782x490 (80% of the 977x612 reference; user, 2026-10-06)
-ASSET_SCALE = 2.5     # assets ship at 2.5x of the default size (R9): exactly 1:1 with the design space
-SKIP_FILES = {"full example"}
+DEFAULT_SCALE = 0.4   # a new editor opens at 782x490 (80% of the 977x612 reference)
+ASSET_SCALE = 2.5     # assets ship at 2.5x of the default size: exactly 1:1 with the design space
 
 
 def camel(name: str) -> str:
@@ -55,8 +53,6 @@ def build():
     slots = OrderedDict()  # component -> (cx, cy, w, h)
     images = OrderedDict()  # file -> max slot (w, h)
     for r in rows:
-        if r["file"] in SKIP_FILES or r["component"] in SKIP_FILES:
-            continue
         w, h = num(r["w"]), num(r["h"])
         if w is None or h is None:
             if r["file"] not in size_by_file:

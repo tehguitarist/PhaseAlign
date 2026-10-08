@@ -1,11 +1,11 @@
-"""Golden references for the C++ port (IMPLEMENTATION_PLAN M2): the Python prototypes render fixed scripts, and
-tests/dsp/GoldenTests.cpp must match them sample by sample.
+"""Golden data for the C++ tests: the Python references render fixed scripts, and tests/dsp/GoldenTests.cpp must
+match them sample by sample.
 
-    .venv/bin/python prototype/golden.py      # → tests/golden/*.f32 (committed)
+    .venv/bin/python reference/golden.py      # writes tests/golden/*.f32 (committed)
 
-Hi/Lo renders through HiLoOversampled (the sections oversampled between halfbands, since 2026-10-06). Each case is two
+Hi/Lo renders through HiLoOversampled (the sections oversampled between halfbands). Each case is two
 files of little-endian float32, channel-major (all of channel 0, then channel 1): <case>_in.f32 (seeded
-noise) and <case>_out.f32 (the prototype's output). The scripts change settings only on the 32-sample coefficient grid,
+noise) and <case>_out.f32 (the reference's output). The scripts change settings only on the 32-sample coefficient grid,
 which is where both implementations act on them. Keep the case list in step with GoldenTests.cpp.
 """
 
@@ -21,7 +21,7 @@ OUT = Path(__file__).resolve().parent.parent / "tests" / "golden"
 # Hi/Lo: (sample, theta or None, mode or None, wide or None). Covers a phi sweep in range 90, RANGE toggled to 180 and
 # back (once with the knob kept where it was, which clamps), a Hi→Lo glide reversed half way, a glide while phi moves,
 # a mode and range change at once, and two more changes within a glide, to shapes other than the one just left (the
-# weights glide on from the current blend; a two-shape glide jumped there, 2026-10-06).
+# weights glide on from the current blend).
 HILO_SCRIPT = [(0, 0.0, "hi", False), (1024, 45.0, None, None), (2048, 90.0, None, None), (3072, 120.0, None, True),
                (4096, None, "lo", None), (4096 + 320, None, "hi", None), (5120, 170.0, None, None),
                (5632, None, None, False), (6144, 30.0, None, None), (6400, None, "lo", None),

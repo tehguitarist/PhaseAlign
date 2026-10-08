@@ -26,7 +26,7 @@ processed linked, so both channels get the same treatment.
 - [Which control for which problem](#which-control-for-which-problem)
 - [Latency and automation](#latency-and-automation)
 - [How it works](#how-it-works) (the technical part)
-- [Build](#build), [Release](#release), [Licence](#licence)
+- [Build](#build), [Licence](#licence)
 
 ## Quick start
 
@@ -397,8 +397,8 @@ setting at every lag out to 40 ms to decide whether to advise a manual shift (on
 knob's reach, and the smallest shift that gets most of it; a clear transient reading inside the reach, or a clear one that the
 score doesn't agree with, means none). It runs on its own thread in a fraction of a second.
 
-**Efficiency.** On an Apple M1, one stereo track costs roughly 0.1% of a single CPU core in HIGH or LOW and about 0.15% in
-CONSTANT at 48 kHz (about double that at 96 kHz); the meter's analysis adds about 0.2% of a core while it is on, plus its
+**Efficiency.** On an Apple M1, one stereo track costs roughly 0.1% of a single CPU core in HIGH or LOW and about 0.2% in
+CONSTANT at 48 kHz (about double that at 96 kHz); the meter's analysis adds about 0.25% of a core while it is on, plus its
 drawing. The FFT is vDSP on macOS and [PFFFT](https://bitbucket.org/jpommier/pffft) on Windows and Linux. Nothing allocates
 on the audio thread, which the tests check.
 
@@ -411,13 +411,8 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release --parallel 3
 ```
 
-Artefacts land in `build/PhaseAlign_artefacts/Release/{AU,VST3}`.
-
-## Release
-
-Run the **Release** workflow manually (Actions tab or `gh workflow run release.yml`). It builds macOS (arm64 and
-Intel), Windows and Linux, signs and notarizes the macOS builds, and publishes a draft GitHub Release. The version
-comes from `project(PhaseAlign VERSION ...)` in `CMakeLists.txt`.
+Artefacts land in `build/PhaseAlign_artefacts/Release/{AU,VST3}`. Testing, the reference implementations and the release
+process are in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
 ## Licence
 

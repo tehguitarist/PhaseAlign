@@ -9,7 +9,7 @@
 #include <memory>
 #include <vector>
 
-// Zero-latency non-uniform partitioned convolution (IMPLEMENTATION_PLAN 2.4, 2.6). Our own rather than
+// Zero-latency non-uniform partitioned convolution. Our own rather than
 // juce::dsp::Convolution for exact control of latency and of when it computes:
 //
 // - The kernel's first b0 taps (the head) are applied directly, sample by sample (only its nonzero taps).
@@ -30,7 +30,7 @@
 // Not real-time: prepare() allocates. process() doesn't allocate, lock or log.
 //
 // The two hot loops (the head taps and the per-bin multiply-adds) are plain register-blocked loops that GCC and clang
-// vectorise. MSVC doesn't, and Windows ran the convolver at 3 to 4 times Linux's cost (CI run 37420074764, plan 2.6 L),
+// vectorise. MSVC doesn't, and Windows ran the convolver at 3 to 4 times Linux's cost (CI run 37420074764),
 // so under MSVC they use dsp/Simd.h. Nowhere else changes. PA_CONVOLVER_SIMD forces the Simd.h loops on any platform,
 // to test them where there is no MSVC (the arithmetic is the same, so results agree to rounding).
 #if defined(_MSC_VER) || defined(PA_CONVOLVER_SIMD)

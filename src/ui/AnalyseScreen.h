@@ -10,7 +10,7 @@
 
 namespace pa::ui
 {
-// ANALYSE's screen (PLAN 3.5, IMPLEMENTATION_PLAN R26), in place of the meter's while the ANALYSE button is lit. It
+// ANALYSE's screen, in place of the meter's while the ANALYSE button is lit. It
 // draws what the session is doing and passes clicks to it; the session (in the processor) does the work.
 //
 //   - Capturing: what is being searched (the DELAY and PHASE buttons decide; polarity always), how much audio is in

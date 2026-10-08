@@ -11,7 +11,7 @@
 #include <memory>
 #include <stdexcept>
 
-// Line for line with prototype/analyse.py: where the Python rounds with round() (half to even) this uses nearbyint, and
+// Line for line with reference/analyse.py: where the Python rounds with round() (half to even) this uses nearbyint, and
 // where it truncates with int(), a cast; the expressions keep the Python's order of operations, so thresholds and lags
 // land on the same side.
 namespace pa::analyse
@@ -35,11 +35,11 @@ void checkCancel(const std::atomic<bool>* cancel)
 }
 
 // Progress through one suggestWithShift, for the screen's bar: work done against the work expected, in units of one
-// full search (every setting of the phase stage). The weights are Release timings ("[.analysecost]", 27 s of audio on
-// the M1: a full search 0.086 s, the attack reading 0.21 s and the cross-spectrum 0.032 s; those two scale with the
-// length, the search doesn't). The expectation is raised when the search takes a longer path (a manual shift) and
-// lowered when work is skipped (the chance test for a strong match, the shift pass when the attacks line up), and what
-// is published never goes back.
+// full search (every setting of the phase stage). The weights are Release timings (27 s of audio on
+// an Apple-silicon laptop: a full search 0.086 s, the attack reading 0.21 s and the cross-spectrum 0.032 s; those two
+// scale with the length, the search doesn't). The expectation is raised when the search takes a longer path (a manual
+// shift) and lowered when work is skipped (the chance test for a strong match, the shift pass when the attacks line
+// up), and what is published never goes back.
 constexpr double attackUnitsPerSecond = 0.09, spectraUnitsPerSecond = 0.014;
 constexpr double fullSettings = 289.0; // settings(true).size()
 
@@ -336,7 +336,7 @@ struct AttackBand
 };
 constexpr AttackBand attackBands[] = {{35.0, 150.0, 12.0}, {150.0, 600.0, 5.0}, {600.0, 0.0, 1.5}};
 // A reading is clear when the strongest rival outside the peak's lobe is under attackRunnerUp of it, and the peak is at
-// least attackMinPeak (the user's genuine pairs peak at 0.17 to 0.88; unrelated instruments read 0.01 to 0.12).
+// least attackMinPeak (genuine pairs peak at 0.17 to 0.88; unrelated instruments read 0.01 to 0.12).
 constexpr double attackRunnerUp = 0.65, attackMinPeak = 0.15, attackSearchMs = 40.0;
 
 // One band's feature: the log of the smoothed magnitude, its positive differences.
@@ -466,8 +466,8 @@ double chanceGain(const float* x, const float* y, int length, double fs, Scope s
     return smallest;
 }
 
-// The two match warnings on the options returned (warnings, not rejections; user, 2026-10-08: guitar and bass playing
-// one part may still want lining up), worked out once for the result returned, so the chance test isn't run for options
+// The two match warnings on the options returned (warnings, not rejections: guitar and bass playing one
+// part may still want lining up), worked out once for the result returned, so the chance test isn't run for options
 // a shift replaces.
 void addMatchFlags(Result& r, const float* x, const float* y, int length, double fs, Scope scope,
                    const std::atomic<bool>* cancel)

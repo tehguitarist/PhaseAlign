@@ -7,17 +7,12 @@
 #include <memory>
 #include <vector>
 
-// GUI side of the correlation meter (IMPLEMENTATION_PLAN 3, R6; method and numbers from P4,
-// prototype/out/p4/report.md). Hann-windowed FFT frames of the three streams (processed output x, unprocessed
+// GUI side of the correlation meter. Hann-windowed FFT frames of the three streams (processed output x, unprocessed
 // input z, sidechain y), 75% overlap. Per bin, the cross-spectra X·Y*, Z·Y* and the powers |X|², |Z|², |Y|² are
-// smoothed by an exponential average with time constant max(0.75 s, 12 cycles of the bin's frequency) on SLOW (R23; P4
-// used 0.3 s and 8 cycles) and max(0.08 s, 3 cycles) on FAST. What the screen shows comes from these sums: r over each
-// of the six BANDS, and the overall pair over every bin from 20 Hz to 20 kHz (unweighted broadband correlation), each
-// Σ Re(X·Y*) / sqrt(Σ|X|² Σ|Y|²).
-//
-// (Until 2026-10-08 it also worked out a frequency curve, phase angles, a PHAT lag function and an attack-based lag for
-// views R23 removed, kept for ANALYSE. ANALYSE's search, src/analyse, does its own from the whole capture, so they
-// went: plan R26.)
+// smoothed by an exponential average with time constant max(0.75 s, 12 cycles of the bin's frequency) on SLOW and
+// max(0.08 s, 3 cycles) on FAST. What the screen shows comes from these sums: r over each of the six BANDS, and the
+// overall pair over every bin from 20 Hz to 20 kHz (unweighted broadband correlation), each Σ Re(X·Y*) / sqrt(Σ|X|²
+// Σ|Y|²).
 //
 // Not real-time code: prepare() allocates; process() doesn't, but runs FFTs. GUI thread only.
 namespace pa::meter
@@ -25,14 +20,14 @@ namespace pa::meter
 class CorrelationAnalyser
 {
   public:
-    // Averaging speed (R17): slow is P4's setting (settles in about 0.75 s); fast trades steadiness for a display
+    // Averaging speed: slow settles in about 0.75 s); fast trades steadiness for a display
     // that follows the knobs (settles in about a third of that).
     enum class Speed
     {
         slow,
         fast
     };
-    static constexpr double tauFloorSeconds = 0.75, tauCycles = 12.0; // slower and steadier than P4's 0.3 s (user, R23)
+    static constexpr double tauFloorSeconds = 0.75, tauCycles = 12.0;
     // Fast also halves the analysis frame (4096 points at 48 kHz: 85 ms, a new result every 21 ms; 11.7 Hz bins), so
     // it responds in about 0.1 s rather than 0.25 s. Switching speed restarts the averages.
     static constexpr double fastTauFloorSeconds = 0.08, fastTauCycles = 3.0;
@@ -43,7 +38,7 @@ class CorrelationAnalyser
     static int fftSizeFor(double sampleRate, Speed speed = Speed::slow);
 
     void prepare(double sampleRate);
-    // What the screen's current view needs (plan R21): only that work runs. The per-bin averages behind the overall bar
+    // What the screen's current view needs: only that work runs. The per-bin averages behind the overall bar
     // always run (three FFTs a frame); the six bands only for BANDS. Switching them on fills them at once from the
     // averages.
     struct Needs
@@ -61,7 +56,7 @@ class CorrelationAnalyser
     // Feeds n samples of each stream; returns how many frames were analysed (each one updates the results).
     int process(const float* in, const float* out, const float* sc, int n);
 
-    // Preview (R17, used while the screen is held): what the processed results would be if the delay knob were set
+    // Preview (used while the screen is held): what the processed results would be if the delay knob were set
     // to `ms` with the phase stage off, worked out from the input's averaged cross-spectrum by turning every bin by
     // its own delay phase. Replaces the processed bands and overall values until cleared; touches nothing else. Exact
     // for the pure delay the plugin applies.
@@ -75,7 +70,7 @@ class CorrelationAnalyser
     void clearPreview();
     bool isPreviewing() const { return previewActive; }
     double previewDelayMs() const { return previewMs; }
-    // Bands view (R17): r over six bands, bandEdgesHz[i] to bandEdgesHz[i + 1]; NaN where gated. The processed ones
+    // Bands view: r over six bands, bandEdgesHz[i] to bandEdgesHz[i + 1]; NaN where gated. The processed ones
     // follow the preview.
     static constexpr int numBands = 6;
     static constexpr double bandEdgesHz[numBands + 1] = {20.0, 100.0, 250.0, 630.0, 1600.0, 4000.0, 20000.0};

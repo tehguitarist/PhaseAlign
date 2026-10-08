@@ -8,17 +8,17 @@
 #include <utility>
 #include <vector>
 
-// ANALYSE's search (PLAN 3.5; IMPLEMENTATION_PLAN R26): given a capture of this track's input and the sidechain (mono,
+// ANALYSE's search: given a capture of this track's input and the sidechain (mono,
 // lined up with each other), the settings of the delay, polarity and phase stage that make the input correlate best
-// with the sidechain, as up to two options to choose from. A port of prototype/analyse.py (`suggest_with_shift` and
-// what it calls), which is the spec and the golden reference (prototype/analyse_golden.py, tests/dsp/AnalyseTests.cpp).
+// with the sidechain, as up to two options to choose from. A port of reference/analyse.py (`suggest_with_shift` and
+// what it calls), which is the spec and the golden reference (reference/analyse_golden.py, tests/dsp/AnalyseTests.cpp).
 //
 // Method, briefly (the Python's docstring has it all): one cross-spectrum of the whole capture (Hann frames of 8192 at
 // 48 kHz, scaled with the rate, 75% overlap); every candidate G = polarity x phase response (dsp::PhaseStageResponse) x
 // delay scored in closed form as the mean over the active 1/3-octave bands of Re(sum G Sxy) / sqrt(Sxx Syy). The delay
 // is searched with one inverse FFT per phase setting (the band mean is linear in the spectrum, so the Python's one
 // transform per band and setting adds up to one), zero-padded 4x, then refined on the knob's 0.1-sample grid. The
-// attack lag (plan R18, whole capture) fixes the delay when its peak is strong; options must gain over doing nothing; a
+// attack lag (whole capture) fixes the delay when its peak is strong; options must gain over doing nothing; a
 // significant gain beyond the knob's reach asks for the smallest manual shift (in samples) that gets most of it.
 //
 // Offline: allocates, and takes a fraction of a second to a few seconds. Run it on a background thread; `cancel` (may
@@ -56,7 +56,7 @@ struct AttackReading
     double peak = 0.0, runnerUp = 1.0;
 };
 
-// What the search may change (the DELAY and PHASE buttons, user 2026-10-08). Polarity is always searched.
+// What the search may change (the DELAY and PHASE buttons). Polarity is always searched.
 struct Scope
 {
     bool delayOn = true, phaseOn = true;
@@ -85,15 +85,15 @@ enum class Verdict
 struct Result
 {
     std::vector<Option> options; // 0 to 2 (after the manual shift, if one is advised)
-    // With a manual shift advised: the best this track can do as it is, inside the knob's reach (user, 2026-10-08: if
-    // it is too far out to shift, still make a best phase effort, e.g. a room mic kept at its own distance). The
+    // With a manual shift advised: the best this track can do as it is, inside the knob's reach (if it is
+    // too far out to shift, still make a best phase effort, e.g. a room mic kept at its own distance). The
     // ordinary options, or else the single best one if it gains at least smallGain, marked small.
     std::vector<Option> optionsAsIs;
     double baseline = 0.0; // the score of doing nothing
     AttackReading attack;
     Verdict verdict = Verdict::nothing;
     bool lessLowEnd = false; // any option lowers the correlation below 300 Hz
-    // Warnings on the options (shown, not hidden; user 2026-10-08): the best option doesn't beat what the search finds
+    // Warnings on the options (shown, not hidden): the best option doesn't beat what the search finds
     // by chance on this material (the sidechain circularly shifted) by chanceMargin, or its score stays under
     // weakMatch.
     bool chanceLevel = false, weakMatch = false;
@@ -103,17 +103,17 @@ struct Result
     bool cancelled = false;
 };
 
-// The search's constants (prototype/analyse.py).
+// The search's constants (reference/analyse.py).
 inline constexpr double maxDelayMs = 4.0, attackStrong = 0.35, minGain = 0.03, minDelayMs = 0.3, minMargin = 0.01,
                         smallGain = 0.01, lowEndHz = 300.0, angleStep = 2.5;
-// The manual shift (prototype/analyse.py shift_advice; user, 2026-10-08): advised only when the best score out to
+// The manual shift (reference/analyse.py shift_advice): advised only when the best score out to
 // shiftReachMs beyond the knob's reach beats the best inside it by shiftGain, and then the smallest shift that gets
 // shiftFraction of that gain.
 // Only shiftGainEdge when the best delay inside the reach sits within edgeMarginMs of its limit (pinned at the knob's
 // end).
 inline constexpr double shiftReachMs = 40.0, shiftGain = 0.04, shiftFraction = 0.75, shiftGainEdge = 0.02,
                         edgeMarginMs = 0.15;
-// The chance test (prototype/analyse.py CHANCE_*, WEAK_MATCH, with the measurements behind them): the sidechain is
+// The chance test (reference/analyse.py CHANCE_*, WEAK_MATCH, with the measurements behind them): the sidechain is
 // turned round by these fractions of the capture.
 inline constexpr double chanceShifts[] = {0.37, 0.61};
 // An option whose score is at least chanceSkipScore is not tested (tracks that agree this well are not unrelated).
@@ -160,10 +160,10 @@ struct SearchOptions
 };
 std::vector<Candidate> search(const Spectra&, const SearchOptions&, const std::atomic<bool>* cancel = nullptr);
 
-// The manual shift to advise, in samples (positive delays the track; 0 for none): prototype/analyse.py shift_advice.
+// The manual shift to advise, in samples (positive delays the track; 0 for none): reference/analyse.py shift_advice.
 int shiftAdvice(const Spectra&, bool phaseOn, const AttackReading&, const std::atomic<bool>* cancel = nullptr);
 
-// suggest(), then the shift advice: prototype/analyse.py suggest_with_shift. `progress` (may be null) is kept at the
+// suggest(), then the shift advice: reference/analyse.py suggest_with_shift. `progress` (may be null) is kept at the
 // fraction of the work done, 0 to 0.99, never going back (any thread may read it).
 Result suggestWithShift(const float* x, const float* y, int length, double fs, Scope,
                         const std::atomic<bool>* cancel = nullptr, std::atomic<float>* progress = nullptr);

@@ -1,4 +1,4 @@
-// The DSP test runner (IMPLEMENTATION_PLAN R8): src/dsp and src/meter plus juce_dsp, no GUI modules, so it
+// The DSP test runner: src/dsp and src/meter plus juce_dsp, no GUI modules, so it
 // builds and runs quickly. Global operator new is counted, so tests can check that the real-time paths
 // never allocate.
 //

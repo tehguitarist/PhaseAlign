@@ -6,8 +6,8 @@
 
 namespace pa::ui
 {
-// A green 7-segment readout with a glow, unlit "8" ghost segments and a unit suffix (IMPLEMENTATION_PLAN
-// 4.3). Double-click opens an in-place text editor; typed text goes to onTextEntered. The glowing text
+// A green 7-segment readout with a glow, unlit "8" ghost segments and a unit suffix.
+// Double-click opens an in-place text editor; typed text goes to onTextEntered. The glowing text
 // is rendered once per value and size, so a repaint is a single image draw.
 class Readout : public DesignComponent
 {

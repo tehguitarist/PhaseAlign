@@ -5,8 +5,8 @@
 #include <fstream>
 #include <vector>
 
-// The C++ port against the Python prototypes (IMPLEMENTATION_PLAN M2): prototype/golden.py renders fixed scripts
-// through prototype/hilo.py (HiLoOversampled) and prototype/p2_constant.py (ConstantRotator) into tests/golden/, and
+// The C++ port against the Python references: reference/golden.py renders fixed scripts
+// through reference/hilo.py (HiLoOversampled) and reference/p2_constant.py (ConstantRotator) into tests/golden/, and
 // the chain must match them sample by sample. Keep the scripts in step with golden.py.
 using namespace pa::dsp;
 
@@ -82,7 +82,7 @@ double worstError(const std::string& name, double fs, PhaseMode initialMode, con
 constexpr int hi = (int)PhaseMode::high, lo = (int)PhaseMode::low;
 } // namespace
 
-TEST_CASE("golden: Hi/Lo matches prototype/hilo.py sample by sample", "[dsp][golden]")
+TEST_CASE("golden: Hi/Lo matches reference/hilo.py sample by sample", "[dsp][golden]")
 {
     // golden.py HILO_SCRIPT
     const std::vector<Event> events = {{1024, 45.0, -1, -1}, {2048, 90.0, -1, -1},       {3072, 120.0, -1, 1},
@@ -98,7 +98,7 @@ TEST_CASE("golden: Hi/Lo matches prototype/hilo.py sample by sample", "[dsp][gol
         }
 }
 
-TEST_CASE("golden: Constant matches prototype/p2_constant.py sample by sample", "[dsp][golden]")
+TEST_CASE("golden: Constant matches reference/p2_constant.py sample by sample", "[dsp][golden]")
 {
     // golden.py CONSTANT_SCRIPT. The prototype convolves exactly; the C++ in float FFT partitions.
     const std::vector<Event> events = {{2048, 90.0, -1}, {6144, 180.0, -1}, {9216, 37.0, -1}, {12288, 0.0, -1}};

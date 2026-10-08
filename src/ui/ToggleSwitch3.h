@@ -4,7 +4,7 @@
 
 namespace pa::ui
 {
-// A 3-way toggle switch with clickable labels (IMPLEMENTATION_PLAN 4.3/4.4). Position 0 is up, 1 centre,
+// A 3-way toggle switch with clickable labels. Position 0 is up, 1 centre,
 // 2 down. Click the upper or lower half of the switch to step, drag it up or down, or click a label.
 // Only the selected label is highlighted.
 class ToggleSwitch3 : public DesignComponent
@@ -27,7 +27,7 @@ class ToggleSwitch3 : public DesignComponent
     void setIndex(int newIndex);
     int getIndex() const { return index; }
 
-    // Called when the user picks a position.
+    // Called when a position is picked.
     std::function<void(int)> onSelect;
 
     void paint(juce::Graphics&) override;

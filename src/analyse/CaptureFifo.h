@@ -5,10 +5,10 @@
 #include <atomic>
 #include <memory>
 
-// Audio side of ANALYSE's capture (PLAN 3.5): a lock-free single-producer, single-consumer FIFO of two mono streams,
+// Audio side of ANALYSE's capture: a lock-free single-producer, single-consumer FIFO of two mono streams,
 // this track's input (before the chain) and the sidechain, as they reach the plugin (so lined up with each other; no
 // latency to undo). The audio thread pushes only while it is active, which is only while ANALYSE is capturing: no
-// cost otherwise. Independent of the meter's capture (plan R26), which may be off or showing another view.
+// cost otherwise. Independent of the meter's capture, which may be off or showing another view.
 //
 // The storage is allocated the first time ANALYSE is used (message thread), before the FIFO is first made active, and
 // kept until the processor goes: the audio thread only touches it while active, so it never sees it change.

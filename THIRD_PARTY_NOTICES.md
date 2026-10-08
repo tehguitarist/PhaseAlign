@@ -9,5 +9,5 @@ licence texts (the BSD-style ones require it for binary redistribution).
 | DSEG font | UI readouts | SIL OFL 1.1: `assets/fonts/licenses/DSEG-OFL.txt` |
 | IBM Plex Mono | UI text | SIL OFL 1.1: `assets/fonts/licenses/IBMPlexMono-OFL.txt` |
 
-Phase Align itself is licensed under the GNU AGPLv3 (`LICENSE`; user, 2026-10-06), and uses JUCE (`libs/JUCE`) under
+Phase Align itself is licensed under the GNU AGPLv3 (`LICENSE`), and uses JUCE (`libs/JUCE`) under
 JUCE's AGPLv3 option.

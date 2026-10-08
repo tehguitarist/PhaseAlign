@@ -12,12 +12,12 @@
 // Runs the DSP chain (polarity, phase, delay; src/dsp/Chain.h) on the main bus, which is mono or stereo
 // (in == out). The sidechain bus (mono, stereo or disabled) is the reference signal for the correlation meter.
 //
-// Latency (plan 2.1a, 2.4): 4 ms plus the interpolation's lookahead (under 0.6 ms) while the delay is on, so the delay
+// Latency: 4 ms plus the interpolation's lookahead (under 0.6 ms) while the delay is on, so the delay
 // knob can move the track earlier as well as later, plus about 48 ms in Constant mode for its linear-phase Hilbert FIR.
 // A delayOn change fades the audio out and back in around the switch (src/dsp/Chain.h), and the reported latency is
 // updated on the message thread.
 //
-// State (IMPLEMENTATION_PLAN 1.2): the parameter tree, plus a "ui" child holding editor settings that
+// State: the parameter tree, plus a "ui" child holding editor settings that
 // are not host parameters, plus stateVersion on the root.
 class PhaseAlignProcessor : public juce::AudioProcessor,
                             public juce::ChangeBroadcaster,
@@ -46,7 +46,7 @@ class PhaseAlignProcessor : public juce::AudioProcessor,
             "analysePreview"}; // "bands" / "alignment": ANALYSE's preview
     };
     static constexpr double minUiScale = 0.6, maxUiScale = 2.0;
-    static constexpr double defaultUiScale = 0.8; // 782x490 (user, 2026-10-06)
+    static constexpr double defaultUiScale = 0.8; // 782x490
 
     PhaseAlignProcessor();
     ~PhaseAlignProcessor() override;
@@ -65,7 +65,7 @@ class PhaseAlignProcessor : public juce::AudioProcessor,
     const juce::String getName() const override { return JucePlugin_Name; }
     bool acceptsMidi() const override { return false; }
     bool producesMidi() const override { return false; }
-    // IIR decay plus 8.6 ms of delay, or Constant's half-length (about 43 ms) (plan 1.3).
+    // IIR decay plus 8.6 ms of delay, or Constant's half-length (about 43 ms).
     double getTailLengthSeconds() const override { return 0.1; }
 
     int getNumPrograms() override { return 1; }
@@ -98,7 +98,7 @@ class PhaseAlignProcessor : public juce::AudioProcessor,
     // The correlation meter's feed. The editor's meter screen turns it on while it is showing and the meter is on.
     pa::meter::MeterCapture& getMeterCapture() { return meterCapture; }
 
-    // ANALYSE (PLAN 3.5, plan R26): the capture, the search and the options. Message thread.
+    // ANALYSE: the capture, the search and the options. Message thread.
     pa::analyse::Session& getAnalyseSession() { return *analyseSession; }
 
     // The seven panel settings ANALYSE reads and sets (message thread). Setting them is one host gesture: every changed

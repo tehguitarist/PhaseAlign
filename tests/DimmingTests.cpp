@@ -1,4 +1,4 @@
-// Switched-off sections (IMPLEMENTATION_PLAN 4.5, R11): what dims, that it follows the parameters however they
+// Switched-off sections: what dims, that it follows the parameters however they
 // change, and that dimmed controls stay usable.
 
 #include "PluginEditor.h"

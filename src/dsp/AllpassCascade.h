@@ -8,14 +8,14 @@
 #include <cmath>
 #include <functional>
 
-// Hi/Lo phase modes (IMPLEMENTATION_PLAN 2.3): two first-order all-pass sections in series, double state. The knob's
+// Hi/Lo phase modes: two first-order all-pass sections in series, double state. The knob's
 // panel angle and the range (90 or 180) set the target of phi, section 1's angle, which is smoothed linearly over
 // smoothMs and mapped to the sections' k by the shapes, (mode, range) (PhaseMapping.h). The glide is a weight on each
 // of the four shapes, summing to 1; each section's log k is the weighted sum of that shape's log k at the current phi.
 // Changing the shape (mode or range) moves the weights to the new shape alone, each on a linear ramp of glideMs from
-// where it is, so the signal stays all-pass throughout (R3) and a change that arrives mid-glide, back to the shape just
-// left or on to a third, continues from the current blend instead of jumping (a two-shape glide jumped to the
-// previous shape's k, which clicked: fixed 2026-10-06). Reference: prototype/hilo.py (HiLo), golden-tested.
+// where it is, so the signal stays all-pass throughout and a change that arrives mid-glide, back to the shape just
+// left or on to a third, continues from the current blend instead of jumping (a glide between two shapes only would
+// jump to the previous shape's k, which clicks). Reference: reference/hilo.py (HiLo), golden-tested.
 //
 // Coefficients are computed on a fixed grid of `cell` samples counted from reset(), so the output doesn't
 // depend on the host's block sizes: at the start of each cell phi and the glide move on by one cell, and each
@@ -25,12 +25,12 @@
 // running, no tan() runs and G is constant.
 //
 // Each section is the first-order all-pass of a TPT one-pole with G = 1 / (1 + k), H(z) = (-p + z^-1) / (1 - p z^-1)
-// with p = 1 - 2G, run in direct form I: y = -p x + x1 + p y1, where x1 and y1 are its last input and output. (It was
-// run as the TPT structure itself until 2026-10-06. Near identity, k = kMin, the pole is just inside z = -1 and the TPT
-// state holds a near-lossless resonance at Nyquist driven by the input's top end, hidden from the output while k stays
-// there; when the knob left 0 or 90 degrees it came out as a burst, up to 12 times the input on white noise. Direct
-// form I keeps only past samples as state, so there is nothing hidden to come out. The transfer function is the same,
-// so a static setting sounds the same; plan 2.3.)
+// with p = 1 - 2G, run in direct form I: y = -p x + x1 + p y1, where x1 and y1 are its last input and output. (Not run
+// as the TPT structure itself: near identity, k = kMin, the pole is just inside z = -1 and the TPT state holds a
+// near-lossless resonance at Nyquist driven by the input's top end, hidden from the output while k stays there; when
+// the knob left 0 or 90 degrees it came out as a burst, up to 12 times the input on white noise. Direct form I keeps
+// only past samples as state, so there is nothing hidden to come out. The transfer function is the same, so a static
+// setting sounds the same.)
 namespace pa::dsp
 {
 class AllpassCascade

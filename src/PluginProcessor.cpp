@@ -23,7 +23,7 @@ PhaseAlignProcessor::PhaseAlignProcessor()
     polarityValue = parameters.getRawParameterValue(id::polarity);
     phaseOnValue = parameters.getRawParameterValue(id::phaseOn);
 
-    // Parameters that change the latency (plan 2.1a, 2.4).
+    // Parameters that change the latency.
     delayOnParameter = parameters.getParameter(id::delayOn);
     phaseModeParameter = parameters.getParameter(id::phaseMode);
     delayOnParameter->addListener(this);
@@ -173,7 +173,7 @@ void PhaseAlignProcessor::processBlockBypassed(juce::AudioBuffer<float>& buffer,
     runChain(buffer, currentSettings().bypassed());
 }
 
-// With no sidechain source chosen, some hosts (Logic Pro, as the user found) don't give the plugin silence: they feed
+// With no sidechain source chosen, some hosts (Logic Pro) don't give the plugin silence: they feed
 // its own input in as the sidechain. The meter would then compare the track with a perfect copy of itself and read +1.
 // So a sidechain that is sample for sample the main input, for a quarter of a second, counts as no sidechain at all.
 // Silence in both doesn't count either way (they are trivially equal), and the first sample that differs ends it at
@@ -329,7 +329,7 @@ void PhaseAlignProcessor::restoreUiState(const juce::ValueTree& loaded)
                         toString(pa::params::delayUnitFromString(get(UiProps::delayUnit).toString())), nullptr);
     uiState.setProperty(UiProps::meterOn, (bool)get(UiProps::meterOn), nullptr);
     uiState.setProperty(UiProps::uiScale, juce::jlimit(minUiScale, maxUiScale, (double)get(UiProps::uiScale)), nullptr);
-    // The old FREQUENCY, TIME OFFSET and PHASE views are gone (R23): an old state opens on BANDS.
+    // The old FREQUENCY, TIME OFFSET and PHASE views are gone: an old state opens on BANDS.
     const auto view = get(UiProps::meterView).toString();
     uiState.setProperty(UiProps::meterView, view == "vector" || view == "scope" ? view : juce::String("bands"), nullptr);
     uiState.setProperty(UiProps::meterSpeed, get(UiProps::meterSpeed).toString() == "fast" ? "fast" : "slow", nullptr);

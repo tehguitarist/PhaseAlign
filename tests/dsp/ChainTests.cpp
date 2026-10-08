@@ -21,7 +21,6 @@ namespace
 constexpr double rates[] = {44100.0, 48000.0, 88200.0, 96000.0, 176400.0, 192000.0};
 
 // The delay knob's reach either way in tenths of a sample, its whole-sample part, and the latency while the delay is on
-// (plan 2.1a).
 int reachTenths(double fs)
 {
     return (int)std::lround(4.0 * fs * 10.0 / 1000.0);
@@ -37,7 +36,7 @@ int latencyAt(double fs)
     return Chain::delayLatencyFor(fs, reachTenths(fs));
 }
 
-// Hi/Lo's latency (its oversampling, plan 2.3), which the chain has whenever Constant isn't active, phase on or off.
+// Hi/Lo's latency (its oversampling), which the chain has whenever Constant isn't active, phase on or off.
 int hiLoAt(double fs)
 {
     return HiLoStage::latencyFor(fs);
@@ -591,7 +590,7 @@ TEST_CASE("processing never allocates", "[dsp]")
     CHECK(probe.allocations() == 0);
 }
 
-// Hidden benchmark (plan 2.6 budgets, full chain per stereo frame: Hi/Lo under 50 ns, Constant under 150 ns). Build in
+// Hidden benchmark (budgets, full chain per stereo frame: Hi/Lo under 50 ns, Constant under 150 ns). Build in
 // Release for meaningful numbers. Each case is the best of three runs of 5 s of audio in 512-sample blocks. Set
 // PA_BENCH to a substring of a case's name to run only the cases that match, and PA_BENCH_SECONDS for longer runs (for
 // a profiler).

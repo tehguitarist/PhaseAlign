@@ -1,0 +1,14 @@
+# Fractional-delay kernels for 192000 Hz (reference/subsample.py): low-delay minimax (LP).
+# lookahead H = 0, taps N = 4. One line per fraction: f (tenths), then N float32 taps,
+# oldest sample first (the C++ reversed() order: index j weights the j-th of N consecutive samples).
+# Nominal delay from the newest sample read: H + f/10. Worst level 0.0107 dB, worst delay
+# 0.0053 samples (float32 taps, 20 Hz to 20 kHz).
+1 0.0246233921 -0.113683216 0.25204587 0.83701396
+2 0.0412509032 -0.195425957 0.464637429 0.689537644
+3 0.0463114493 -0.23405461 0.625451565 0.562291563
+4 0.0463791341 -0.249124721 0.754549742 0.448195845
+5 0.0415748805 -0.240683839 0.851523995 0.347584963
+6 0.0333390608 -0.212772131 0.920192242 0.259240836
+7 0.0231982321 -0.169648334 0.964588523 0.181861565
+8 0.012750688 -0.115581594 0.988588989 0.11424192
+9 0.00428694626 -0.056921348 0.99828136 0.0543530583

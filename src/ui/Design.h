@@ -2,12 +2,12 @@
 
 #include "ui/Layout.h"
 
-// Hand-measured design values that ui-info.csv doesn't carry: measured on ui/plugin-base.png and
-// "ui/full example.png", in the same 1954x1224 design space as Layout.h.
+// Hand-measured design values that ui-info.csv doesn't carry: measured on ui/plugin-base.png,
+// in the same 1954x1224 design space as Layout.h.
 namespace pa::design
 {
 // The reference editor size (uiScale 1) is half the design space; resizable from 60% to 200% of it, opening at 80%
-// (PhaseAlignProcessor::defaultUiScale; IMPLEMENTATION_PLAN 4.2).
+// (PhaseAlignProcessor::defaultUiScale).
 inline constexpr int defaultWidth = 977;
 inline constexpr int defaultHeight = 612;
 
@@ -38,7 +38,7 @@ inline constexpr float scaleDegreeSize = 12.0f;
 inline constexpr float scaleDegreeGap = 5.0f;
 inline const juce::Colour scaleLabelColour{0xfff6f4f2};
 
-// A switched-off section's controls (IMPLEMENTATION_PLAN 4.5) are drawn at this opacity but stay fully usable.
+// A switched-off section's controls are drawn at this opacity but stay fully usable.
 inline constexpr float dimmedAlpha = 0.4f;
 
 // Readouts: green 7-segment digits with a glow; the unit suffix sits bottom-right in Arial Bold.
@@ -53,10 +53,10 @@ inline constexpr float readoutGhostAlpha = 0.07f;
 inline const juce::Rectangle<float> helpButtonSlot{977.0f - 40.0f, 1164.0f - 40.0f, 80.0f, 80.0f};
 inline constexpr float helpCapHeight = 42.0f;
 
-// Meter screen (positions measured on the example; the band count is provisional until P4).
+// Meter screen (positions measured on the example).
 inline const juce::Colour phosphor{0xff3cf04e};
 inline const juce::Colour meterAxisText{0xffd0d0cc};
-// This track before the plugin: a soft blue, to tell it from the output's phosphor green (user, 2026-10-07).
+// This track before the plugin: a soft blue, to tell it from the output's phosphor green.
 inline const juce::Colour meterInput{0xff5a8fdc};
 inline const juce::Colour meterGrid{0xff5a5a58};
 // ANALYSE's advice that needs acting on (a manual shift, less low end, no sidechain): amber, apart from the traces'

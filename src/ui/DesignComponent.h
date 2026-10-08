@@ -29,7 +29,7 @@ class DesignComponent : public juce::Component, public juce::SettableTooltipClie
 
     float getScale() const { return scale; }
 
-    // A switched-off section's controls draw at design::dimmedAlpha (IMPLEMENTATION_PLAN 4.5) but stay usable.
+    // A switched-off section's controls draw at design::dimmedAlpha but stay usable.
     // Repaints only this component, and only when the state changes.
     void setDimmed(bool shouldBeDimmed)
     {

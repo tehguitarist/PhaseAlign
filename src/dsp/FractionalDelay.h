@@ -6,8 +6,8 @@
 #include <array>
 #include <cmath>
 
-// Interpolation kernels for the delay's 0.1-sample steps (IMPLEMENTATION_PLAN 2.1a; user, 2026-10-06; study in
-// prototype/subsample.py). For a fraction f (1 to 9 tenths), a kernel of `taps` weights reads that many consecutive
+// Interpolation kernels for the delay's 0.1-sample steps (study in
+// reference/subsample.py). For a fraction f (1 to 9 tenths), a kernel of `taps` weights reads that many consecutive
 // samples, the newest `lookahead` samples ahead of the tap: the latency it adds. Each is within 0.02 dB and 0.01
 // samples (phase delay) of a pure delay from 20 Hz to 20 kHz at the rate. Two designs:
 //
@@ -27,7 +27,7 @@ class FractionalKernels
         kaiser,
         lowDelay
     };
-    static constexpr Design design = Design::kaiser; // the user kept Kaiser (2026-10-06, plan 2.6)
+    static constexpr Design design = Design::kaiser; // the chosen design
 
     static constexpr int maxTaps = 48;
     static constexpr int steps = 10; // tenths of a sample

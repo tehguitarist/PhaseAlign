@@ -4,11 +4,11 @@
 #include <cmath>
 #include <functional>
 
-// Linear ramps for click-free transitions (IMPLEMENTATION_PLAN 2.5). Plain C++: no JUCE, no allocation.
+// Linear ramps for click-free transitions. Plain C++: no JUCE, no allocation.
 namespace pa::dsp
 {
 // One length for every crossfade and gain ramp: delay changes (dual-tap crossfade), delay on/off, polarity
-// and stage on/off. 50 ms linear was heard as click-free, with smooth delay sweeps. P3 may tune it.
+// and stage on/off. 50 ms linear is click-free, with smooth delay sweeps.
 inline constexpr double crossfadeMs = 50.0;
 
 inline int crossfadeSamples(double sampleRate)
@@ -17,7 +17,7 @@ inline int crossfadeSamples(double sampleRate)
 }
 
 // A latency change (the delay switched on or off; later, entering or leaving Constant) fades the output out over
-// this, switches while silent, and fades back in over it (plan 2.1a and 2.4: about 10 + 10 ms). P3 may tune it.
+// this, switches while silent, and fades back in over it (about 10 + 10 ms).
 inline constexpr double latencyFadeMs = 10.0;
 
 inline int latencyFadeSamples(double sampleRate)

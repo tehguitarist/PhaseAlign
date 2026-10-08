@@ -25,7 +25,7 @@ class SourceAssets
     std::array<juce::Image, (size_t)layout::Image::count> images;
 };
 
-// Per-editor cache of the artwork pre-scaled to exact physical pixel sizes (IMPLEMENTATION_PLAN 4.2):
+// Per-editor cache of the artwork pre-scaled to exact physical pixel sizes:
 // each image is resampled once per size and then painted 1:1, never resampled per paint.
 class ScaledImages
 {

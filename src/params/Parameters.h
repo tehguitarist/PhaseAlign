@@ -4,7 +4,7 @@
 
 #include <optional>
 
-// Parameter IDs, ranges and text conversions (IMPLEMENTATION_PLAN 1.2). The IDs are permanent: never
+// Parameter IDs, ranges and text conversions. The IDs are permanent: never
 // rename one, and add new parameters with a new version number instead of changing an old one.
 namespace pa::params
 {
@@ -21,7 +21,7 @@ inline constexpr const char* polarity = "polarity";
 inline constexpr const char* phaseOn = "phaseOn";
 } // namespace id
 
-// The delay knob runs from -maxDelayMs to +maxDelayMs in steps of 0.1 sample (plan 2.1a). While the delay is on, the
+// The delay knob runs from -maxDelayMs to +maxDelayMs in steps of 0.1 sample. While the delay is on, the
 // plugin reports latency to cover the negative half (pa::dsp::Chain::latencyFor) and delays by that plus the knob's
 // value, so a negative setting moves the track earlier.
 inline constexpr float maxDelayMs = 4.0f;
@@ -49,7 +49,7 @@ juce::StringArray phaseModeNames();
 // change; the number is the shift at the first section's reference frequency, which is 0-90 with RANGE out. With RANGE
 // in, Low's two stacked sections and Constant's true rotation read 0-180 exactly, but High's second section sits an
 // octave or more above the first and adds its own turn there, so High shows the first section's angle, 0-90, marked
-// with an asterisk (IMPLEMENTATION_PLAN 2.3).
+// with an asterisk.
 inline constexpr double shownRangeDegrees(bool range180, PhaseMode mode)
 {
     return range180 && mode != PhaseMode::high ? 180.0 : 90.0;
@@ -63,8 +63,8 @@ inline constexpr bool shownRangeIsApproximate(bool range180, PhaseMode mode)
 juce::AudioProcessorValueTreeState::ParameterLayout createLayout(std::function<double()> currentRangeDegrees);
 
 //==============================================================================
-// Delay units. The delay is stored in ms and applied in tenths of a sample (plan 2.1a; replaced whole samples,
-// decision 12, user 2026-10-06), so everything shown to the user is the effective, rounded value.
+// Delay units. The delay is stored in ms and applied in tenths of a sample, so everything
+// shown is the effective, rounded value.
 enum class DelayUnit
 {
     ms,
@@ -95,7 +95,7 @@ std::optional<double> parseDelay(const juce::String&, DelayUnit, double sampleRa
 juce::String formatPhase(double degrees);                                   // "90.0"
 std::optional<double> parsePhase(const juce::String&, double rangeDegrees); // degrees, clamped to the range
 
-// One wheel or arrow-key step (IMPLEMENTATION_PLAN 4.4): one sample (0.1 sample if fine), through zero, keeping the
+// One wheel or arrow-key step: one sample (0.1 sample if fine), through zero, keeping the
 // fraction; or the next 0.5 degree.
 double stepDelayMs(double ms, int direction, double sampleRate, bool fine = false);
 double stepPhaseDeg(double degrees, int direction, double rangeDegrees);

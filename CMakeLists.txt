@@ -1,11 +1,11 @@
 cmake_minimum_required(VERSION 3.15)
 
-project(PhaseAlign VERSION 0.1.0)   # release.yml greps this line for the version; keep the format
+project(PhaseAlign VERSION 1.0.0)   # release.yml greps this line for the version; keep the format
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_OSX_DEPLOYMENT_TARGET "10.13" CACHE STRING "Minimum macOS deployment version")
-# macOS ships two separate builds, not a universal binary (R14): arm64, the default here and locally, and x86_64
+# macOS ships two separate builds, not a universal binary: arm64, the default here and locally, and x86_64
 # ("Intel"), which release.yml cross-compiles with -DCMAKE_OSX_ARCHITECTURES=x86_64.
 
 option(PA_BUILD_TESTS "Build the unit tests (tests/, Catch2 v3)" ON)
@@ -152,7 +152,6 @@ if (PA_BUILD_TESTS)
         tests/dsp/PhaseTests.cpp
         tests/dsp/GoldenTests.cpp
         tests/dsp/MeterTests.cpp
-        tests/dsp/P3Renders.cpp
         tests/dsp/AnalyseTests.cpp
     )
     set_source_files_properties(tests/ParameterTests.cpp tests/StateTests.cpp tests/EditorTests.cpp
@@ -162,14 +161,14 @@ if (PA_BUILD_TESTS)
 
     add_test(NAME PhaseAlignTests COMMAND PhaseAlignTests)
 
-    # The light DSP runner (R8): src/dsp and src/meter with juce_dsp only, no GUI modules or plugin sources,
+    # The light DSP runner: src/dsp and src/meter with juce_dsp only, no GUI modules or plugin sources,
     # so it builds in a fraction of the time. It counts global operator new to check the real-time paths.
     juce_add_console_app(PhaseAlignDspTests PRODUCT_NAME "PhaseAlignDspTests")
     target_sources(PhaseAlignDspTests PRIVATE ${PA_DSP_TEST_SOURCES} src/meter/CorrelationAnalyser.cpp
         src/analyse/Search.cpp)
     target_include_directories(PhaseAlignDspTests PRIVATE src tests/dsp)
     target_compile_definitions(PhaseAlignDspTests PRIVATE
-        PA_GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/golden" # prototype/golden.py writes these
+        PA_GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/golden" # reference/golden.py writes these
         _USE_MATH_DEFINES                                        # M_PI in the tests, on MSVC
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0

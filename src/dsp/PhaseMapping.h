@@ -4,8 +4,7 @@
 #include <cmath>
 #include <utility>
 
-// Hi/Lo knob mapping (IMPLEMENTATION_PLAN 2.3, P5; reference prototype/hilo.py). Don't change the mapping without
-// asking the user (CLAUDE.md).
+// Hi/Lo knob mapping (see reference/hilo.py).
 //
 // Each (mode, range) combination is a "shape" with its own section reference frequencies: LOW 90 is one section at
 // 75.1 Hz, LOW 180 two stacked sections at 150.1 Hz, HIGH 90 one section at 150.1 Hz, HIGH 180 sections at 75.1 Hz and
@@ -32,7 +31,7 @@ struct Shape
     friend bool operator!=(const Shape& a, const Shape& b) { return ! (a == b); }
 };
 
-// The four shapes in a fixed order, matching SHAPE_ORDER in prototype/hilo.py: low 90, low 180, high 90, high 180.
+// The four shapes in a fixed order, matching SHAPE_ORDER in reference/hilo.py: low 90, low 180, high 90, high 180.
 inline constexpr int shapeCount = 4;
 inline constexpr int shapeIndex(const Shape& s)
 {

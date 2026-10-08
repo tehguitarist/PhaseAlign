@@ -393,7 +393,7 @@ jobs:
   linux:
     name: Linux build
     needs: version
-    runs-on: ubuntu-24.04  # pinned as in ci.yml (ubuntu-latest moves to 26.04 on 2026-10-19)
+    runs-on: ubuntu-24.04  # pinned as in ci.yml (ubuntu-latest changes image versions over time)
     steps:
       - uses: actions/checkout@v6
         with: { submodules: recursive }

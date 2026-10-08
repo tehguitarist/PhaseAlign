@@ -12,10 +12,9 @@
 #include <map>
 #include <sstream>
 #include <string>
-#include <thread>
 #include <vector>
 
-// ANALYSE's search against its spec (prototype/analyse.py): prototype/analyse_golden.py runs suggest_with_shift on
+// ANALYSE's search against its spec (reference/analyse.py): reference/analyse_golden.py runs suggest_with_shift on
 // fixed pairs and writes what it found to tests/golden/analyse_expected.txt; the C++ must find the same, to rounding.
 using namespace pa::analyse;
 
@@ -33,20 +32,6 @@ std::vector<float> loadI16(const std::string& path)
     std::vector<float> v(q.size());
     for (size_t i = 0; i < q.size(); ++i)
         v[i] = (float)q[i] / 32768.0f;
-    return v;
-}
-
-std::vector<float> loadF32(const std::string& path)
-{
-    std::vector<float> v;
-    if (auto* f = std::fopen(path.c_str(), "rb"))
-    {
-        std::fseek(f, 0, SEEK_END);
-        v.resize((size_t)std::ftell(f) / sizeof(float));
-        std::rewind(f);
-        REQUIRE(std::fread(v.data(), sizeof(float), v.size(), f) == v.size());
-        std::fclose(f);
-    }
     return v;
 }
 
@@ -244,7 +229,7 @@ void checkCase(const Case& c, const std::vector<float>& x, const std::vector<flo
         CHECK(got.fromAttacks == want.fromAttacks);
         CHECK(got.delayOnly == want.delayOnly);
     }
-    // With a shift advised, the best this track can do as it is (user, 2026-10-08). The best option is checked exactly;
+    // With a shift advised, the best this track can do as it is. The best option is checked exactly;
     // the ones after it only for the level of their score: on case B unshifted (6.5 ms out, so a flat landscape of
     // weak, near-tied candidates) which of them makes the top 200 leaders depends on rounding differences between
     // numpy's FFT and ours (the C++ found 122.5 degrees at 0.1512 where the Python has 120 at 0.1495).
@@ -280,7 +265,7 @@ void checkCase(const Case& c, const std::vector<float>& x, const std::vector<flo
 }
 } // namespace
 
-TEST_CASE("ANALYSE's search matches prototype/analyse.py on the golden pairs", "[analyse]")
+TEST_CASE("ANALYSE's search matches reference/analyse.py on the golden pairs", "[analyse]")
 {
     const std::string dir = PA_GOLDEN_DIR;
     const auto cases = readCases(dir + "/analyse_expected.txt");
@@ -417,26 +402,19 @@ TEST_CASE("PhaseStageResponse is the response phaseStageResponse gives", "[analy
         }
 }
 
-// Hidden: the user's own pairs (captures/, gitignored), against the Python on the same files
-// (prototype/analyse_golden.py writes captures/analyse_user_expected.txt and the second set's raw copies).
-TEST_CASE("ANALYSE's search matches the Python on the user's pairs", "[.useranalyse]")
-{
-    const auto cases = readCases("captures/analyse_user_expected.txt");
-    REQUIRE(! cases.empty());
-    for (const auto& c : cases)
-    {
-        const auto x = loadF32(c.x + ".f32"), y = loadF32(c.y + ".f32");
-        REQUIRE(! x.empty());
-        checkCase(c, x, y);
-    }
-}
-
-// Hidden, Release: what each part of the search costs on the user's longest pair (the progress bar's weights).
+// Hidden, Release: what each part of the search costs on a synthetic 10 s pair (the progress bar's weights).
 TEST_CASE("ANALYSE's search: the cost of its parts", "[.analysecost]")
 {
-    const auto x = loadF32("captures/kick_a.f32"), y = loadF32("captures/kick_b.f32");
-    REQUIRE(! x.empty());
-    const auto n = (int)std::min(x.size(), y.size());
+    const int n = 480000;
+    std::vector<float> x(n), y(n);
+    uint32_t seed = 12345;
+    for (auto& v : x)
+    {
+        seed = seed * 1664525u + 1013904223u;
+        v = (float)(seed >> 8) / 8388608.0f - 1.0f;
+    }
+    for (int i = 0; i < n; ++i)
+        y[(size_t)i] = i >= 37 ? 0.8f * x[(size_t)(i - 37)] : 0.0f;
     const auto time = [](auto&& f)
     {
         const auto start = std::chrono::steady_clock::now();
@@ -453,45 +431,4 @@ TEST_CASE("ANALYSE's search: the cost of its parts", "[.analysecost]")
     std::printf("%.1f s of audio: spectra %.3f s, attack %.3f s, search %.3f s (phase off %.3f s), whole %.3f s\n",
                 n / 48000.0, spectra, attack, full, noPhase,
                 time([&] { suggestWithShift(x.data(), y.data(), n, 48000.0, {}); }));
-}
-
-// Hidden, Release: how the progress fraction follows the clock on the user's pairs (the bar should move steadily).
-TEST_CASE("ANALYSE's search: progress against time", "[.analysecost]")
-{
-    for (const auto* name : {"captures/kick", "captures/bass", "captures/stems/kick_oh", "captures/stems/snare_sample"})
-    {
-        const auto x = loadF32(std::string(name) + "_a.f32"), y = loadF32(std::string(name) + "_b.f32");
-        if (x.empty())
-            continue;
-        const auto n = (int)std::min(x.size(), y.size());
-        std::atomic<float> fraction{0.0f};
-        std::vector<std::pair<double, float>> samples;
-        const auto start = std::chrono::steady_clock::now();
-        std::thread worker([&] { suggestWithShift(x.data(), y.data(), n, 48000.0, {}, nullptr, &fraction); });
-        std::atomic<bool> running{true};
-        std::thread watcher(
-            [&]
-            {
-                while (running)
-                {
-                    samples.push_back({std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count(),
-                                       fraction.load()});
-                    std::this_thread::sleep_for(std::chrono::milliseconds(2));
-                }
-            });
-        worker.join();
-        running = false;
-        watcher.join();
-        const auto total = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
-        std::printf("%-28s %.2f s:", name, total);
-        for (const auto q : {0.25, 0.5, 0.75, 0.95})
-        {
-            float f = 0.0f;
-            for (const auto& [t, v] : samples)
-                if (t <= q * total)
-                    f = v;
-            std::printf("  at %2.0f%% of the time %3.0f%%", q * 100.0, f * 100.0);
-        }
-        std::printf("\n");
-    }
 }

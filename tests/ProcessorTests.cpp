@@ -37,7 +37,7 @@ int delayLatency(double fs)
     return pa::dsp::Chain::delayLatencyFor(fs, maxDelayTenths(fs));
 }
 
-// Hi/Lo's latency (its oversampling, plan 2.3), there whenever Constant isn't selected, phase on or off.
+// Hi/Lo's latency (its oversampling), there whenever Constant isn't selected, phase on or off.
 int hiLoLatency(double fs)
 {
     return pa::dsp::HiLoStage::latencyFor(fs);
@@ -280,7 +280,7 @@ TEST_CASE("any host block size works, including larger than prepared and variabl
 }
 
 //==============================================================================
-TEST_CASE("M4: a delayed copy as the sidechain reads +1 once the delay knob aligns it, in all three modes",
+TEST_CASE("a delayed copy as the sidechain reads +1 once the delay knob aligns it, in all three modes",
           "[processor][meter]")
 {
     const auto fs = 48000.0;
@@ -346,7 +346,7 @@ TEST_CASE("M4: a delayed copy as the sidechain reads +1 once the delay knob alig
         CHECK(analyser.overallProcessed() == Approx(analyser.overallUnprocessed()).margin(0.02));
 
         setParam(proc, id::delayMs, (float)(1000.0 * d / fs)); // the delay knob, set to the peak's reading
-        run(8.0); // the slow average (R23) has to forget the 2 s that weren't aligned
+        run(8.0); // the slow average has to forget the 2 s that weren't aligned
         CHECK(analyser.overallProcessed() > 0.999f);
         for (const auto r : analyser.bandsProcessed())
             if (! std::isnan(r))

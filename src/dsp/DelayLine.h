@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <vector>
 
-// Multichannel circular buffer with a power-of-two size, so wrapping is a mask (IMPLEMENTATION_PLAN 2.1).
+// Multichannel circular buffer with a power-of-two size, so wrapping is a mask.
 // Used by the delay stage, the meter's alignment, and later by Constant mode's dry path. Every sample is stored twice,
 // a buffer length apart, so any run of up to size + 1 consecutive samples can be read as one contiguous span (the
 // delay's interpolation kernels).

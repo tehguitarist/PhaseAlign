@@ -6,7 +6,7 @@
 #include <cmath>
 #include <complex>
 
-// The phase stage's frequency response at a static setting, in closed form (IMPLEMENTATION_PLAN R20, step 2): what
+// The phase stage's frequency response at a static setting, in closed form: what
 // the meter applies to its held cross-spectrum so the phase knob previews on a frozen picture. Unit magnitude;
 // the phase is a lag (negative), as the panel angle is.
 //

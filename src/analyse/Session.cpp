@@ -265,7 +265,7 @@ void Session::keepChunk()
     };
     if (rms(chunkInput) < floor || rms(chunkSidechain) < floor)
         return;
-    // A sidechain that is the track itself (Logic with no sidechain chosen, plan R24) is no reference. The processor
+    // A sidechain that is the track itself (Logic with no sidechain chosen) is no reference. The processor
     // takes a quarter of a second to decide that; here it is exact at once.
     if (std::equal(chunkInput.begin(), chunkInput.end(), chunkSidechain.begin()))
         return;

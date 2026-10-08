@@ -3,9 +3,9 @@
 #include <cmath>
 #include <vector>
 
-// Constant mode's FIR Hilbert transformer (IMPLEMENTATION_PLAN 2.4; P2, prototype/p2_constant.py). Odd length N, type
+// Constant mode's FIR Hilbert transformer (reference/p2_constant.py). Odd length N, type
 // III, Kaiser-windowed (beta 6) ideal Hilbert centred at tap D = (N - 1) / 2: h[D + m] = 2 / (pi m) for odd m, 0 for
-// even m, so its phase is exactly 90 degrees at every frequency. 4097 taps at 48 kHz (user, 2026-10-06), scaled with
+// even m, so its phase is exactly 90 degrees at every frequency. 4097 taps at 48 kHz, scaled with
 // the rate to keep the same duration (and so the same low end), rounded to N = 1 (mod 4): D is then even, so the first
 // and last taps are zero as well.
 namespace pa::dsp

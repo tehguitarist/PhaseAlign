@@ -10,7 +10,7 @@
 #include <functional>
 #include <vector>
 
-// A captured hit (R22): a short stretch of this track's input and of the sidechain around one sidechain onset, held so
+// A captured hit: a short stretch of this track's input and of the sidechain around one sidechain onset, held so
 // the ALIGNMENT view can sit still while the knobs are turned, and the output the knobs would give for that hit,
 // rendered from it. The rendering is exact for the stage's linear filters: the input's spectrum times the response of
 // the delay, the polarity flip and the phase stage (dsp::phaseStageResponse), back to the time domain. The streams are

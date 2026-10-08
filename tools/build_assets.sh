@@ -1,16 +1,16 @@
 #!/bin/bash
-# Builds the embedded UI assets from the masters in ui/ (IMPLEMENTATION_PLAN 4.2) and regenerates
+# Builds the embedded UI assets from the masters in ui/ and regenerates
 # src/ui/Layout.h from ui/ui-info.csv. Re-run after changing any artwork or the CSV, then rebuild.
 #
 # Each image is resampled to 2.5x of its slot at the default 782x490 size, which is exactly its slot in the
-# 1954x1224 design space, keeping its aspect ratio, then compressed with pngquant. Masters are never enlarged. "full example.png" is not embedded.
+# 1954x1224 design space, keeping its aspect ratio, then compressed with pngquant. Masters are never enlarged.
 # Output goes to assets/images/, which CMake embeds as BinaryData. Fonts live in assets/fonts/ and
 # are not processed. Requires magick (ImageMagick), pngquant and the project venv.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 PY=.venv/bin/python
-[ -x "$PY" ] || { echo "missing .venv (see CLAUDE.md)" >&2; exit 1; }
+[ -x "$PY" ] || { echo "missing .venv: python3 -m venv .venv && .venv/bin/pip install -r reference/requirements.txt" >&2; exit 1; }
 command -v magick >/dev/null || { echo "magick not found" >&2; exit 1; }
 command -v pngquant >/dev/null || { echo "pngquant not found" >&2; exit 1; }
 

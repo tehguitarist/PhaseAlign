@@ -73,7 +73,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout(std::function<d
             .withStringFromValueFunction([](float v, int) { return fixed(v, 3) + " ms"; })
             .withValueFromStringFunction([](const String& s) { return (float)leadingNumber(s).value_or(0.0); })));
 
-    // Not automatable, off by default (plan 2.1a): switching the delay on or off changes the reported latency.
+    // Not automatable, off by default: switching the delay on or off changes the reported latency.
     layout.add(std::make_unique<AudioParameterBool>(pid(id::delayOn), "Delay On", false,
                                                     AudioParameterBoolAttributes().withAutomatable(false)));
 
@@ -104,7 +104,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout(std::function<d
                     return t.startsWith("in") || t.startsWith("180") || t == "on" || t == "1";
                 })));
 
-    // Not automatable (R5): leaving or entering Constant changes the reported latency.
+    // Not automatable: leaving or entering Constant changes the reported latency.
     layout.add(std::make_unique<AudioParameterChoice>(pid(id::phaseMode), "Phase Mode", phaseModeNames(), 0,
                                                       AudioParameterChoiceAttributes().withAutomatable(false)));
 

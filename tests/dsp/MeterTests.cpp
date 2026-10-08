@@ -132,8 +132,8 @@ TEST_CASE("signals below the gate are not measured; sidechain silence is timed",
 
 TEST_CASE("averaging settles within about two seconds on slow", "[meter]")
 {
-    // tau = max(0.75 s, 12 cycles) takes r from +1 to below -0.8 in about 1.7 s after a polarity step (R23: it was
-    // 0.75 s with P4's 0.3 s; slower and steadier at the user's request).
+    // tau = max(0.75 s, 12 cycles) takes r from +1 to below -0.8 in about 1.7 s after a polarity step (a slower,
+    // steadier average than the 0.3 s it replaced).
     const auto fs = 48000.0;
     const auto source = noise((int)(9.0 * fs), 5);
     auto flipped = source;
@@ -642,7 +642,7 @@ TEST_CASE("hit capture: renders the input through delay, polarity and phase exac
     CHECK(outEnergy == Approx(inEnergy).epsilon(0.12)); // not the DC, which a 90 degree turn removes
 }
 
-// Hidden, Release: what the analyser costs per second of audio for each view's needs (plan R21). The averages the overall
+// Hidden, Release: what the analyser costs per second of audio for each view's needs. The averages the overall
 // bar needs always run; the rest is per view.
 TEST_CASE("analyser cost by view", "[.analysercost]")
 {
@@ -673,106 +673,6 @@ TEST_CASE("analyser cost by view", "[.analysercost]")
         }
     }
 }
-
-// Hidden: ALIGNMENT's capture on the user's own acoustic pairs (captures/). Every hit the detector reports is captured and
-// rendered through the pair's known offset (the delay that lines the input up with the sidechain); where the rendered
-// output starts is then compared with where the sidechain starts (first time its 0.5 ms envelope reaches 15% of its peak
-// over the first 15 ms, where a hit's click or pluck dominates the body).
-TEST_CASE("the user's pairs: captured hits line up once the delay is applied", "[.usercapture]")
-{
-    const auto load = [](const std::string& path)
-    {
-        std::vector<float> v;
-        if (auto* f = std::fopen(path.c_str(), "rb"))
-        {
-            std::fseek(f, 0, SEEK_END);
-            v.resize((size_t)std::ftell(f) / sizeof(float));
-            std::rewind(f);
-            REQUIRE(std::fread(v.data(), sizeof(float), v.size(), f) == v.size());
-            std::fclose(f);
-        }
-        return v;
-    };
-    struct Case
-    {
-        const char* name;
-        double delayMs; // the offset that aligns them
-        double toleranceMs;
-        int minHits, maxHits; // what the detector should find: the pair's real hits, give or take the odd extra
-    };
-    const auto fs = 48000.0;
-    // Real counts (from the waveforms): kick 61, snare 31, guitar 18, hats 32; the bass is strummed, so has many.
-    for (const auto& c : {Case{"kick", 1.23, 0.4, 52, 80}, Case{"snare", 1.0, 0.4, 28, 40}, Case{"bass", 0.0, 0.5, 60, 400},
-                          Case{"guitar", 0.0, 0.4, 12, 26}, Case{"hats", 0.0, 0.4, 28, 36}})
-    {
-        const auto a = load(std::string("captures/") + c.name + "_a.f32"), b = load(std::string("captures/") + c.name + "_b.f32");
-        REQUIRE_FALSE(a.empty());
-        const auto n = std::min(a.size(), b.size());
-        pa::meter::ScopeBuffer buffer;
-        buffer.prepare(fs);
-        buffer.startScanning();
-        pa::meter::HitCapture capture;
-
-        // First time the 0.5 ms envelope of a stream reaches 15% of its peak in [onset - 10 ms, onset + 15 ms].
-        const auto startOf = [&](int stream, long long onset)
-        {
-            const auto from = onset - (long long)(0.010 * fs), to = onset + (long long)(0.015 * fs);
-            const auto w = std::max(1, (int)std::lround(0.0005 * fs));
-            std::vector<float> env((size_t)(to - from));
-            double sum = 0.0;
-            for (long long i = from - w; i < from; ++i)
-                sum += std::abs(capture.at(stream, i));
-            float peak = 0.0f;
-            for (long long i = from; i < to; ++i)
-            {
-                sum += std::abs(capture.at(stream, i)) - std::abs(capture.at(stream, i - w));
-                env[(size_t)(i - from)] = (float)(sum / w);
-                peak = std::max(peak, env[(size_t)(i - from)]);
-            }
-            for (long long i = from; i < to; ++i)
-                if (env[(size_t)(i - from)] >= 0.15f * peak)
-                    return (i - from) * 1000.0 / fs;
-            return -1.0;
-        };
-
-        std::vector<double> errors;
-        int hits = 0;
-        for (size_t pos = 0; pos + 1600 <= n; pos += 1600)
-        {
-            buffer.push(a.data() + pos, a.data() + pos, b.data() + pos, 1600);
-            buffer.scan();
-            pa::meter::ScopeBuffer::Onset onset;
-            while (buffer.takeCompleted(pa::meter::HitCapture::postSeconds, onset))
-            {
-                ++hits;
-                capture.capture(buffer, onset.index);
-                const auto delaySamples = (int)std::lround(c.delayMs * fs / 1000.0);
-                capture.render({delaySamples * 1000.0 / fs, false, {}});
-                // The rendering is the input shifted later by the delay, exactly (checked where the hit has energy).
-                float peak = 1.0e-6f;
-                for (long long i = onset.index - 100; i < onset.index + 2000; ++i)
-                    peak = std::max(peak, std::abs(capture.at(pa::meter::HitCapture::input, i)));
-                for (long long i = onset.index - 100; i < onset.index + 2000; i += 13)
-                    REQUIRE(std::abs(capture.at(pa::meter::HitCapture::output, i) -
-                                     capture.at(pa::meter::HitCapture::input, i - delaySamples)) <= 0.005f * peak);
-                const auto out = startOf(pa::meter::HitCapture::output, onset.index);
-                const auto sc = startOf(pa::meter::HitCapture::sidechain, onset.index);
-                if (out >= 0.0 && sc >= 0.0)
-                    errors.push_back(out - sc);
-            }
-        }
-        std::sort(errors.begin(), errors.end(), [](double x, double y) { return std::abs(x) < std::abs(y); });
-        const auto median = errors.empty() ? 99.0 : std::abs(errors[errors.size() / 2]);
-        int within = 0;
-        for (const auto e : errors)
-            within += std::abs(e) <= c.toleranceMs;
-        std::printf("%-7s hits captured %3d   rendered output vs sidechain start: median |error| %.2f ms, %d of %d within %.1f ms\n",
-                    c.name, hits, median, within, (int)errors.size(), c.toleranceMs);
-        CHECK(hits >= c.minHits);
-        CHECK(hits <= c.maxHits);
-    }
-}
-
 
 TEST_CASE("hit detector: scanning back over what is in the buffer finds the latest complete hit at its true start", "[meter]")
 {
@@ -841,55 +741,4 @@ TEST_CASE("capture: the side streams are only filled when given, and are aligned
         CHECK(s3[(size_t)i] == 0.0f);
         CHECK(s4[(size_t)i] == 0.0f);
     }
-}
-
-// Hidden, diagnostic: how often each band is not measured (gated) or reads about 0, per speed, on the user's pairs.
-TEST_CASE("bands: how often a band is gated or near zero", "[.bandgate]")
-{
-    const auto load = [](const std::string& path)
-    {
-        std::vector<float> v;
-        if (auto* f = std::fopen(path.c_str(), "rb"))
-        {
-            std::fseek(f, 0, SEEK_END);
-            v.resize((size_t)std::ftell(f) / sizeof(float));
-            std::rewind(f);
-            REQUIRE(std::fread(v.data(), sizeof(float), v.size(), f) == v.size());
-            std::fclose(f);
-        }
-        return v;
-    };
-    const auto fs = 48000.0;
-    for (const char* name : {"kick", "snare", "bass", "guitar", "hats"})
-        for (const auto speed : {CorrelationAnalyser::Speed::slow, CorrelationAnalyser::Speed::fast})
-        {
-            const auto a1 = load(std::string("captures/") + name + "_a.f32"), a2 = load(std::string("captures/") + name + "_b.f32");
-            REQUIRE_FALSE(a1.empty());
-            CorrelationAnalyser a;
-            a.prepare(fs);
-            a.setSpeed(speed);
-            a.setNeeds({true});
-            int ticks = 0, gated[6] = {}, nearZero[6] = {};
-            const auto n = std::min(a1.size(), a2.size());
-            for (size_t pos = 0; pos + 1600 <= n; pos += 1600)
-            {
-                a.process(a1.data() + pos, a1.data() + pos, a2.data() + pos, 1600);
-                if (pos < (size_t)(fs * 4))
-                    continue;
-                ++ticks;
-                for (int b = 0; b < 6; ++b)
-                {
-                    const auto v = a.bandsProcessed()[(size_t)b];
-                    gated[b] += std::isnan(v);
-                    nearZero[b] += ! std::isnan(v) && std::abs(v) < 0.05f;
-                }
-            }
-            std::printf("%-6s %s  gated %%:", name, speed == CorrelationAnalyser::Speed::fast ? "fast" : "slow");
-            for (int b = 0; b < 6; ++b)
-                std::printf(" %3d", 100 * gated[b] / std::max(1, ticks));
-            std::printf("   |r|<0.05 %%:");
-            for (int b = 0; b < 6; ++b)
-                std::printf(" %3d", 100 * nearZero[b] / std::max(1, ticks));
-            std::printf("\n");
-        }
 }

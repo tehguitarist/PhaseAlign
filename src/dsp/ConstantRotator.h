@@ -8,7 +8,7 @@
 #include <cmath>
 #include <functional>
 
-// Constant mode (IMPLEMENTATION_PLAN 2.4): y[n] = cos(theta) x[n - L] + sin(theta) (h * x)[n - (L - D)], a true
+// Constant mode: y[n] = cos(theta) x[n - L] + sin(theta) (h * x)[n - (L - D)], a true
 // constant rotation with h the FIR Hilbert (HilbertFir.h). L is the latency: the Hilbert's centre D less one, because
 // the zero first tap is dropped and the convolver has no latency of its own (L = D - 1). At 0 degrees the output is the
 // delayed input, bit-exact; at 180 its exact negation.
@@ -17,8 +17,8 @@
 // cos/sin are interpolated per sample across each grid cell, so a moving angle doesn't step. The convolver's output
 // is computed only while it is used: not while sin(theta) is settled at 0, nor while the stage is off; its spectra are
 // kept current meanwhile, so it resumes on any sample. While another mode is active it keeps only its input history,
-// and rebuilds from it on entering Constant (a one-off cost, in the silence of the switch) (2.6).
-// Reference: prototype/p2_constant.py (ConstantRotator), golden-tested.
+// and rebuilds from it on entering Constant (a one-off cost, in the silence of the switch).
+// Reference: reference/p2_constant.py (ConstantRotator), golden-tested.
 namespace pa::dsp
 {
 class ConstantRotator
@@ -29,9 +29,9 @@ class ConstantRotator
     static constexpr double smoothMs = 20.0;
 
     // The convolver's blocks: the head applied directly, then each FFT level's block (PartitionedConvolver.h). Measured
-    // fastest (plan 2.6): uniform 128 at 44.1/48 kHz. Where the kernel is twice as long or more, a second level of
+    // fastest: uniform 128 at 44.1/48 kHz. Where the kernel is twice as long or more, a second level of
     // larger blocks for its tail costs less than more 128-sample partitions: 2048 from 88.2 kHz. The same with vDSP and
-    // with PFFFT (measured on the M1; to check against CI's x86 runners).
+    // with PFFFT (measured on an Apple-silicon laptop).
     static std::vector<int> blockSizesFor(double sampleRate)
     {
         return sampleRate >= 80000.0 ? std::vector<int>{128, 2048} : std::vector<int>{128};

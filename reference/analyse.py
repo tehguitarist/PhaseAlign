@@ -1,25 +1,24 @@
-"""ANALYSE groundwork (PLAN 3.5, 8 step 6): the auto-suggest search, prototyped offline.
+"""ANALYSE: the auto-suggest search for a phase alignment setting (the spec of src/analyse/).
 
-    source .venv/bin/activate && python prototype/analyse.py          # synthetic checks, then the user's pairs
-    ... python prototype/analyse.py --synthetic                         # only the known-answer checks
+    .venv/bin/python reference/analyse.py     # the known-answer checks on synthetic pairs, and the render check
 
-Input = the track (what the plugin changes), sidechain = the reference. Positive delay = delay the input. Both are captured, the cross-spectrum of the
-whole capture is taken once (Hann 8192 at 48 kHz, 75% overlap, scaled with the rate), and every candidate setting is
-scored from it in closed form: a candidate turns the input's spectrum by G(f) = s * H(f) * exp(-j 2 pi f d), where s is the
-polarity (+-1), H the phase stage's response at a static setting (the same formulas as src/dsp/PhaseResponse.h) and d the
-delay, and its score is the band-limited Pearson correlation with the sidechain,
+Input = the track (what the plugin changes), sidechain = the reference. Positive delay = delay the input. Both are
+captured, the cross-spectrum of the whole capture is taken once (Hann 8192 at 48 kHz, 75% overlap, scaled with the
+rate), and every candidate setting is scored from it in closed form: a candidate turns the input's spectrum by
+G(f) = s * H(f) * exp(-j 2 pi f d), where s is the polarity (+-1), H the phase stage's response at a static setting
+(the same formulas as src/dsp/PhaseResponse.h) and d the delay, and its score is the band-limited Pearson correlation
+with the sidechain,
 
     r_b = sum_{k in b} Re(G_k Sxy_k) / sqrt(Sxx_b Syy_b),      score = mean of r_b over the active bands.
 
-Equal weight per 1/3-octave band (so low frequencies don't dominate, PLAN 3.5); a band is active when both signals have
-energy within 40 dB of their own loudest band. Delay is searched jointly with the phase setting: for each (shape, angle)
-one inverse FFT per band gives r_b at every lag at once (zero-padded 4x, so a quarter of a sample); polarity is the sign of
+Equal weight per 1/3-octave band (so low frequencies don't dominate); a band is active when both signals have energy
+within 40 dB of their own loudest band. Delay is searched jointly with the phase setting: for each (shape, angle) one
+inverse FFT per band gives r_b at every lag at once (zero-padded 4x, so a quarter of a sample); polarity is the sign of
 the score. Candidates are then ranked and de-duplicated into families; the top few are refined to 0.1 sample.
 
 The search is checked against the plugin's own DSP: the best Hi/Lo candidates are rendered through
-`hilo.HiLoOversampled` and the delay applied exactly (FFT shift), and the rendered score is compared with the predicted one.
-
-Outputs: prototype/out/analyse/report.md
+`hilo.HiLoOversampled` and the delay applied exactly (FFT shift), and the rendered score is compared with the
+predicted one.
 """
 import math
 import sys
@@ -34,10 +33,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import hilo  # noqa: E402
 from oversampling import plan  # noqa: E402
 
-ROOT = Path(__file__).resolve().parent.parent
-OUT = Path(__file__).resolve().parent / "out" / "analyse"
 PAD = 4                 # zero-padding of the lag search (a quarter of a sample)
-MAX_DELAY_MS = 4.0      # the plugin's DELAY knob reach (the user, 2026-10-08: it is for micro adjustments, a bigger offset is moved by hand)
+MAX_DELAY_MS = 4.0      # the plugin's DELAY knob reach: it is for micro adjustments, a bigger offset is moved by hand
 BAND_LO, BAND_HI = 40.0, 16000.0
 ACTIVE_DB = -40.0
 STEP = 2.5              # panel degrees between angle candidates
@@ -118,7 +115,7 @@ def stage_response(mode, wide, theta, fs, freqs):
 
 def settings(phase_on=True):
     """Every (mode, wide, theta) the search covers: Hi/Lo in both ranges over their travel, and Constant 0 to 180. With the PHASE
-    stage off (user, 2026-10-08) only "none": the search leaves the phase alone."""
+    stage off only "none": the search leaves the phase alone."""
     out = [("none", False, 0.0)]
     if not phase_on:
         return out
@@ -172,8 +169,8 @@ def same_family(f, c, sp):
     the other's, band by band as the score counts it (every bin of each active band, weighted by this track's own
     spectrum Sxx, so within-band turns count and empty bins don't), its band mean at least cos(FAMILY_DEGREES). Either for
     the polarity and phase stage alone with delays within FAMILY_DELAY_MS, or for the whole response, delay included (a
-    Hi/Lo turn at a small angle is close to a short delay). 2026-10-08: first the same mode within 20 degrees (CONSTANT 180
-    showed beside the polarity flip it equals), then the phase difference at each band's centre alone."""
+    Hi/Lo turn at a small angle is close to a short delay). Comparing the responses over every active bin, rather than a
+    mode and angle, keeps equivalent settings together (CONSTANT 180 equals the polarity flip)."""
     limit = math.cos(math.radians(FAMILY_DEGREES))
     k = active_bins(sp)
     gf, gc = family_response(f, sp.fs, sp.freqs[k]), family_response(c, sp.fs, sp.freqs[k])
@@ -248,12 +245,11 @@ def search(sp, top=6, verbose=False, window_ms=None, phase_on=True, reach_ms=Non
     return families, baseline
 
 
-# --- the attack lag (plan R18, offline) ----------------------------------------------------------------------------------------
+# --- the attack lag ----------------------------------------------------------------------------------------
 ATTACK_BANDS = [(35.0, 150.0, 12.0), (150.0, 600.0, 5.0), (600.0, None, 1.5)]   # low Hz, high Hz, smoothing ms
 ATTACK_RUNNER_UP = 0.65     # a peak is clear when the strongest rival outside its lobe is below this fraction of it
-ATTACK_MIN_PEAK = 0.15      # ... and at least this high (2026-10-08: the user's genuine pairs peak at 0.17 to 0.88; unrelated
-                            # instruments read "clear" at 0.01 to 0.12, bass against kick, hats against snare, and gave a
-                            # delay-only option and a manual-shift message)
+ATTACK_MIN_PEAK = 0.15      # ... and at least this high: related pairs peak well above it, while unrelated material can read
+                            # "clear" at a peak of 0.01 to 0.12, which would give a spurious delay-only option
 SEARCH_MS = 40.0
 
 
@@ -346,12 +342,10 @@ def synthetic(fs, delay_ms, angle, seed):
     return x, y
 
 
-def synthetic_checks(report):
+def synthetic_checks():
+    """The input is the sidechain turned by a constant rotation and a delay; the search must find the inverse (Constant
+    at that angle, delay of that size). Returns True when every case is found."""
     fs = 48000
-    report.append("## Synthetic pairs (known answer)\n")
-    report.append("The input is the sidechain turned by a constant rotation and a delay; the search must find the inverse "
-                  "(Constant at that angle, delay of that size).\n")
-    report.append("| built as | best | score | baseline r | 2nd family |\n|---|---|---|---|---|")
     ok = True
     for delay, angle in [(0.0, 0.0), (1.7, 0.0), (-2.3, 0.0), (0.0, 60.0), (1.0, 90.0), (0.0, 180.0), (-1.25, 120.0)]:
         x, y = synthetic(fs, delay, angle, 7)
@@ -359,6 +353,8 @@ def synthetic_checks(report):
         sp = spectra(x, y, fs)
         fam, base = search(sp, top=2)
         best = fam[0]
+        if best.mode == "constant" and best.theta == 180.0 and best.flip:   # a half turn and the flip cancel
+            best = Candidate("none", False, 0.0, best.delay_ms, False, best.score)
         want_delay = -delay
         want_theta = angle % 360.0
         ok_here = abs(best.delay_ms - want_delay) < 0.05 and (
@@ -367,18 +363,11 @@ def synthetic_checks(report):
         if angle == 180.0 and best.flip and best.mode == "none":
             ok_here = abs(best.delay_ms - want_delay) < 0.05
         ok &= ok_here
-        second = fam[1].label() + f" ({fam[1].score:.3f})" if len(fam) > 1 else "-"
-        report.append(f"| delay {delay:+.2f} ms, rotation {angle:.0f}° | {best.label()} {'✓' if ok_here else '✗'} | {best.score:.3f} | "
-                      f"{base:+.3f} | {second} |")
-        print(f"synthetic {delay:+.2f} ms {angle:5.1f}°  →  {best.label():45s} {best.score:.3f}  {'ok' if ok_here else 'MISS'}")
-    report.append("")
+        print(f"synthetic {delay:+.2f} ms {angle:5.1f} deg  ->  {best.label():45s} {best.score:.3f}  {'ok' if ok_here else 'MISS'}")
     return ok
 
 
-# --- the user's pairs -----------------------------------------------------------------------------------------------------------
-PAIRS = ["kick", "snare", "bass", "guitar", "hats"]
-
-
+# --- the analysis --------------------------------------------------------------------------------------------------------------
 def analyse(x, y, fs, top=5, delay_on=True, phase_on=True):
     """The delay-first search: the attack lag fixes the delay (when it is clear and inside the knob's reach), then phase and
     polarity are chosen at that delay (refined by up to +-0.3 ms, the score's own say). Falls back to the joint search.
@@ -396,7 +385,7 @@ def analyse(x, y, fs, top=5, delay_on=True, phase_on=True):
     return fam, base, lag, "score" if not clear else "score (attack out of range)"
 
 
-LF_HZ = 300.0        # the low-end guard: a candidate must not lower the correlation below this from where it started
+LF_HZ = 300.0        # the low-end guard: a candidate that lowers the correlation below this from where it started is flagged
 
 
 def candidate_response(c, fs, freqs):
@@ -406,8 +395,8 @@ def candidate_response(c, fs, freqs):
 
 
 def low_end_change(sp, c):
-    """r of the bands below LF_HZ with the candidate, minus without it. Negative means the low end got worse, which the user
-    heard on the bass pair (2026-10-08) although the whole-band score had gone up."""
+    """r of the bands below LF_HZ with the candidate, minus without it. Negative means the low end got worse, although the
+    whole-band score may have gone up."""
     import copy
     lf = copy.copy(sp)
     keep = [(e, f) for e, f in zip(sp.edges, sp.centres) if f < LF_HZ]
@@ -415,24 +404,23 @@ def low_end_change(sp, c):
     return score_at(lf, candidate_response(c, sp.fs, sp.freqs)) - score_at(lf, np.ones(len(sp.freqs)))
 
 
-SHIFT_REACH_MS = 40.0  # how far beyond the knob the waveform score looks for a better delay (to tell the user to shift by hand)
+SHIFT_REACH_MS = 40.0  # how far beyond the knob the waveform score looks for a better delay (to advise a shift by hand)
 SHIFT_GAIN = 0.04      # a manual shift is advised only when the best score beyond the knob's reach beats the best inside it by this
 SHIFT_FRACTION = 0.75  # ... and the advice is the smallest shift that gets this fraction of that gain
 SHIFT_GAIN_EDGE = 0.02 # ... but only this when the best delay inside the reach sits at its limit (within EDGE_MARGIN_MS of it): the track
-EDGE_MARGIN_MS = 0.15  #     is pinned at the knob's end and wants more (overheads are often 4 to 7 ms from the kick and snare: 2.5 m is
-                       #     7 ms, the user, 2026-10-08; one overhead pair read +0.038 against the kick, a hair under SHIFT_GAIN)
+EDGE_MARGIN_MS = 0.15  #     is pinned at the knob's end and wants more (overhead microphones are often 4 to 7 ms from the sources:
+                       #     2.5 m is 7 ms)
 ATTACK_STRONG = 0.35   # the attack reading's peak above which its delay is trusted over the waveform score's (see suggest)
 
 
 def suggest(x, y, fs, delay_on=True, phase_on=True):
-    """What ANALYSE would show: up to two options to choose from (user, 2026-10-08: the best of several close ones is a matter of
-    the sound wanted). Both come from one search, chosen by how strong the attack reading is: a strong, in-reach one fixes the
-    delay (the delay-first search); a weak one is not trusted and the joint (waveform score) search is used. On the user's six
-    pairs that was the ear's pick every time, and the other variant was the one they rated worst twice (kick sample: joint,
-    guitar: delay-first); four pairs with a clear difference, so a first guess for the threshold. Each option must also pass the
-    low-end flag (an option that lowers the correlation below 300 Hz is kept but marked: the bass and the kick OH, where the user heard less low end). Only the stages that are on are searched (user, 2026-10-08): DELAY off keeps the delay at 0, PHASE off keeps
-    the phase off; polarity is always searched (the Ø button is its own control). So the same search answers "find the best
-    delay", "the best phase", "the best polarity" or any mix.
+    """What ANALYSE would show: up to two options to choose from (the best of several close ones is a matter of the sound
+    wanted). Both come from one search, chosen by how strong the attack reading is (ATTACK_STRONG): a strong, in-reach one
+    fixes the delay (the delay-first search); a weak one is not trusted and the joint (waveform score) search is used. Each
+    option carries the low-end flag (an option that lowers the correlation below 300 Hz is kept but marked). Only the
+    stages that are on are searched: DELAY off keeps the delay at 0, PHASE off keeps the phase off; polarity is always
+    searched (the polarity button is its own control). So the same search answers "find the best delay", "the best phase",
+    "the best polarity" or any mix.
     Returns (options, baseline r, attack reading, verdict); options: (name, Candidate, gain, low-end change)."""
     sp = spectra(x, y, fs)
     fam, base, lag, how = analyse(x, y, fs, top=6, delay_on=delay_on, phase_on=phase_on)
@@ -441,12 +429,12 @@ def suggest(x, y, fs, delay_on=True, phase_on=True):
     options = []
     for c in lst:
         lf = low_end_change(sp, c)
-        if c.score - base >= MIN_GAIN:      # a lower low end (lf < 0) is flagged for the user, not hidden (kick OH, 2026-10-08)
+        if c.score - base >= MIN_GAIN:      # a lower low end (lf < 0) is flagged, not hidden
             options.append((name, c, c.score - base, lf))
         if len(options) == 2:
             break
     if len(options) == 2 and options[0][1].score - options[1][1].score >= MIN_MARGIN:
-        options = options[:1]     # a clear winner (user, 2026-10-08): one option; two only when they are close
+        options = options[:1]     # a clear winner: one option; two only when they are close
     if options:
         verdict = "suggest" if len(options) == 1 else "close: two options"
         return options, base, lag, verdict + (" (less low end)" if any(o[3] < 0 for o in options) else "")
@@ -484,15 +472,14 @@ def shift_gain_beyond(sp, phase_on=True):
 
 
 def shift_advice(sp, phase_on=True, attack=None):
-    """The manual shift (samples, positive delays the track; 0 for none) the user's policy asks for (2026-10-08: the DELAY knob is
-    for micro adjustments, and a room mic's pre-delay is part of its size, so a big shift is advised only for a significant
-    improvement, and then the smallest one that gets most of it). One pass over every setting and both polarities gives the best
+    """The manual shift (samples, positive delays the track; 0 for none) advised: the DELAY knob is for micro adjustments,
+    and a room mic's pre-delay is part of its size, so a big shift is advised only for a significant improvement, and
+    then the smallest one that gets most of it. One pass over every setting and both polarities gives the best
     score at every lag out to SHIFT_REACH_MS. The best inside the knob's reach is what ANALYSE can already do; the best beyond it
     must beat that by SHIFT_GAIN, and the advice is the lag nearest zero beyond the reach whose score is at least SHIFT_FRACTION
     of the way from the one to the other. A clear attack reading beyond the reach (`attack` = (ms, clear)) is a second witness that has
     to agree: the advice is then that lag if the score there beats the best inside the reach by SHIFT_GAIN, and none otherwise
-    (2026-10-08: the user's snare sample reads a clear attack at -5.9 ms, one period of its body, and the score peaks at -17 to
-    -20 ms, more periods; the user hears no flam, so it is within 100 samples: both witnesses were cycle slips and disagreed)."""
+    (the two witnesses can each land on a different cycle of a tonal source, and then disagree)."""
     curve, lags = shift_curve(sp, phase_on)
     inside = np.abs(lags) <= MAX_DELAY_MS * 1e-3 * sp.fs
     in_idx = np.nonzero(inside)[0]
@@ -512,14 +499,14 @@ def shift_advice(sp, phase_on=True, attack=None):
 
 
 def suggest_with_shift(x, y, fs, delay_on=True, phase_on=True):
-    """suggest(), plus the case the DELAY knob can't cover (user, 2026-10-08: it is for micro adjustments; a big offset is moved
-    by hand, in samples, as DAWs work in them). The message asks for a manual shift only (and never when a clear attack reading is
-    inside the reach) when shift_advice finds a significant
-    improvement beyond the knob's reach (user, 2026-10-08: not whenever the transients sit far apart: a room mic's pre-delay is
-    part of its size), and the options are then those for the signal once it has been shifted (so within the knob's reach). With
-    DELAY off nothing is shifted; a clear attack offset is only mentioned. Returns (options, baseline r, attack reading,
-    verdict, shift in samples or 0, message or ""). The match flags (match_flags) are worked out once, for the options returned
-    (2026-10-08: so the chance test isn't run for options a shift replaces)."""
+    """suggest(), plus the case the DELAY knob can't cover (it is for micro adjustments; a big offset is moved by hand, in
+    samples, as DAWs work in them). The message asks for a manual shift only (and never when a clear attack reading is
+    inside the reach) when shift_advice finds a significant improvement beyond the knob's reach (not whenever the
+    transients sit far apart: a room mic's pre-delay is part of its size), and the options are then those for the signal
+    once it has been shifted (so within the knob's reach). With DELAY off nothing is shifted; a clear attack offset is
+    only mentioned. Returns (options, baseline r, attack reading, verdict, shift in samples or 0, message or ""). The
+    match flags (match_flags) are worked out once, for the options returned, so the chance test isn't run for options a
+    shift replaces."""
     def flagged(xx, opts, verdict):
         if opts and not verdict.startswith("delay only"):
             return verdict + match_flags(xx, y, fs, opts, delay_on, phase_on)
@@ -531,8 +518,8 @@ def suggest_with_shift(x, y, fs, delay_on=True, phase_on=True):
         if lag[1] and abs(lag[0]) >= MIN_DELAY_MS:
             note = f"DELAY is off: the transients are {int(round(lag[0] * 1e-3 * fs)):+d} samples apart"
         return opts, base, lag, flagged(x, opts, verdict), 0, note
-    # a clear attack reading inside the knob's reach means the transients already line up: no manual shift (2026-10-08: the bass
-    # amp against its DI was told to move 5 ms, another cycle of the note, with the attacks 1.3 ms apart)
+    # a clear attack reading inside the knob's reach means the transients already line up: no manual shift (the score alone
+    # can land on another cycle of a tonal source)
     shift = 0 if lag[1] and abs(lag[0]) <= MAX_DELAY_MS else shift_advice(spectra(x, y, fs), phase_on, (lag[0], lag[1]))
     if shift == 0:
         return opts, base, lag, flagged(x, opts, verdict), 0, ""
@@ -543,8 +530,8 @@ def suggest_with_shift(x, y, fs, delay_on=True, phase_on=True):
 
 
 def as_is_options(x, y, fs, delay_on=True, phase_on=True):
-    """The options for the track where it is, for when suggest_with_shift advises a manual shift (user, 2026-10-08: if it is too far out
-    to shift, still make a best phase effort, e.g. a room mic kept at its own distance). The ordinary options (suggest) when there are
+    """The options for the track where it is, for when suggest_with_shift advises a manual shift (if it is too far out to
+    shift, still make a best phase effort, e.g. a room mic kept at its own distance). The ordinary options (suggest) when there are
     any; else the single best candidate inside the knob's reach if it gains at least SMALL_GAIN, as a "small improvement" (shown, not
     hidden). Returns [(name, Candidate, gain, low-end change, small)]."""
     opts, base, _, _ = suggest(x, y, fs, delay_on, phase_on)
@@ -561,20 +548,18 @@ MIN_GAIN = 0.03      # r gained over doing nothing below which ANALYSE says ther
 SMALL_GAIN = 0.01    # ... and the least gain that as_is_options still shows, marked as small
 CHANCE_SHIFTS = (0.37, 0.61)  # the chance test turns the sidechain round by these fractions of the capture
 CHANCE_MARGIN = 0.02          # an option's gain must beat the chance test's by this, or it is flagged "chance level"
-CHANCE_SKIP_R = 0.30          # ... unless its r is at least this: tracks that already agree this well are not unrelated (2026-10-08:
-                              # bass amp against its DI and an acoustic guitar pair, r 0.44, were flagged; the unrelated pairs reach 0.1)
+CHANCE_SKIP_R = 0.30          # ... unless its r is at least this: tracks that already agree this well are not unrelated
 WEAK_MATCH = 0.12             # an option whose r stays under this is flagged "weak match"
-# From the user's pairs (2026-10-08): genuine ones beat the chance test by +0.037 (set 1 kick) to +0.53, GTR 1 against
-# Bass DI (both ways, unrelated) by +0.016 and +0.007; guitar against bass playing one part beat it by +0.09 and +0.14 (a
-# real but weak link: r 0.075 and 0.082 after the best option, where every genuine pair reached 0.13 or more). The set 1
-# hats show why the smaller of the two shifts: one landed on a repeat of the pattern (+0.066 against +0.002).
+# The margins are chosen so that unrelated material stays below the chance gain, and genuinely related pairs beat it.
+# The smaller of the two chance shifts is used because one shift can land on a repeat of the music (a rhythmic pattern),
+# which makes the shifted copy genuinely related.
 
 
 def chance_gain(x, y, fs, delay_on=True, phase_on=True):
     """What the search gains by chance on this material: the same search with the sidechain circularly shifted (which
     keeps both signals' spectra and breaks their relationship), at CHANCE_SHIFTS of the capture, the smaller of the two
-    (a shift that lands on a repeat of the music would make the copy genuinely related). User, 2026-10-08: unrelated
-    material should be flagged, not hidden (guitar and bass playing one part may still want lining up)."""
+    (a shift that lands on a repeat of the music would make the copy genuinely related). Unrelated material is flagged,
+    not hidden (two instruments playing one part may still want lining up)."""
     gains = []
     for frac in CHANCE_SHIFTS:
         sp = spectra(x, np.roll(y, int(frac * len(y))), fs)
@@ -592,83 +577,28 @@ def match_flags(x, y, fs, options, delay_on, phase_on):
     if options[0][1].score < WEAK_MATCH:
         flags += " (weak match)"
     return flags
+
+
 MIN_DELAY_MS = 0.3   # a clear attack offset at least this large is worth a delay on its own
 MIN_MARGIN = 0.01    # r lead over the next family below which two options are shown
 
 
-def verdict(fam, base, lag=None):
-    """(label, gain, margin): what ANALYSE would tell the user about the leading candidate."""
-    gain = fam[0].score - base
-    margin = fam[0].score - fam[1].score if len(fam) > 1 else gain
-    if gain < MIN_GAIN and lag is not None and lag[1] and MIN_DELAY_MS <= abs(lag[0]) <= MAX_DELAY_MS:
-        # the waveforms barely correlate, but the attacks clearly sit apart: the delay alone is worth suggesting
-        return f"delay only, {lag[0]:+.2f} ms (phase and polarity add nothing the score can see)", gain, margin
-    if gain < MIN_GAIN:
-        return "no change worth making", gain, margin
-    return ("suggest" if margin >= MIN_MARGIN else "tentative: several settings score alike"), gain, margin
-
-
-def write_renders(tag, a, b, fam, fs):
-    """For listening: the sidechain, the input as it is, and the input through each leading candidate, each also summed with the
-    sidechain (what two mics sound like together). One common gain, so levels compare."""
-    import soundfile as sf
-    d = OUT / "renders" / tag
-    d.mkdir(parents=True, exist_ok=True)
-    clips = {"sidechain": b, "input_off": a, "sum_off": a + b}
-    for i, c in enumerate(fam[:3]):
-        y = render(a, fs, c)
-        clips[f"input_cand{i + 1}"] = y
-        clips[f"sum_cand{i + 1}"] = y + b
-    gain = 0.9 / max(np.abs(v).max() for v in clips.values())
-    for name, v in clips.items():
-        sf.write(d / f"{name}.wav", (v * gain).astype(np.float32), int(fs), subtype="FLOAT")
-    (d / "candidates.txt").write_text("\n".join(f"cand{i + 1}: {c.label()} (r {c.score:+.3f})" for i, c in enumerate(fam[:3])) + "\n")
-
-
-def user_pairs(report):
-    fs = 48000
-    report.append("## The user's stem pairs\n")
-    report.append("Input = the `_a` take, sidechain = the `_b` take (as the meter tests read them; `prototype/export_pairs.py`). "
-                  "Positive delay = delay the input. `joint` is the first version (score alone, whole ±4 ms); `attack-first` takes "
-                  "the delay from the attack lag and chooses phase and polarity within 0.3 ms of it. `rendered` is the candidate "
-                  "run through the plugin's Hi/Lo and an exact delay. The verdict is what ANALYSE would say: nothing worth changing "
-                  f"below a gain of {MIN_GAIN}, tentative below a lead of {MIN_MARGIN}. Listening files: `renders/<pair>/`.\n")
-    for tag in PAIRS:
-        try:
-            a = np.fromfile(ROOT / "captures" / f"{tag}_a.f32", np.float32).astype(np.float64)
-            b = np.fromfile(ROOT / "captures" / f"{tag}_b.f32", np.float32).astype(np.float64)
-        except FileNotFoundError:
-            print(f"{tag}: captures/{tag}_*.f32 missing (run prototype/export_pairs.py)")
-            continue
-        sp = spectra(a, b, fs)
-        joint, base = search(sp, top=3)
-        fam, _, lag, how = analyse(a, b, fs)
-        print(f"\n{tag}: baseline r {base:+.3f}; attack lag {lag[0]:+.2f} ms ({'clear' if lag[1] else 'unclear'}, "
-              f"peak {lag[2]:.2f}, rival {lag[3]:.2f}); delay from {how}")
-        report.append(f"### {tag}\n\nBaseline r = {base:+.3f}. Attack lag {lag[0]:+.2f} ms "
-                      f"({'clear' if lag[1] else 'unclear'}; peak {lag[2]:.2f}, strongest rival {lag[3]:.2f} of it). Delay taken from: {how}.\n")
-        label, gain, margin = verdict(fam, base, lag)
-        print(f"  verdict: {label} (gain {gain:+.3f}, margin {margin:+.3f})")
-        report.append(f"**Verdict: {label}** (gain over doing nothing {gain:+.3f}, lead over the next family {margin:+.3f}).\n")
-        write_renders(tag, a, b, fam, fs)
-        report.append("| version | # | setting | predicted r | rendered r |\n|---|---|---|---|---|")
-        for name, lst in (("joint", joint), ("attack-first", fam)):
-            for i, c in enumerate(lst[:3]):
-                rend = rendered_score(a, b, fs, c)
-                print(f"  {name:12s} {i + 1}. {c.label():48s} predicted {c.score:+.3f}  rendered {rend:+.3f}")
-                report.append(f"| {name} | {i + 1} | {c.label()} | {c.score:+.3f} | {rend:+.3f} |")
-        report.append("")
+def render_check(fs=48000):
+    """Predicted against rendered score: the best candidates run through the plugin's own DSP (Hi/Lo) or an exact
+    rotation (Constant)."""
+    x, y = synthetic(fs, 1.0, 60.0, 3)
+    sp = spectra(x, y, fs)
+    fam, base = search(sp, top=3)
+    for c in fam:
+        print(f"render check: {c.label():45s} predicted {c.score:+.4f}  rendered {rendered_score(x, y, fs, c):+.4f}")
 
 
 def main():
-    OUT.mkdir(parents=True, exist_ok=True)
-    report = ["# ANALYSE groundwork: search prototype\n", "Generated by `prototype/analyse.py`. Method in its docstring.\n"]
-    ok = synthetic_checks(report)
-    if "--synthetic" not in sys.argv:
-        user_pairs(report)
-    (OUT / "report.md").write_text("\n".join(report) + "\n")
-    print(f"\nwrote {OUT / 'report.md'}; synthetic checks {'all passed' if ok else 'HAD MISSES'}")
+    ok = synthetic_checks()
+    render_check()
+    print(f"\nsynthetic checks {'all passed' if ok else 'HAD MISSES'}")
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

@@ -20,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Ubuntu pinned: ubuntu-latest moves to 26.04 from 2026-10-19, which may rename apt packages or change the
+        # Ubuntu pinned: ubuntu-latest changes image versions over time, which may rename apt packages or change the
         # fonts the editor tests render with. Move the pin deliberately, after one green run on the new image.
         os: [macos-latest, windows-latest, ubuntu-24.04]
     steps:
@@ -60,7 +60,7 @@ jobs:
           fi
 
       - name: Benchmark the DSP (information only)
-        # Numbers for IMPLEMENTATION_PLAN 2.6 on every OS: Windows and Linux use PFFFT (no vDSP).
+        # Numbers on every OS: Windows and Linux use PFFFT (no vDSP).
         # Budgets per stereo frame: Hi/Lo under 50 ns, Constant under 150 ns. Never fails the build.
         continue-on-error: true
         shell: bash

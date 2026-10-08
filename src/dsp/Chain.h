@@ -9,8 +9,8 @@
 #include <algorithm>
 #include <cmath>
 
-// The processing chain: polarity flip -> phase -> delay (IMPLEMENTATION_PLAN 1, PLAN 4.1). Plain C++ that runs
-// on any float buffers with its own state, so the v0.8 analyser can reuse it offline (PLAN 4.9).
+// The processing chain: polarity flip -> phase -> delay. Plain C++ that runs
+// on any float buffers with its own state, so it can be reused offline.
 //
 // Real-time use: prepare() allocates; reset(), setSettings() and process() don't allocate, lock or log.
 namespace pa::dsp
@@ -42,7 +42,7 @@ struct ChainSettings
     }
 
     // What host bypass fades to: every stage out of the signal path, but the latency kept (so the delay stays on at a
-    // knob value of 0, and the mode stays), so bypass delays the input by the reported latency (plan 1.3).
+    // knob value of 0, and the mode stays), so bypass delays the input by the reported latency.
     ChainSettings bypassed() const
     {
         auto s = *this;
@@ -89,7 +89,7 @@ class PolarityStage
 
 // Phase stage: Hi/Lo (HiLoStage, oversampled, latency Lh: 32 samples at 44.1 kHz, 18 at 48, 5 at 96, 0 from 176.4 kHz
 // up) or Constant (ConstantRotator, latency L). The on/off crossfade mixes the wet path with the dry one, the input
-// delayed by the active path's latency, so phase on/off never changes the latency. Hi/Lo always runs (warm, R2), even
+// delayed by the active path's latency, so phase on/off never changes the latency. Hi/Lo always runs (warm), even
 // while the stage is off or Constant is active, and in Hi/Lo the rotator keeps only its history, so either can start at
 // once. Which of the two is active (Constant or not) changes only through setConstant(), which the chain calls while
 // its output is silent (a latency change). Settled off in Hi/Lo, the output is the input delayed by Lh, bit-exact.
@@ -122,13 +122,13 @@ class PhaseStage
         rotator.setTarget(s.phaseDegrees);
         if (s.phaseMode != PhaseMode::constant)
             hiLoMode = s.phaseMode == PhaseMode::low ? HiLoStage::Mode::lo : HiLoStage::Mode::hi;
-        // A change of mode or range glides (R3); unheard while Constant is active, where the mode stays as it was.
+        // A change of mode or range glides; unheard while Constant is active, where the mode stays as it was.
         cascade.set(s.phaseDegrees, hiLoMode, s.phaseWide);
     }
 
     // Only while the output is silent. The cascade keeps running in Constant (warm, unheard), so going back to Hi/Lo
     // never restarts it from a clear state on a signal that is already playing (a restart left a burst near Nyquist
-    // in its state; plan 2.3).
+    // in its state).
     void setConstant(bool on) { constant = on; }
 
     bool isConstant() const { return constant; }
@@ -178,7 +178,7 @@ class PhaseStage
                 cascade.process(io, numChannels, n);
                 return;
             }
-            if (settled) // off: the output is the delayed input, and the stage keeps warm (R2)
+            if (settled) // off: the output is the delayed input, and the stage keeps warm
             {
                 cascade.processUnheard(io, numChannels, n);
                 for (int ch = 0; ch < numChannels; ++ch)
@@ -210,7 +210,7 @@ class PhaseStage
     LinearRamp wetGain;
 };
 
-// The chain's latency depends on the delay being on (plan 2.1a) and on Constant mode (2.4). The delay knob
+// The chain's latency depends on the delay being on and on Constant mode. The delay knob
 // reaches d = +-maxDelayTenths, in tenths of a sample. With the delay on, the chain's latency is Lmax + H, where Lmax
 // is the knob's reach rounded up to whole samples and H the interpolation kernels' lookahead, and the delay stage
 // applies Lmax + H + d, so the net shift is d. With it off, the stage applies 0 and the latency is 0.

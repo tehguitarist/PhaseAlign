@@ -135,7 +135,7 @@ PhaseAlignEditor::PhaseAlignEditor(PhaseAlignProcessor& p)
       meterButton(
           images, layout::meterButton.bounds(),
           {layout::Image::meterInOff, layout::Image::meterInOn, layout::Image::meterOutOff, layout::Image::meterOutOn}),
-      // Lit while ANALYSE is active (plan R26).
+      // Lit while ANALYSE is active.
       analyseButton(images, layout::analyseButton.bounds(),
                     {layout::Image::analyseInOff, layout::Image::analyseInOn, layout::Image::analyseOutOff,
                      layout::Image::analyseOutOn}),
@@ -544,7 +544,7 @@ void PhaseAlignEditor::updateMeter()
     meterScreen.setMeterOn(on);
 }
 
-// While the meter is frozen, turning the knobs shows what they would do (plan R20): the screen applies them to the held
+// While the meter is frozen, turning the knobs shows what they would do: the screen applies them to the held
 // picture. The delay counts as 0 when it is off; the phase stage's response is applied when it is on.
 void PhaseAlignEditor::updateHeldPreview()
 {

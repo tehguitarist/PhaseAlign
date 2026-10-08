@@ -358,7 +358,7 @@ void AnalyseScreen::paintMessage(juce::Graphics& g, juce::Rectangle<float> area,
                                  juce::Colour colour) const
 {
     g.setColour(colour);
-    g.setFont(meterFont(assets, 20.0f * getScale())); // the screen has the room: easy to read (user, 2026-10-08)
+    g.setFont(meterFont(assets, 20.0f * getScale())); // the screen has the room: easy to read
     g.drawFittedText(text, area.toNearestInt(), juce::Justification::topLeft, 3, 1.0f);
 }
 
@@ -543,7 +543,7 @@ void AnalyseScreen::paintResults(juce::Graphics& g) const
     }
     else if (result.message.size() > 0)
         note = note.isEmpty() ? juce::String(result.message) : note + " " + juce::String(result.message) + ".";
-    // The two match warnings (user, 2026-10-08): the options stay; this says how far to trust them.
+    // The two match warnings: the options stay; this says how far to trust them.
     if (result.chanceLevel)
         warning += juce::String(warning.isEmpty() ? "" : " ") +
                    "The audio seems unrelated: this match is no better than chance. Check the sidechain is the right "

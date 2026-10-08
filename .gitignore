@@ -9,7 +9,6 @@ JuceLibraryCode/
 .vscode/
 .venv/
 __pycache__/
-prototype/out/
 captures/
 build-*/
 snapshots/

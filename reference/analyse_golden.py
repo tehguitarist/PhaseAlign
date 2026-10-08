@@ -1,19 +1,15 @@
-"""Golden references for ANALYSE's C++ search (src/analyse/Search.cpp): prototype/analyse.py's suggest_with_shift on fixed
-pairs, which tests/dsp/AnalyseTests.cpp must reproduce.
+"""Golden data for ANALYSE's C++ search (src/analyse/Search.cpp): analyse.py's suggest_with_shift on fixed pairs, which
+tests/dsp/AnalyseTests.cpp must reproduce.
 
-    .venv/bin/python prototype/analyse_golden.py      # → tests/golden/analyse_*.i16 and analyse_expected.txt (committed)
-                                                      #   and, if the user's pairs are there, captures/analyse_user_*.txt
+    .venv/bin/python -u reference/analyse_golden.py      # writes tests/golden/analyse_*.i16 and analyse_expected.txt
 
 Synthetic pairs, 3 s at 48 kHz, each signal int16 little-endian (value / 32768; the Python works on exactly those values):
-  A: impulsive coloured noise, the input built as the sidechain 1.25 ms early and turned 120°: the attack-first path.
-  B: the same sidechain, the input 6.5 ms late and turned 60°: beyond the knob, so a manual shift and then the options.
-  C: steady coloured noise, the input 2 ms late and turned 70°: weak attacks, so the joint (waveform score) search.
+  A: impulsive coloured noise, the input built as the sidechain 1.25 ms early and turned 120 degrees: the attack-first path.
+  B: the same sidechain, the input 6.5 ms late and turned 60 degrees: beyond the knob, so a manual shift and then the options.
+  C: steady coloured noise, the input 2 ms late and turned 70 degrees: weak attacks, so the joint (waveform score) search.
 The cases run A with both stages on, with DELAY off and with PHASE off, B and C with both on, and A's input against C's
-sidechain (unrelated: nothing worth changing). Each case also pins a few closed-form scores, and when a manual shift is advised the options as the track is (`asis` lines).
-
-The user's pairs (gitignored): the first set's captures/<tag>_a.f32 / _b.f32 (prototype/export_pairs.py) and the second
-set's captures/stems/<tag>_a.f32 / _b.f32 (written here from the wavs). captures/analyse_user_expected.txt is what the
-hidden test `PhaseAlignDspTests "[.useranalyse]"` compares with.
+sidechain (unrelated: nothing worth changing). Each case also pins a few closed-form scores, and when a manual shift is
+advised the options as the track is (`asis` lines).
 """
 import math
 import sys
@@ -133,40 +129,8 @@ def synthetic():
     (GOLDEN / "analyse_expected.txt").write_text("\n".join(lines) + "\n")
 
 
-def user_pairs():
-    import soundfile as sf
-    import analyse_stems as st
-    pairs = []
-    for tag in an.PAIRS:
-        a, b = ROOT / "captures" / f"{tag}_a.f32", ROOT / "captures" / f"{tag}_b.f32"
-        if a.exists() and b.exists():
-            pairs.append((tag, f"captures/{tag}"))
-    stems = ROOT / "captures" / "stems"
-    for tag, track, ref in st.PAIRS:
-        if not (stems / f"{track}.wav").exists():
-            continue
-        x, y = st.load(track), st.load(ref)
-        n = min(len(x), len(y))
-        x[:n].astype("<f4").tofile(stems / f"{tag}_a.f32")
-        y[:n].astype("<f4").tofile(stems / f"{tag}_b.f32")
-        pairs.append((tag, f"captures/stems/{tag}"))
-    if not pairs:
-        print("no user pairs in captures/ (skipped)")
-        return
-    lines = []
-    for tag, stem in pairs:
-        x = np.fromfile(ROOT / f"{stem}_a.f32", np.float32).astype(np.float64)
-        y = np.fromfile(ROOT / f"{stem}_b.f32", np.float32).astype(np.float64)
-        for delay_on, phase_on in ((True, True), (False, True), (True, False)):
-            lines += describe_case(f"{tag}_{int(delay_on)}{int(phase_on)}", f"{stem}_a", f"{stem}_b", x, y, delay_on,
-                                   phase_on, FS)
-    (ROOT / "captures" / "analyse_user_expected.txt").write_text("\n".join(lines) + "\n")
-
-
 def main():
     synthetic()
-    if "--synthetic" not in sys.argv:
-        user_pairs()
 
 
 if __name__ == "__main__":

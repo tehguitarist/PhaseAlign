@@ -15,7 +15,7 @@
 #define PA_REAL_FFT_VDSP 0
 #endif
 
-// A real FFT in the packed split format the convolver works in (IMPLEMENTATION_PLAN 2.6): n real samples become n/2
+// A real FFT in the packed split format the convolver works in: n real samples become n/2
 // bins in two arrays, re[0] = DC and im[0] = Nyquist (both real), (re[k], im[k]) = bin k for 0 < k < n/2. Each engine
 // has its own scale, so the transforms are only exact up to convolutionScale(): for kernel h and input x,
 // inverse(forward(h) * convolutionScale() * forward(x)) is their circular convolution (bin 0's DC and Nyquist parts
@@ -24,8 +24,7 @@
 // Engines: vDSP on Apple (directly, in the packed split format it uses natively; JUCE's wrapper adds a strided layout
 // and two extra passes). Elsewhere PFFFT (libs/pffft, BSD-style licence; SSE on x86, NEON on ARM): its ordered real
 // transform is the same packing interleaved, so one pass splits or joins it. PFFFT wants 16-byte aligned buffers, so
-// unaligned input or output goes through its own (n >= 32, a power of two here). Until 2026-10-06 the other engine was
-// juce::dsp::FFT's complex transform of n/2 points plus a twiddle pass, about 2-3 times slower on CI's x86 runners.
+// unaligned input or output goes through its own (n >= 32, a power of two here).
 //
 // prepare() allocates; forward() and inverse() don't.
 namespace pa::dsp

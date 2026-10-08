@@ -7,7 +7,7 @@
 #include <array>
 #include <iterator>
 
-// Hi/Lo's oversampling (IMPLEMENTATION_PLAN 2.3; reference prototype/oversampling.py, Oversampler). Up by 4 below
+// Hi/Lo's oversampling (see reference/oversampling.py, Oversampler). Up by 4 below
 // 85 kHz, by 2 below 170 kHz, not at all from there up, through linear-phase halfbands, which add a pure delay (the
 // latency, a whole number of samples) and no phase. Plain C++, no allocation: blocks of up to maxBlock samples at the
 // session rate.
@@ -148,7 +148,7 @@ class Oversampler
     static int factorFor(double sampleRate) { return sampleRate >= 170000.0 ? 1 : sampleRate >= 85000.0 ? 2 : 4; }
 
     // In session samples: (N - 1) / 2 for the outer stage (N = 2 * dense - 1), plus K of the inner one at 4x
-    // (prototype/oversampling.py).
+    // (reference/oversampling.py).
     static int latencyFor(double sampleRate)
     {
         const auto f = factorFor(sampleRate);

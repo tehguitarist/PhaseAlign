@@ -4,7 +4,7 @@
 #include <cmath>
 #include <vector>
 
-// The scope view's data (IMPLEMENTATION_PLAN 3, R19): the last few seconds of the three streams the meter captures
+// The scope view's data: the last few seconds of the three streams the meter captures
 // (input, output, sidechain, already lined up by the capture), and a finder for the loudest recent onset of the
 // sidechain, which the view uses as its trigger so a hit sits at a fixed place however it is zoomed. GUI thread only.
 namespace pa::meter
@@ -121,13 +121,13 @@ class ScopeBuffer
         return result;
     }
 
-    // Streaming hit detection (R22): feed it as samples arrive. A hit is a local peak of the sidechain envelope's rise
+    // Streaming hit detection: feed it as samples arrive. A hit is a local peak of the sidechain envelope's rise
     // (as findOnset) that is within 12 dB of the strongest rise of the last few seconds, is a real start (the 4 ms
-    // envelope at least 2.5 times its quietest level of the 5 to 22 ms before: not a ripple in a ringing tail, which a sub bass or a
-    // kick's body is full of) and is at least 60 ms after the last hit; it is reported once there is `postSeconds` of audio after it to capture. Cheap: only the new samples
-    // are looked at.
-    // The running sums of |sidechain| over the windows ending just before `scanned`, taken from the buffer, so that
-    // scanning can start anywhere (a sum that starts at 0 would subtract samples it never added, and stay offset).
+    // envelope at least 2.5 times its quietest level of the 5 to 22 ms before: not a ripple in a ringing tail, which a
+    // sub bass or a kick's body is full of) and is at least 60 ms after the last hit; it is reported once there is
+    // `postSeconds` of audio after it to capture. Cheap: only the new samples are looked at. The running sums of
+    // |sidechain| over the windows ending just before `scanned`, taken from the buffer, so that scanning can start
+    // anywhere (a sum that starts at 0 would subtract samples it never added, and stay offset).
     void primeSums()
     {
         const auto smooth = std::max(1, (int)std::lround(0.0005 * fs)), smooth4 = std::max(1, (int)std::lround(0.004 * fs));
