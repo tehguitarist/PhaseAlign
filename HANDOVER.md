@@ -84,60 +84,18 @@ analysis stays for ANALYSE. Tuned on the user's own stem pairs (`prototype/expor
 4. **`release.yml`** now refuses to run on a commit without a green CI run (the `version` job checks `gh run list --workflow
    ci.yml --commit $GITHUB_SHA`; the `skip_ci_check` input overrides it). Its first real run also checks the Windows and
    Linux installers' docs step.
-5. **ANALYSE (auto-suggest)**: built (2026-10-08), see "ANALYSE: built into the plugin" below; **the cleanup of what it
-   doesn't use comes after the refinement** (user, 2026-10-07). History of the groundwork: What is ready for it: the waveform (PHAT) and attack lags and
-   the curve and phase measures in `meter/CorrelationAnalyser` (off unless a view asks: `Needs`), the delay, polarity
-   and phase response preview (`dsp/PhaseResponse.h`, `meter/HitCapture`), and the user's stem pairs with tests.
-   Findings that matter: the waveform lag is wrong for hits whose bodies differ (a kick against a kick sample read +29
-   ms), the attack lag (three bands, plan R18) is right on all five pairs; the bass's attack reading is the weakest.
-   **Groundwork (2026-10-07): `prototype/analyse.py`** (PLAN 8 step 6). Whole-capture cross-spectrum; every candidate
-   (4 Hi/Lo shapes, Constant, polarity, delay ±4 ms at 0.1 sample) scored in closed form as the mean per-1/3-octave-band
-   r; top families de-duplicated. Synthetic pairs with a known delay and rotation are all recovered, and predicted scores
-   match the plugin's own Hi/Lo rendered (to 0.003). Version 2 is attack-first: `attack_lag` (a Python port of R18; its
-   readings equal the C++'s on the five pairs, input = `_a`, positive = delay the input) fixes the delay when clear and
-   in reach, and phase and polarity are chosen within 0.3 ms of it. Result: delays are now right (kick +1.57 ms where the
-   score alone said +3.2; snare +0.74; bass, guitar, hats ~0), but **the phase and polarity choice is weakly supported on
-   these pairs** (r gains of 0.00 to 0.07 over doing nothing; kick's top three settings are within 0.001 of each other
-   and the kick wants Ø, which two differently-recorded kicks may simply not justify). Next: a confidence measure
-   (gain over baseline, margin over the runner-up family) so ANALYSE says "no change worth making" for guitar and hats,
-   and listening to the renders; then the C++ (offline, on a background thread, reusing `dsp/PhaseResponse.h`).
-   Report: `prototype/out/analyse/report.md`.
-   **Second stem set and blind shootout (user, 2026-10-07/08; `captures/stems/`, `prototype/analyse_stems.py`,
-   `analyse_shootout.py --blind`):** the user's by-ear settings mostly scored badly on the metric, but in the blind
-   listening (sums with the sidechain) the search's pick was best on 5 of 6: snare sample (CONSTANT 50°, -5.94 ms, only one
-   whose transients lined up; the user's own 4 ms pick was worst, so **the delay should reach 6 ms**, user), snare OH
-   (CONSTANT 5°, Ø, -1.85 ms), kick sample (attack-first LO in 62.5°, +1.21 ms; the joint pick's transients didn't line up),
-   kick OH (joint, LO in 140°, Ø, -4.94 ms, tied with the user's own), guitar (joint CONSTANT 110°, -0.58 ms best; then off, then the
-   user's own LO in 102.6° at 0 ms, attack-first worst). The bass was the exception: off was best (the search's -0.42 ms LO in 27.5° had less low end, the user's
-   +4.6 ms HI out worst). Built from that, in `analyse.suggest`: (1) the **low-end guard** (a candidate must not lower r
-   below 300 Hz: the bass is the only pair it rejects), (2) **attack-first only when the attack peak is >= 0.35**, else the
-   joint search (0.39 kick sample, 0.61 snare OH vs 0.30 kick OH, 0.18 guitar: a threshold from four pairs, a first
-   guess), (3) up to **two options** to choose from (user's idea: it was a toss-up by the sound wanted). Caveat: all of this
-   was tuned on the same six pairs, so it needs new stems to mean anything; and the two options are near neighbours (50° vs
-   70°), not real alternatives. The bass now reads "delay only, -0.37 ms", which is untested by ear.
-   **Decided (user, 2026-10-08): the delay stays +-4 ms** (micro adjustments; no 6 ms extension). A bigger offset is moved
-   by hand: `analyse.suggest_with_shift` says "Transient may be out of range, consider shifting +/- N samples manually if
-   needed" (N in samples, as DAWs work in them; positive delays the track) when the attack reading is clear and beyond
-   the reach, or the best option sits at the edge, and gives options for the signal after that shift. Two options only
-   when the best two are within 0.01 r, one when there is a clear winner. Untested by ear: snare sample (-284 samples,
-   then the residual search says HI in 180°, -1.05 ms, not the CONSTANT 50° the ear liked at the whole -5.94 ms) and kick
-   OH (within +-4 ms the best is LO in 180°, Ø, -0.70 ms; the ear's -4.94 ms pick is out of reach and no message fires,
-   because the attack peak is weak and the in-reach best isn't at the edge). The user will get more stems.
-   **2026-10-08, later:** ANALYSE **respects the stage toggles** (user): `suggest(..., delay_on, phase_on)` searches only what
-   is on (DELAY off: delay stays 0 and a clear attack offset is only mentioned, "DELAY is off: the transients are N samples
-   apart"; PHASE off: phase stays off; polarity is always searched, the Ø button being its own control; confirmed by the user,
-   whatever the button's state), so one search answers best delay, best phase, best polarity or any mix. The shift message also fires when the
-   waveform score has a clearly better delay up to 10 ms out (`WIDE_REACH_MS`; this catches the kick OH, -237 samples,
-   which the attack reading alone missed). The **low-end guard became a flag**: the kick OH's -4.94 ms pick lowers r below
-   300 Hz by 0.05 (the user heard that: more attack, less low-end solidity) and a hard reject hid it; options are now kept
-   and marked "less low end" (the bass too, -0.02). Second blind set (`analyse_shootout.py --blind2`, the ANALYSE answer
-   with the manual shift applied first, plus off and the earlier best): waiting for the user's listening.
-   **Listening (user, 2026-10-07; `prototype/out/analyse/renders/`): the sum tells more than the input alone.** Kick: sum 1
-   (CONSTANT 130°, Ø, +1.57 ms: the score's own top pick) was best, input 3 (LO in 180°, Ø, +1.02 ms) the best alone. Snare:
-   sum 3 (HI in 157.5°, Ø, +0.95 ms) was best, input 1 (LO in 125°, Ø, +0.74 ms) the best alone, so for the snare the
-   score's top pick was not what the ear chose from the sum (the three scores are within 0.003). All the winners are Ø
-   plus a rotation. Judge candidates by the sum with the sidechain, not the input alone. The user is getting stems that are
-   further apart (bigger offsets) to test with next; the confidence thresholds stay as guesses until then.
+5. **ANALYSE (auto-suggest)**: built (2026-10-08), see "ANALYSE: built into the plugin" below. What the groundwork
+   (`prototype/analyse.py`, 2026-10-07/08) found that still matters:
+   - **Judge by the sum with the sidechain, not the track alone** (user's listening, `prototype/out/analyse/renders/`).
+   - **Blind shootout** (`analyse_shootout.py --blind`, the second stem set): the search's pick was best on 5 of 6; the bass
+     was the exception (off was best: the pick had less low end, hence the "less low end" flag rather than a reject).
+     All the kick and snare winners were Ø plus a rotation.
+   - **Decided (user):** the delay stays ±4 ms (a bigger offset is a manual shift in samples); only the stages switched on
+     are searched, polarity always; up to two options, two only when within 0.01; less low end is a flag, not a reject.
+   - **Untested by ear:** snare sample after its −284 sample shift (HI in 180°, −1.05 ms, where the ear liked CONSTANT 50°
+     at the whole −5.94 ms), and the bass's suggestions. The second blind set (`analyse_shootout.py --blind2`,
+     `prototype/out/analyse/blind2/`, key in `key.txt`) is waiting for the user's listening.
+   The full history is in git (this file before 2026-10-08) and plan R26.
 
 ## ANALYSE: built into the plugin (2026-10-08, branch `analyse`, not merged; plan R26)
 
@@ -171,9 +129,10 @@ order unless the user says otherwise:
    want lining up).
 2. The thresholds (`ATTACK_STRONG`, `MIN_GAIN`, `MIN_MARGIN`) with the new stems, and the second blind set
    (`prototype/out/analyse/blind2/`).
-3. Then **clean up what ANALYSE doesn't use in `meter/CorrelationAnalyser`** (the user's standing request): the C++ search
-   uses none of it (its attack lag is the Python's whole-capture form), so the PHAT lag, the attack features, the curve
-   and phase measures and their tests can go unless a view wants them.
+3. **Done (2026-10-08): `meter/CorrelationAnalyser` cleaned up** (the user's standing request): the curve, phase angles,
+   PHAT lag and attack lag (and their tests: the time and phase views', the kick sample's, `[.userpairs]`,
+   `[.attacktrace]`) are gone; it keeps the averages, the six bands, the overall pair, the held preview and the
+   sidechain silence timer. ANALYSE's search has its own attack lag (the Python's whole-capture form).
 
 Known behaviour to mention if asked: an option whose phase is "off" switches PHASE off, so the next ANALYSE doesn't search
 the phase (the screen's header says what is searched).

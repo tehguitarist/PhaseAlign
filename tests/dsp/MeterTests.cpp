@@ -68,7 +68,7 @@ TEST_CASE("the FFT size scales with the rate: 8192 at 44.1/48 kHz", "[meter]")
     CHECK(CorrelationAnalyser::fftSizeFor(192000.0) == 32768);
 }
 
-TEST_CASE("a delayed copy reads +1 once aligned, and the time view finds the delay", "[meter]")
+TEST_CASE("a delayed copy reads +1 once aligned, in every band", "[meter]")
 {
     for (const auto fs : {44100.0, 48000.0, 96000.0, 192000.0})
     {
@@ -84,28 +84,13 @@ TEST_CASE("a delayed copy reads +1 once aligned, and the time view finds the del
         feed(a, source, aligned, sidechain);
 
         CHECK(a.overallProcessed() > 0.999f);
-        CHECK(minMeasured(a.curveProcessed()) > 0.99);
-
-        // Unaligned: r(f) follows cos(2 pi f d) where the 1/6-octave window is narrow against the comb.
-        const auto& hz = a.curveFrequencies();
-        for (size_t i = 0; i < hz.size(); ++i)
-            if (hz[i] > 40.0f && hz[i] < 150.0f)
-            {
-                INFO(hz[i] << " Hz");
-                CHECK(a.curveUnprocessed()[i] == Approx(std::cos(2.0 * M_PI * hz[i] * d / fs)).margin(0.08));
-            }
+        CHECK(minMeasured(a.bandsProcessed()) > 0.99);
+        // Unaligned, the 1.3 ms comb averages away over the whole band.
         CHECK(std::abs(a.overallUnprocessed()) < 0.3f);
-
-        a.computeLag();
-        CHECK(a.lagPeakUnprocessed().clear);
-        CHECK(a.lagPeakUnprocessed().lagMs == Approx(1000.0 * d / fs).margin(0.02));
-        CHECK(a.lagPeakUnprocessed().value > 0.9f);
-        CHECK(a.lagPeakProcessed().lagMs == Approx(0.0).margin(0.02));
-        CHECK(a.lagPeakProcessed().value > 0.9f);
     }
 }
 
-TEST_CASE("an inverted sidechain reads -1 and peaks at 0 ms, negative", "[meter]")
+TEST_CASE("an inverted sidechain reads -1", "[meter]")
 {
     const auto fs = 48000.0;
     const auto source = noise((int)(2.0 * fs), 2);
@@ -117,9 +102,8 @@ TEST_CASE("an inverted sidechain reads -1 and peaks at 0 ms, negative", "[meter]
     a.prepare(fs);
     feed(a, source, source, inverted);
     CHECK(a.overallProcessed() < -0.999f);
-    a.computeLag();
-    CHECK(a.lagPeakProcessed().lagMs == Approx(0.0).margin(0.01));
-    CHECK(a.lagPeakProcessed().value < -0.9f);
+    for (const auto r : a.bandsProcessed())
+        CHECK(r < -0.99f);
 }
 
 TEST_CASE("signals below the gate are not measured; sidechain silence is timed", "[meter]")
@@ -134,7 +118,8 @@ TEST_CASE("signals below the gate are not measured; sidechain silence is timed",
     a.prepare(fs);
     feed(a, loud, loud, quiet);
     CHECK(std::isnan(a.overallProcessed()));
-    CHECK(std::isnan(a.curveProcessed()[100]));
+    for (const auto r : a.bandsProcessed())
+        CHECK(std::isnan(r));
     CHECK(a.sidechainSilentSeconds() > 1.5);
 
     feed(a, loud, loud, loud);
@@ -246,102 +231,6 @@ TEST_CASE("capture delays the input and sidechain by the latency, so they line u
         REQUIRE(a[i] == 0.0f);
 }
 
-TEST_CASE("the time view reads a fractional offset to within 0.01 sample", "[meter]")
-{
-    // A long Kaiser-windowed sinc gives the sidechain an accurate fractional delay, independent of the plugin's
-    // kernels.
-    const auto i0 = [](double x)
-    {
-        double sum = 1.0, term = 1.0;
-        for (int k = 1; k < 60; ++k)
-        {
-            term *= (x / (2.0 * k)) * (x / (2.0 * k));
-            sum += term;
-        }
-        return sum;
-    };
-    const auto fractionalDelay = [&](const std::vector<float>& x, double delay)
-    {
-        constexpr int half = 255;
-        std::vector<double> h(2 * half + 1);
-        const auto whole = (int)std::floor(delay);
-        const auto frac = delay - whole;
-        for (int k = -half; k <= half; ++k)
-        {
-            const auto t = k - frac;
-            const auto r = t / (half + 1.0);
-            const auto sinc = std::abs(t) < 1e-12 ? 1.0 : std::sin(M_PI * t) / (M_PI * t);
-            h[(size_t)(k + half)] = sinc * i0(10.0 * std::sqrt(std::max(0.0, 1.0 - r * r))) / i0(10.0);
-        }
-        std::vector<float> y(x.size(), 0.0f);
-        for (size_t n = 0; n < x.size(); ++n)
-        {
-            double acc = 0.0;
-            for (int k = -half; k <= half; ++k)
-            {
-                const auto idx = (long)n - whole - k;
-                if (idx >= 0 && idx < (long)x.size())
-                    acc += h[(size_t)(k + half)] * x[(size_t)idx];
-            }
-            y[n] = (float)acc;
-        }
-        return y;
-    };
-
-    for (const auto fs : {44100.0, 96000.0})
-        for (const auto offset : {12.0, 12.3, -7.5, 30.8})
-        {
-            INFO("fs " << fs << ", offset " << offset << " samples");
-            const auto source = noise((int)(2.5 * fs), 21);
-            const auto track = fractionalDelay(source, 300.0);
-            const auto sidechain = fractionalDelay(source, 300.0 + offset);
-            CorrelationAnalyser a;
-            a.prepare(fs);
-            feed(a, track, track, sidechain);
-            a.computeLag();
-            const auto peak = a.lagPeakUnprocessed();
-            CHECK(peak.clear);
-            CHECK(peak.lagMs * fs / 1000.0 == Approx(offset).margin(0.01));
-        }
-}
-
-TEST_CASE("offsets beyond the time view are found coarsely and read as out of the delay's reach", "[meter]")
-{
-    // Positive: the sidechain is later; negative: the track is (it needs a negative delay).
-    for (const auto fs : {44100.0, 48000.0, 96000.0})
-        for (const auto ms : {3.9, -3.9, 4.5, -4.5, 7.0, -12.0, 25.0, -38.0})
-        {
-            INFO("fs " << fs << ", " << ms << " ms");
-            const auto d = (int)std::lround(std::abs(ms) * fs / 1000.0);
-            const auto length = (int)(3.0 * fs);
-            const auto source = noise(length, 7);
-            const auto late = delayed(source, d);
-            const auto& track = ms > 0.0 ? source : late;
-            const auto& sidechain = ms > 0.0 ? late : source;
-
-            CorrelationAnalyser a;
-            a.prepare(fs);
-            feed(a, track, track, sidechain);
-            a.computeLag();
-            const auto peak = a.inputPeak();
-            const auto expected = (ms > 0.0 ? 1.0 : -1.0) * 1000.0 * d / fs;
-            CHECK(peak.clear);
-            CHECK(peak.coarse == (std::abs(ms) > CorrelationAnalyser::lagRangeMs));
-            CHECK(peak.lagMs == Approx(expected).margin(peak.coarse ? 1000.0 / fs : 0.02));
-            CHECK(a.inputOutOfReach(4.0) == (std::abs(ms) > 4.0));
-        }
-
-    // Nothing correlated (independent noise): no clear peak anywhere, so nothing is said to be out of reach.
-    const auto fs = 48000.0;
-    CorrelationAnalyser a;
-    a.prepare(fs);
-    const auto x = noise((int)(3.0 * fs), 8), y = noise((int)(3.0 * fs), 9);
-    feed(a, x, x, y);
-    a.computeLag();
-    CHECK_FALSE(a.inputPeak().clear);
-    CHECK_FALSE(a.inputOutOfReach(4.0));
-}
-
 TEST_CASE("fast averaging follows a change sooner than slow", "[meter]")
 {
     const auto fs = 48000.0;
@@ -387,7 +276,7 @@ TEST_CASE("preview: the input as it would read with the delay knob set; clearing
         a.setPreviewDelayMs(1000.0 * d / fs);
         CHECK(a.isPreviewing());
         CHECK(a.overallProcessed() > 0.999f);
-        CHECK(minMeasured(a.curveProcessed()) > 0.99);
+        CHECK(minMeasured(a.bandsProcessed()) > 0.99);
         CHECK(a.overallUnprocessed() == beforeInput); // the input trace never moves
 
         // Half a millisecond off is worse than right.
@@ -398,56 +287,6 @@ TEST_CASE("preview: the input as it would read with the delay knob set; clearing
         CHECK_FALSE(a.isPreviewing());
         CHECK(a.overallProcessed() == before);
     }
-}
-
-TEST_CASE("phase view: a delay is a slope, a polarity flip is 180, noise is not drawn", "[meter]")
-{
-    const auto fs = 48000.0;
-    const auto d = 62; // 1.29 ms
-    const auto source = noise((int)(3.0 * fs), 7);
-    const auto sidechain = delayed(source, d);
-
-    CorrelationAnalyser a;
-    a.prepare(fs);
-    feed(a, source, source, sidechain);
-    const auto& hz = a.curveFrequencies();
-    int checked = 0;
-    for (size_t i = 0; i < hz.size(); ++i)
-        if (hz[i] > 40.0f && hz[i] < 300.0f)
-        {
-            INFO(hz[i] << " Hz");
-            REQUIRE_FALSE(std::isnan(a.phaseProcessed()[i]));
-            auto expected = std::fmod(360.0 * hz[i] * d / fs + 180.0, 360.0) - 180.0;
-            CHECK(a.phaseProcessed()[i] == Approx(expected).margin(8.0));
-            CHECK(a.phaseProcessedCoherence()[i] > 0.9f);
-            ++checked;
-        }
-    CHECK(checked > 20);
-
-    // Previewing the right delay flattens it to 0 right across the spectrum, high frequencies included.
-    a.setPreviewDelayMs(1000.0 * d / fs);
-    for (size_t i = 0; i < hz.size(); ++i)
-        if (! std::isnan(a.phaseProcessed()[i]))
-            CHECK(std::abs(a.phaseProcessed()[i]) < 5.0f);
-    CHECK_FALSE(std::isnan(a.phaseProcessed()[hz.size() - 20])); // near 15 kHz: only the preview keeps it coherent
-    a.clearPreview();
-
-    auto inverted = source;
-    for (auto& v : inverted)
-        v = -v;
-    CorrelationAnalyser b;
-    b.prepare(fs);
-    feed(b, source, source, inverted);
-    for (size_t i = 20; i < hz.size() - 20; i += 10)
-        CHECK(std::abs(b.phaseProcessed()[i]) > 170.0f);
-
-    CorrelationAnalyser c;
-    c.prepare(fs);
-    feed(c, source, source, noise((int)(3.0 * fs), 8));
-    int drawn = 0;
-    for (const auto v : c.phaseProcessed())
-        drawn += std::isnan(v) ? 0 : 1;
-    CHECK(drawn < (int)hz.size() / 4);
 }
 
 TEST_CASE("bands view: six bands, +1 when aligned, the delayed input comb-averages, preview follows", "[meter]")
@@ -476,72 +315,7 @@ TEST_CASE("bands view: six bands, +1 when aligned, the delayed input comb-averag
         CHECK(v > 0.99f);
 }
 
-namespace
-{
-// A kick: a decaying sine sweeping down from `startHz` to `endHz`, a short click at the front, every `period` samples.
-std::vector<float> kickTrain(int length, double fs, double startHz, double endHz, int period, unsigned seed)
-{
-    std::mt19937 rng(100); // the beater click is the same in both kicks; the body (pitch, sweep) is what differs
-    (void)seed;
-    std::normal_distribution<float> dist(0.0f, 1.0f);
-    std::vector<float> x((size_t)length, 0.0f);
-    const auto len = (int)(0.25 * fs);
-    for (int start = 0; start + len < length; start += period)
-    {
-        double phase = 0.0;
-        for (int n = 0; n < len; ++n)
-        {
-            const auto t = n / fs;
-            const auto hz = endHz + (startHz - endHz) * std::exp(-t / 0.03);
-            phase += 2.0 * M_PI * hz / fs;
-            const auto click = n < 40 ? 0.3f * dist(rng) * (1.0f - n / 40.0f) : 0.0f;
-            x[(size_t)(start + n)] += (float)(0.8 * std::exp(-t / 0.08) * std::sin(phase)) + click;
-        }
-    }
-    return x;
-}
-} // namespace
-
-TEST_CASE("a kick against a different kick sample: the time view finds the offset", "[meter]")
-{
-    for (const auto speed : {CorrelationAnalyser::Speed::slow, CorrelationAnalyser::Speed::fast})
-    {
-        const auto fs = 48000.0;
-        const auto d = 58; // 1.2 ms
-        const auto length = (int)(6.0 * fs);
-        const auto period = (int)(0.5 * fs);
-        const auto mic = kickTrain(length, fs, 120.0, 50.0, period, 1);
-        auto sample = kickTrain(length, fs, 90.0, 45.0, period, 2); // another kick: different click, pitch, tail
-        auto sidechain = delayed(sample, d);
-        const auto floorNoise = noise(length, 3, 0.003f);
-        for (size_t i = 0; i < sidechain.size(); ++i)
-            sidechain[i] += floorNoise[i];
-
-        CorrelationAnalyser a;
-        a.prepare(fs);
-        a.setSpeed(speed);
-        feed(a, mic, mic, sidechain);
-        a.computeLag(true); // as when frozen: the one picture is all there is
-        const auto peak = a.inputPeak();
-        INFO("fast " << (speed == CorrelationAnalyser::Speed::fast) << " peak " << peak.lagMs << " ms value "
-                     << peak.value << " clear " << peak.clear);
-        if (speed == CorrelationAnalyser::Speed::slow)
-        {
-            CHECK(peak.clear);
-            CHECK(peak.lagMs == Approx(1000.0 * d / fs).margin(0.15));
-        }
-        else if (peak.clear) // fast has about two frames to go on: it may decline, but not claim a wrong offset
-            CHECK(peak.lagMs == Approx(1000.0 * d / fs).margin(0.15));
-
-        // The attacks, though, are what a kick is about: found by both speeds, with different bodies.
-        const auto attack = a.attackInput();
-        INFO("attack " << attack.lagMs << " ms value " << attack.value);
-        CHECK(attack.clear);
-        CHECK(attack.lagMs == Approx(1000.0 * d / fs).margin(0.1));
-    }
-}
-
-TEST_CASE("fast: a delay on steady material is found, and the meter follows a change within about 0.3 s", "[meter]")
+TEST_CASE("fast: a halved frame, and the meter follows a change within about 0.3 s", "[meter]")
 {
     for (const auto fs : {44100.0, 48000.0, 96000.0})
     {
@@ -553,9 +327,6 @@ TEST_CASE("fast: a delay on steady material is found, and the meter follows a ch
         a.setSpeed(CorrelationAnalyser::Speed::fast);
         CHECK(a.getFftSize() == CorrelationAnalyser::fftSizeFor(fs, CorrelationAnalyser::Speed::fast));
         feed(a, source, source, delayed(source, d));
-        a.computeLag();
-        CHECK(a.inputPeak().clear);
-        CHECK(a.inputPeak().lagMs == Approx(1000.0 * d / fs).margin(0.02));
 
         // From matched to inverted: reads negative within 0.3 s.
         auto inverted = source;
@@ -566,111 +337,6 @@ TEST_CASE("fast: a delay on steady material is found, and the meter follows a ch
         feed(a, head, head, head);
         feed(a, head, head, flipped);
         CHECK(a.overallProcessed() < 0.0f);
-    }
-}
-
-// Hidden: the user's own pairs (captures/, gitignored; raw float32 mono at 48 kHz, written by a script from the wavs
-// of the same names): two takes of the same hits, whose waveforms differ. `expected` is the offset of the second
-// from the first, read off the onsets (the kick's is 1483.35 vs 1484.58 ms); `tolerance` is how far attack readings
-// may be from it (the snare's attacks differ in shape, so "the" offset is only good to a fraction of a millisecond;
-// a sub bass note's to a few tenths).
-TEST_CASE("the user's pairs: the attack lag finds the offset between the hits", "[.userpairs]")
-{
-    const auto load = [](const std::string& path)
-    {
-        std::vector<float> v;
-        if (auto* f = std::fopen(path.c_str(), "rb"))
-        {
-            std::fseek(f, 0, SEEK_END);
-            v.resize((size_t)std::ftell(f) / sizeof(float));
-            std::rewind(f);
-            REQUIRE(std::fread(v.data(), sizeof(float), v.size(), f) == v.size());
-            std::fclose(f);
-        }
-        return v;
-    };
-    struct Case
-    {
-        const char* name;
-        double expected, tolerance, minClear; // minClear: the fraction of readings (slow) that must be clear
-    };
-    const auto fs = 48000.0;
-    // The bass is strumming and stabs, so often has no attacks to read; the waveform reading covers it.
-    for (const auto& c : {Case{"kick", 1.23, 0.15, 0.6}, Case{"snare", 1.0, 0.25, 0.8}, Case{"bass", 0.0, 0.3, 0.0},
-                          Case{"guitar", 0.0, 0.1, 0.5}, Case{"hats", 0.0, 0.3, 0.8}})
-        for (const auto speed : {CorrelationAnalyser::Speed::slow, CorrelationAnalyser::Speed::fast})
-        {
-            const auto a1 = load(std::string("captures/") + c.name + "_a.f32"),
-                       a2 = load(std::string("captures/") + c.name + "_b.f32");
-            REQUIRE_FALSE(a1.empty());
-            CorrelationAnalyser a;
-            a.prepare(fs);
-            a.setSpeed(speed);
-            const auto n = std::min(a1.size(), a2.size());
-            int readings = 0, clear = 0, wrong = 0;
-            std::string line, waveform;
-            for (size_t pos = 0; pos < n; pos += 1600) // 30 Hz pulls
-            {
-                const auto m = (int)std::min<size_t>(1600, n - pos);
-                a.process(a1.data() + pos, a1.data() + pos, a2.data() + pos, m);
-                a.computeLag();
-                if (pos > (size_t)(fs * 3) && pos % (size_t)(fs * 2) < 1600)
-                {
-                    const auto t = a.attackInput();
-                    const auto w = a.inputPeak();
-                    waveform += (w.clear ? " " : " ?") + std::to_string(w.lagMs).substr(0, 5);
-                    ++readings;
-                    clear += t.clear;
-                    wrong += t.clear && std::abs(t.lagMs - c.expected) > c.tolerance;
-                    char buf[48];
-                    std::snprintf(buf, sizeof buf, " %+.2f%s", t.lagMs, t.clear ? "" : "?");
-                    line += buf;
-                }
-            }
-            std::printf("%-7s %s: attack%s\n                 waveform%s\n", c.name,
-                        speed == CorrelationAnalyser::Speed::fast ? "fast" : "slow", line.c_str(), waveform.c_str());
-            INFO(c.name << (speed == CorrelationAnalyser::Speed::fast ? " fast" : " slow"));
-            // Slow never calls a wrong offset clear. Fast, with about two frames to average, may now and then.
-            CHECK(wrong <= (speed == CorrelationAnalyser::Speed::fast ? 1 : 0));
-            if (speed == CorrelationAnalyser::Speed::slow)
-                CHECK(clear >= readings * c.minClear);
-        }
-}
-
-// Hidden, for tuning: the raw attack peak (before the steadiness rule) every 0.25 s from the start.
-TEST_CASE("attack peak trace", "[.attacktrace]")
-{
-    const auto load = [](const std::string& path)
-    {
-        std::vector<float> v;
-        if (auto* f = std::fopen(path.c_str(), "rb"))
-        {
-            std::fseek(f, 0, SEEK_END);
-            v.resize((size_t)std::ftell(f) / sizeof(float));
-            std::rewind(f);
-            REQUIRE(std::fread(v.data(), sizeof(float), v.size(), f) == v.size());
-            std::fclose(f);
-        }
-        return v;
-    };
-    const auto fs = 48000.0;
-    for (const char* name : {"kick", "bass"})
-    {
-        const auto a1 = load(std::string("captures/") + name + "_a.f32"), a2 = load(std::string("captures/") + name + "_b.f32");
-        CorrelationAnalyser a;
-        a.prepare(fs);
-        std::printf("%s\n  t     lag    value  runnerUp/value  raw-clear  shown-clear\n", name);
-        for (size_t pos = 0; pos + 1600 < std::min(a1.size(), a2.size()) && pos < (size_t)(fs * 30); pos += 1600)
-        {
-            a.process(a1.data() + pos, a1.data() + pos, a2.data() + pos, 1600);
-            a.computeLag();
-            if (pos % (size_t)(fs * 0.5) < 1600 && (std::string(name) == "bass" ? pos < (size_t)(fs * 14) : ! a.attackInput().clear))
-            {
-                const auto t = a.attackInput();
-                std::printf("%5.1f  %+6.2f  %.3f  %5.2f  %s\n", pos / fs, t.lagMs, t.value,
-                            t.value > 0 ? t.runnerUp / t.value : 9.0f, t.clear ? "shown" : "-");
-            }
-        }
     }
 }
 
@@ -732,12 +398,11 @@ TEST_CASE("preview with polarity: a delayed, inverted sidechain reads +1 with bo
     a.setPreview(1000.0 * d / fs, true);
     CHECK(a.isPreviewInverted());
     CHECK(a.overallProcessed() > 0.999f);
-    CHECK(minMeasured(a.curveProcessed()) > 0.99);
+    CHECK(minMeasured(a.bandsProcessed()) > 0.99);
     a.setPreview(1000.0 * d / fs, false);
     CHECK(a.overallProcessed() < -0.999f);
-    // The phase view: 180 degrees across the band with the delay alone.
-    for (size_t i = 20; i < a.curveFrequencies().size() - 20; i += 10)
-        CHECK(std::abs(a.phaseProcessed()[i]) > 170.0f);
+    for (const auto r : a.bandsProcessed()) // inverted in every band with the delay alone
+        CHECK(r < -0.99f);
     a.clearPreview();
     CHECK_FALSE(a.isPreviewInverted());
 }
@@ -869,15 +534,6 @@ TEST_CASE("preview with the phase stage: a sidechain that is the input through t
         CHECK(a.previewHasPhase());
         CHECK(a.overallProcessed() > 0.98f);
         CHECK(a.overallProcessed() > before);
-        // The phase view: flat at 0 where it is drawn.
-        int drawn = 0;
-        for (const auto v : a.phaseProcessed())
-            if (! std::isnan(v))
-            {
-                ++drawn;
-                CHECK(std::abs(v) < 6.0f);
-            }
-        CHECK(drawn > 150);
         // Without the phase, it is as before.
         a.setPreview(0.0, false);
         CHECK_FALSE(a.previewHasPhase());
@@ -885,36 +541,22 @@ TEST_CASE("preview with the phase stage: a sidechain that is the input through t
     }
 }
 
-TEST_CASE("needs: only the current view's results are worked out, and switching one on fills it at once", "[meter]")
+TEST_CASE("needs: the bands are only worked out for BANDS, and switching them on fills them at once", "[meter]")
 {
     const auto fs = 48000.0;
     const auto d = 62;
     const auto source = noise((int)(3.0 * fs), 71);
     CorrelationAnalyser a;
     a.prepare(fs);
-    a.setNeeds({false, false, false, false}); // ALIGNMENT: nothing but the overall bar
+    a.setNeeds({false}); // VECTORSCOPE or ALIGNMENT: nothing but the overall bar
     feed(a, source, source, delayed(source, d));
-    CHECK_FALSE(std::isnan(a.overallProcessed()));       // always
-    CHECK(std::isnan(a.curveProcessed()[100]));          // not computed
-    CHECK(std::isnan(a.phaseProcessed()[100]));
-    CHECK(std::isnan(a.bandsProcessed()[2]));
-    a.computeLag();
-    CHECK_FALSE(a.attackInput().clear);                  // no attack features were running
+    CHECK_FALSE(std::isnan(a.overallProcessed())); // always
+    for (const auto r : a.bandsProcessed())
+        CHECK(std::isnan(r)); // not computed
 
-    a.setNeeds({true, false, true, false});              // FREQUENCY and BANDS at once: filled from the averages
-    CHECK_FALSE(std::isnan(a.curveProcessed()[100]));
-    CHECK_FALSE(std::isnan(a.bandsProcessed()[2]));
-    CHECK(std::isnan(a.phaseProcessed()[100]));
-    a.setNeeds({false, true, false, false});
-    CHECK_FALSE(std::isnan(a.phaseProcessed()[100]));
-
-    // The attack starts from nothing when switched on, and finds the delay once it has a second of audio.
-    a.setNeeds({false, false, false, true});
-    const auto more = noise((int)(3.0 * fs), 72);
-    feed(a, more, more, delayed(more, d));
-    for (int i = 0; i < 10; ++i)
-        a.computeLag();
-    CHECK(a.attackInput().lagMs == Approx(1000.0 * d / fs).margin(0.05));
+    a.setNeeds({true}); // filled from the averages
+    for (const auto r : a.bandsProcessed())
+        CHECK_FALSE(std::isnan(r));
 }
 
 namespace
@@ -1012,12 +654,7 @@ TEST_CASE("analyser cost by view", "[.analysercost]")
         const char* name;
         CorrelationAnalyser::Needs needs;
     };
-    const Config configs[] = {{"everything on (before)", {true, true, true, true}},
-                              {"FREQUENCY", {true, false, false, false}},
-                              {"PHASE", {false, true, false, false}},
-                              {"BANDS", {false, false, true, false}},
-                              {"TIME OFFSET (+ lag at 30 Hz)", {false, false, false, true}},
-                              {"ALIGNMENT (nothing but the overall bar)", {false, false, false, false}}};
+    const Config configs[] = {{"BANDS", {true}}, {"VECTORSCOPE, ALIGNMENT (nothing but the overall bar)", {false}}};
     for (const auto speed : {CorrelationAnalyser::Speed::slow, CorrelationAnalyser::Speed::fast})
     {
         std::printf("%s\n", speed == CorrelationAnalyser::Speed::slow ? "slow (frame 8192)" : "fast (frame 4096)");
@@ -1029,11 +666,7 @@ TEST_CASE("analyser cost by view", "[.analysercost]")
             a.setNeeds(c.needs);
             const auto start = std::chrono::steady_clock::now();
             for (size_t pos = 0; pos + 1600 <= x.size(); pos += 1600)
-            {
                 a.process(x.data() + pos, x.data() + pos, y.data() + pos, 1600);
-                if (c.needs.attack)
-                    a.computeLag(); // the screen does this at its 30 Hz in the time view
-            }
             const auto elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
             std::printf("  %-42s %6.2f ms per second of audio (%.2f%% of a core)\n", c.name, 1000.0 * elapsed / seconds,
                         100.0 * elapsed / seconds);
@@ -1235,7 +868,7 @@ TEST_CASE("bands: how often a band is gated or near zero", "[.bandgate]")
             CorrelationAnalyser a;
             a.prepare(fs);
             a.setSpeed(speed);
-            a.setNeeds({false, false, true, false});
+            a.setNeeds({true});
             int ticks = 0, gated[6] = {}, nearZero[6] = {};
             const auto n = std::min(a1.size(), a2.size());
             for (size_t pos = 0; pos + 1600 <= n; pos += 1600)

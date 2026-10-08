@@ -342,19 +342,16 @@ TEST_CASE("M4: a delayed copy as the sidechain reads +1 once the delay knob alig
 
         run(2.0);
         CHECK(analyser.overallProcessed() < 0.5f); // not aligned yet
-        analyser.computeLag();
-        CHECK(analyser.lagPeakUnprocessed().lagMs == Approx(1000.0 * d / fs).margin(0.01));
-        CHECK(analyser.lagPeakProcessed().lagMs == Approx(1000.0 * d / fs).margin(0.01)); // knob at 0: no net shift
+        // Knob at 0: no net shift, so the output reads what the input does (the capture lines them up).
+        CHECK(analyser.overallProcessed() == Approx(analyser.overallUnprocessed()).margin(0.02));
 
         setParam(proc, id::delayMs, (float)(1000.0 * d / fs)); // the delay knob, set to the peak's reading
         run(8.0); // the slow average (R23) has to forget the 2 s that weren't aligned
         CHECK(analyser.overallProcessed() > 0.999f);
-        for (const auto r : analyser.curveProcessed())
+        for (const auto r : analyser.bandsProcessed())
             if (! std::isnan(r))
                 REQUIRE(r > 0.99f);
-        analyser.computeLag();
-        CHECK(analyser.lagPeakProcessed().lagMs == Approx(0.0).margin(0.01));
-        CHECK(analyser.lagPeakUnprocessed().lagMs == Approx(1000.0 * d / fs).margin(0.01));
+        CHECK(analyser.overallUnprocessed() < 0.5f); // the input as it was
     }
 }
 

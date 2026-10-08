@@ -204,7 +204,8 @@ interpolation kernel. The rest of this section is unchanged.)
   - Meter: `MeterCapture::push(..., latency)` delays the input and sidechain sums (cleared when capture starts). The
     TIME view shades −4 to +4 ms. Beyond ±5 ms (the view), a coarse search out to ±40 ms (whole samples, same "clear"
     test) finds the peak: the INPUT readout shows it to one decimal and the screen says TRANSIENTS OUT OF DELAY RANGE
-    (`CorrelationAnalyser::inputPeak`, `inputOutOfReach`; MeterTests, 2026-10-06; no view shows it since R23).
+    (`CorrelationAnalyser::inputPeak`, `inputOutOfReach`; MeterTests, 2026-10-06; no view showed it after R23 and it was
+    removed in R26: ANALYSE's manual-shift message does that job now).
 - **Sub-sample steps (R12; user, 2026-10-06: "lets add 0.1 samples"; 0.1 rather than 0.01 on my advice).**
   `prototype/subsample.py` → `prototype/out/subsample/report.md`: whole-sample rounding leaves up to 0.5 sample, a dip
   of up to 2.4 dB at 20 kHz (0.56 dB at 10 kHz) at 44.1 kHz for an equal, coherent pair; a 0.1-sample grid leaves
@@ -745,17 +746,13 @@ middle, BANDS (default), VECTORSCOPE and ALIGNMENT, described in R23, R19 and R2
 all of them; blue is the input and green the output; the legend labels hide or show a trace; the bars ease toward their
 values (0.3 s on SLOW, 0.1 s on FAST). Only the current view's work runs (R21).
 
-**Still computed, shown by no view** (kept for ANALYSE, with their tests and the user's pairs in `captures/`, see
-`prototype/export_pairs.py`; clean up whatever ANALYSE doesn't use afterwards, user 2026-10-07; all off by `Needs` unless
-asked for):
+**The preview** (R20): the input's cross-spectrum turned by a delay, a polarity flip and the phase stage's response
+(`dsp/PhaseResponse.h`), which is how the knobs preview on a held screen.
 
-- the **curve**: r(f) over 1/6 octave at 256 log-spaced points, and the **phase** angle of the cross-spectrum per point
-  (1/24-octave windows, drawn only where coherent: a slope is a delay, a flat offset a rotation);
-- the **PHAT lag function** (−5 to +5 ms, a coarse search to ±40 ms), whose peak is a pure delay's lag on any material
-  and a phase rotation's at 0 ms, weighted by each bin's coherence (R17);
-- the **ATTACK lag** (R18): the same offset read from the attacks in three bands, for hits whose waveforms differ;
-- the **preview**: the input's cross-spectrum turned by a delay, a polarity flip and the phase stage's response
-  (`dsp/PhaseResponse.h`), which is how the knobs preview on a held screen (R20).
+**Removed (2026-10-08, R26):** the curve (r(f) at 256 points), the phase angles, the PHAT lag function (with its ±40 ms
+coarse search) and the attack lag (R18), which the views R23 removed had shown and which were kept for ANALYSE. ANALYSE's
+search works from the whole capture with its own attack lag (`src/analyse/Search`), so they went, with their tests
+(git history has them).
 
 **"No sidechain":** NO SIDECHAIN SIGNAL when the sidechain bus is disabled, **or** its level has been below the gate
 for more than 1 s, **or** no audio has arrived for 1 s, **or** (R24) the sidechain is sample for sample the track's own
@@ -995,12 +992,11 @@ Each item has a "done when" check. P* (Python) and U* (UI) work can run in paral
     `release.yml` signs and notarises both macOS builds and their .pkg (confirmed on the first release run). Windows
     and Linux ship unsigned (no credentials; none needed).
   - Left: the first release run, the host checks.
-- [ ] **Quick-start guide** (README section + installer readme). The essential point: the plugin can only *delay*, so it goes on the track that arrives **earlier** (usually the closer mic), with the later track as the sidechain. Also covers routing a sidechain in the major hosts, what the meter's two markers mean, and that Constant mode adds compensated latency.
 - [x] Name check: web search (2026-10-06) found no audio product called "Phase Align"; "phase alignment" is common as a
   description of other products. **No trademark search (user, 2026-10-06): open source.**
-- [ ] Quick-start guide: **drafted in README (2026-10-06)** with the −4..+4 ms delay (it can move a track either way, so
-  "only delay" no longer applies); host routing steps to be checked in each host; the installer readme is generated
-  from it (`installer/stage_docs.sh`), draft note included until the routing is checked.
+- [x] Quick-start guide: the README's (2026-10-06; the −4..+4 ms delay moves a track either way, so the old "only delay"
+  advice went; ANALYSE added 2026-10-08), from which the installer readme is generated (`installer/stage_docs.sh`). No
+  host-specific routing steps (user, 2026-10-07).
 
 ### v0.8: Record and compare
 - [x] **Built (2026-10-08, R26):** the search (`src/analyse/Search`, golden-tested against `prototype/analyse.py`), the

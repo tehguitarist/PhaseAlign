@@ -45,7 +45,7 @@ MeterScreen::MeterScreen(const SourceAssets& assetsIn, meter::MeterCapture& capt
 
 void MeterScreen::applyNeeds()
 {
-    meter::CorrelationAnalyser::Needs needs{false, false, false, false};
+    meter::CorrelationAnalyser::Needs needs{false};
     needs.bands = view == View::bands;
     capture.setWantSide(view == View::vector && isVectorStereo());
     analyser.setNeeds(needs); // the others need nothing but the overall bar: their pictures come from the scope buffer

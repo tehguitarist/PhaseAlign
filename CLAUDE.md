@@ -118,10 +118,10 @@ job, better.
       frozen picture, `dsp/PhaseResponse.h`), legend labels that hide a trace, input in blue (`design::meterInput`), only
       the current view's work runs (R21), bars hold through the analysis's signal gate (R24), and a sidechain that is a
       copy of the track's own input counts as none (the Logic bug, R24). FREQUENCY, TIME OFFSET and PHASE were removed;
-      **their analysis (curves, PHAT lag, attack lag, the preview) stays in `meter/CorrelationAnalyser` for ANALYSE, and
-      what ANALYSE doesn't use gets cleaned up afterwards (user).** The user's own stem pairs (kick, snare, bass, guitar,
-      hats; `captures/`, gitignored) tuned all of it: `prototype/export_pairs.py` makes the raw copies the hidden tests
-      read (`PhaseAlignDspTests "[.userpairs]"`, `"[.usercapture]"`, `"[.bandgate]"`; Release `"[.analysercost]"`).
+      their analysis (curves, PHAT and attack lags) was removed from `meter/CorrelationAnalyser` once ANALYSE had its own
+      (2026-10-08, plan R26). The user's own stem pairs (kick, snare, bass, guitar, hats; `captures/`, gitignored) tuned
+      all of it: `prototype/export_pairs.py` makes the raw copies the hidden tests read (`PhaseAlignDspTests
+      "[.usercapture]"`, `"[.bandgate]"`, `"[.useranalyse]"`; Release `"[.analysercost]"`, `"[.analysecost]"`).
       Pending: the user's DAW verdict on all of it (and on the Logic fix, which is tested with synthetic buffers only).
    10. **ANALYSE built (2026-10-08, branch `analyse`, not merged; plan R26, HANDOVER "ANALYSE: built into the plugin").**
       `src/analyse/` (Search: the port of `prototype/analyse.py`, which stays the spec, golden-tested via

@@ -371,8 +371,7 @@ their values at the screen's own pace. The VECTORSCOPE plots the last 0.25 s (SL
 deviation of 1 and turned 45 degrees. ALIGNMENT keeps four seconds of the streams, finds hits on the sidechain (the rise of
 its 0.5 ms envelope, within 12 dB of the strongest recent one, from a quiet start) and, for a captured hit, renders this
 track's input through the knobs: its spectrum times the response of the delay, the polarity flip and the phase stage (two
-first-order all-passes for HIGH and LOW, a rotation for CONSTANT), back to the time domain. The meter's analysis also
-measures delays and rotations (a PHAT lag function and an attack-based lag) that no view shows.
+first-order all-passes for HIGH and LOW, a rotation for CONSTANT), back to the time domain.
 
 **ANALYSE.** While it captures, the audio thread copies this track's input and the sidechain into a buffer; everything
 else happens off the audio thread. The search takes one cross-spectrum of the whole capture (8192-point Hann frames at
