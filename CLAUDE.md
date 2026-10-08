@@ -23,14 +23,15 @@ or call `.venv/bin/python` directly. Never use the system `python3` or `pip` for
 
 **Naming (user, 2026-10-06):** the only mention of another product anywhere in the repo (docs, code, comments, commit
 messages) is the README's "Inspired by phase alignment tools like the Little Labs IBP". Not a clone: it does the same
-job, better.
+job, better. That includes the mic and preamp models in the user's stem names: they live in the gitignored `captures/`.
 
 ## Current status (update as work progresses)
 
-As of 2026-10-08 everything is on master (ANALYSE merged from its branch that day). GitHub has master up to `8f906f0`
-(green in CI on all three platforms); the ANALYSE work after it is not pushed. **Start a session with `HANDOVER.md`**:
-what is next, what waits for the user, and the ground rules. The plan's R-table (IMPLEMENTATION_PLAN.md) records every
-decision.
+As of 2026-10-08 master has ANALYSE (merged that day; GitHub has master up to `8f906f0`, green in CI on all three platforms, the
+ANALYSE work after it is not pushed). The refinements from the user's newer stems (the shift rule, the chance flag, the best
+effort as it is, larger text) are on the branch `analyse-refinements`, not merged. **Start a session with `HANDOVER.md`**: what is
+next, what waits for the user (their blind listening test), and the ground rules. The plan's R-table (IMPLEMENTATION_PLAN.md)
+records every decision.
 
 1. **What is built.** The delay (−4 to +4 ms in steps of 0.1 sample, windowed-sinc kernels; latency = the reach plus the
    lookahead while on; plan 2.1a, R12), polarity, the phase stage (HIGH and LOW all-pass shapes in both RANGEs, run
@@ -38,7 +39,8 @@ decision.
    4097-tap Hilbert FIR, a true rotation, about 43 ms of latency), host bypass, section dimming (alpha 0.4, approved),
    the tooltips switch (R25), the meter (BANDS, VECTORSCOPE, ALIGNMENT; R17 to R24) and **ANALYSE** (R26: capture, a
    search golden-tested against `prototype/analyse.py`, the options screen with ORIGINAL, before/after previews,
-   warnings for chance-level and weak matches, a progress bar). Licence: GNU AGPLv3.
+   warnings for chance-level and weak matches, a manual-shift advice only for a significant gain with a best effort as the track
+   stands, a progress bar). Licence: GNU AGPLv3.
 2. **Hi/Lo shapes:** each (mode, range) is its own shape from the reference unit's captured geometries (LOW out 75.1 Hz,
    LOW in two stacked at 150.1 Hz, HIGH out 150.1 Hz, HIGH in 75.1 Hz + 1502 Hz); the modes are named for where the
    middle of the turn sits (plan 2.3). HIGH with RANGE in shows the first section's angle, 0-90, with an asterisk. The
@@ -47,8 +49,11 @@ decision.
 3. **Python references** (`prototype/`, all through the venv) and their C++ goldens, within 1e-6 (DSP) or 1e-9
    (ANALYSE's scores): `hilo.py` and `p2_constant.py` → `golden.py` → `tests/golden/`; `analyse.py` (the ANALYSE spec) →
    `analyse_golden.py` → `tests/golden/analyse_*` and, from the user's pairs, `captures/analyse_user_expected.txt`.
-   Regenerate whenever a reference changes, and change the C++ identically. Also: `analyse_stems.py`,
-   `analyse_shootout.py` (blind listening sets), `analyse_metrics.py` (scoring measures against the user's verdicts),
+   Regenerate whenever a reference changes, and change the C++ identically. Also: `analyse_stems.py`, `analyse_stems2.py` and
+   `analyse_stems3.py` (every pair of the newer stem sets, results in `prototype/out/analyse/`), `build_blind3.py`,
+   `blind3_page.html` and `blind3_decode.py` (the blind listening test and its decoder; the key stays unopened until the user's
+   results are back), `hit_timing.py` (onset timing per hit, a candidate witness for percussive pairs),
+   `analyse_shootout.py` (the earlier blind listening sets), `analyse_metrics.py` (scoring measures against the user's verdicts),
    `export_pairs.py` (raw copies of the user's pairs for the hidden tests), `p3_report.py`, `p4_meter.py`,
    `subsample.py`, `hf_check.py`, `oversampling.py`, `decramp_ab.py`, `range_ab.py`, `modes_figure.py`.
 4. **Build and test** (see also HANDOVER "Gotchas"):
@@ -64,9 +69,8 @@ decision.
    - CI runs on master pushes, PRs and manual dispatch: tests, the DSP benchmark and pluginval on all three platforms
      (pluginval gates the Windows and Linux jobs); `release.yml` refuses a commit without a green CI run.
    - Installing (when the user asks): `/Library/Audio/Plug-Ins/{Components,VST3}`, not ~/Library.
-5. **Waiting for the user:** their DAW verdict on the meter and ANALYSE; their new stems, for a comprehensive check of
-   ANALYSE's thresholds and the listening sets (they asked to change nothing in the search until then); the second
-   blind set's listening. Details: HANDOVER.
+5. **Waiting for the user:** their blind listening test (`captures/stems2/blind/index.html`, then the results file to decode
+   against the key); their DAW verdict on the meter and ANALYSE; a merge and a push. Details: HANDOVER.
 
 ## Key documents
 

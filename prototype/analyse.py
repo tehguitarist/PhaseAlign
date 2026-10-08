@@ -415,7 +415,12 @@ def low_end_change(sp, c):
     return score_at(lf, candidate_response(c, sp.fs, sp.freqs)) - score_at(lf, np.ones(len(sp.freqs)))
 
 
-WIDE_REACH_MS = 10.0   # how far beyond the knob the waveform score looks for a better delay (to tell the user to shift by hand)
+SHIFT_REACH_MS = 40.0  # how far beyond the knob the waveform score looks for a better delay (to tell the user to shift by hand)
+SHIFT_GAIN = 0.04      # a manual shift is advised only when the best score beyond the knob's reach beats the best inside it by this
+SHIFT_FRACTION = 0.75  # ... and the advice is the smallest shift that gets this fraction of that gain
+SHIFT_GAIN_EDGE = 0.02 # ... but only this when the best delay inside the reach sits at its limit (within EDGE_MARGIN_MS of it): the track
+EDGE_MARGIN_MS = 0.15  #     is pinned at the knob's end and wants more (overheads are often 4 to 7 ms from the kick and snare: 2.5 m is
+                       #     7 ms, the user, 2026-10-08; one overhead pair read +0.038 against the kick, a hair under SHIFT_GAIN)
 ATTACK_STRONG = 0.35   # the attack reading's peak above which its delay is trusted over the waveform score's (see suggest)
 
 
@@ -458,14 +463,63 @@ def shift_samples(x, n):
     return np.concatenate([x[-n:], np.zeros(-n)])
 
 
+def shift_curve(sp, phase_on=True):
+    """The best score at every lag out to SHIFT_REACH_MS over every setting and both polarities: (curve, lags in samples)."""
+    freqs = sp.freqs
+    curve = None
+    for mode, wide, theta in settings(phase_on):
+        h = stage_response(mode, wide, theta, sp.fs, freqs) if mode != "none" else np.ones(len(freqs))
+        r, lags = band_scores(sp, h, SHIFT_REACH_MS)
+        m = r.mean(0)
+        s = np.maximum(m, -m)
+        curve = s if curve is None else np.maximum(curve, s)
+    return curve, lags
+
+
+def shift_gain_beyond(sp, phase_on=True):
+    """How much the best score beyond the knob's reach beats the best inside it (the shift's gain)."""
+    curve, lags = shift_curve(sp, phase_on)
+    inside = np.abs(lags) <= MAX_DELAY_MS * 1e-3 * sp.fs
+    return curve[~inside].max() - curve[inside].max()
+
+
+def shift_advice(sp, phase_on=True, attack=None):
+    """The manual shift (samples, positive delays the track; 0 for none) the user's policy asks for (2026-10-08: the DELAY knob is
+    for micro adjustments, and a room mic's pre-delay is part of its size, so a big shift is advised only for a significant
+    improvement, and then the smallest one that gets most of it). One pass over every setting and both polarities gives the best
+    score at every lag out to SHIFT_REACH_MS. The best inside the knob's reach is what ANALYSE can already do; the best beyond it
+    must beat that by SHIFT_GAIN, and the advice is the lag nearest zero beyond the reach whose score is at least SHIFT_FRACTION
+    of the way from the one to the other. A clear attack reading beyond the reach (`attack` = (ms, clear)) is a second witness that has
+    to agree: the advice is then that lag if the score there beats the best inside the reach by SHIFT_GAIN, and none otherwise
+    (2026-10-08: the user's snare sample reads a clear attack at -5.9 ms, one period of its body, and the score peaks at -17 to
+    -20 ms, more periods; the user hears no flam, so it is within 100 samples: both witnesses were cycle slips and disagreed)."""
+    curve, lags = shift_curve(sp, phase_on)
+    inside = np.abs(lags) <= MAX_DELAY_MS * 1e-3 * sp.fs
+    in_idx = np.nonzero(inside)[0]
+    j_in = in_idx[int(np.argmax(curve[in_idx]))]
+    best_in = curve[j_in]
+    best_out = curve[~inside].max()
+    need = SHIFT_GAIN_EDGE if abs(lags[j_in]) >= (MAX_DELAY_MS - EDGE_MARGIN_MS) * 1e-3 * sp.fs else SHIFT_GAIN
+    if attack is not None and attack[1] and MAX_DELAY_MS < abs(attack[0]) <= SHIFT_REACH_MS:
+        atk = attack[0] * 1e-3 * sp.fs
+        return int(round(atk)) if curve[np.abs(lags - atk) <= 1.0].max() - best_in >= need else 0
+    if best_out - best_in < need:
+        return 0
+    target = best_in + SHIFT_FRACTION * (best_out - best_in)
+    ok = np.nonzero((~inside) & (curve >= target))[0]
+    j = min(ok, key=lambda i: (abs(lags[i]), -curve[i]))
+    return int(round(lags[j]))
+
+
 def suggest_with_shift(x, y, fs, delay_on=True, phase_on=True):
     """suggest(), plus the case the DELAY knob can't cover (user, 2026-10-08: it is for micro adjustments; a big offset is moved
-    by hand, in samples, as DAWs work in them). When the attack reading is clear and beyond the reach, when the best option
-    sits at its edge, or when the waveform score has a clearly better delay beyond the reach (WIDE_REACH_MS), the message asks
-    for a manual shift of that many samples, and the options are those for the signal once it has been shifted (so within the
-    knob's reach). With DELAY off nothing is shifted; a clear attack offset is only mentioned. Returns (options, baseline r,
-    attack reading, verdict, shift in samples or 0, message or ""). The match flags (match_flags) are worked out once, for
-    the options returned (2026-10-08: so the chance test isn't run for options a shift replaces)."""
+    by hand, in samples, as DAWs work in them). The message asks for a manual shift only (and never when a clear attack reading is
+    inside the reach) when shift_advice finds a significant
+    improvement beyond the knob's reach (user, 2026-10-08: not whenever the transients sit far apart: a room mic's pre-delay is
+    part of its size), and the options are then those for the signal once it has been shifted (so within the knob's reach). With
+    DELAY off nothing is shifted; a clear attack offset is only mentioned. Returns (options, baseline r, attack reading,
+    verdict, shift in samples or 0, message or ""). The match flags (match_flags) are worked out once, for the options returned
+    (2026-10-08: so the chance test isn't run for options a shift replaces)."""
     def flagged(xx, opts, verdict):
         if opts and not verdict.startswith("delay only"):
             return verdict + match_flags(xx, y, fs, opts, delay_on, phase_on)
@@ -477,16 +531,9 @@ def suggest_with_shift(x, y, fs, delay_on=True, phase_on=True):
         if lag[1] and abs(lag[0]) >= MIN_DELAY_MS:
             note = f"DELAY is off: the transients are {int(round(lag[0] * 1e-3 * fs)):+d} samples apart"
         return opts, base, lag, flagged(x, opts, verdict), 0, note
-    shift = 0
-    if lag[1] and abs(lag[0]) > MAX_DELAY_MS:
-        shift = int(round(lag[0] * 1e-3 * fs))
-    elif opts and abs(opts[0][1].delay_ms) >= MAX_DELAY_MS - 0.15:
-        shift = int(round(opts[0][1].delay_ms * 1e-3 * fs))
-    else:
-        wide, _ = search(spectra(x, y, fs), top=1, phase_on=phase_on, reach_ms=WIDE_REACH_MS)
-        inside = opts[0][1].score if opts else base
-        if abs(wide[0].delay_ms) > MAX_DELAY_MS and wide[0].score - inside >= MIN_GAIN:
-            shift = int(round(wide[0].delay_ms * 1e-3 * fs))
+    # a clear attack reading inside the knob's reach means the transients already line up: no manual shift (2026-10-08: the bass
+    # amp against its DI was told to move 5 ms, another cycle of the note, with the attacks 1.3 ms apart)
+    shift = 0 if lag[1] and abs(lag[0]) <= MAX_DELAY_MS else shift_advice(spectra(x, y, fs), phase_on, (lag[0], lag[1]))
     if shift == 0:
         return opts, base, lag, flagged(x, opts, verdict), 0, ""
     shifted = shift_samples(x, shift)
@@ -495,9 +542,27 @@ def suggest_with_shift(x, y, fs, delay_on=True, phase_on=True):
     return opts, base, lag, flagged(shifted, opts, verdict), shift, message
 
 
+def as_is_options(x, y, fs, delay_on=True, phase_on=True):
+    """The options for the track where it is, for when suggest_with_shift advises a manual shift (user, 2026-10-08: if it is too far out
+    to shift, still make a best phase effort, e.g. a room mic kept at its own distance). The ordinary options (suggest) when there are
+    any; else the single best candidate inside the knob's reach if it gains at least SMALL_GAIN, as a "small improvement" (shown, not
+    hidden). Returns [(name, Candidate, gain, low-end change, small)]."""
+    opts, base, _, _ = suggest(x, y, fs, delay_on, phase_on)
+    if opts:
+        return [(n, c, g, lf, False) for n, c, g, lf in opts]
+    sp = spectra(x, y, fs)
+    fam, base = search(sp, top=1, phase_on=phase_on, reach_ms=None if delay_on else 0.0)
+    if fam and fam[0].score - base >= SMALL_GAIN:
+        return [("small improvement", fam[0], fam[0].score - base, low_end_change(sp, fam[0]), True)]
+    return []
+
+
 MIN_GAIN = 0.03      # r gained over doing nothing below which ANALYSE says there is nothing worth changing
+SMALL_GAIN = 0.01    # ... and the least gain that as_is_options still shows, marked as small
 CHANCE_SHIFTS = (0.37, 0.61)  # the chance test turns the sidechain round by these fractions of the capture
 CHANCE_MARGIN = 0.02          # an option's gain must beat the chance test's by this, or it is flagged "chance level"
+CHANCE_SKIP_R = 0.30          # ... unless its r is at least this: tracks that already agree this well are not unrelated (2026-10-08:
+                              # bass amp against its DI and an acoustic guitar pair, r 0.44, were flagged; the unrelated pairs reach 0.1)
 WEAK_MATCH = 0.12             # an option whose r stays under this is flagged "weak match"
 # From the user's pairs (2026-10-08): genuine ones beat the chance test by +0.037 (set 1 kick) to +0.53, GTR 1 against
 # Bass DI (both ways, unrelated) by +0.016 and +0.007; guitar against bass playing one part beat it by +0.09 and +0.14 (a
@@ -522,7 +587,7 @@ def match_flags(x, y, fs, options, delay_on, phase_on):
     """" (chance level)" when the best option doesn't beat the chance test by CHANCE_MARGIN, " (weak match)" when its r
     stays under WEAK_MATCH: warnings on the screen, the options still shown."""
     flags = ""
-    if options[0][2] - chance_gain(x, y, fs, delay_on, phase_on) < CHANCE_MARGIN:
+    if options[0][1].score < CHANCE_SKIP_R and options[0][2] - chance_gain(x, y, fs, delay_on, phase_on) < CHANCE_MARGIN:
         flags += " (chance level)"
     if options[0][1].score < WEAK_MATCH:
         flags += " (weak match)"

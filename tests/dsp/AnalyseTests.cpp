@@ -98,7 +98,7 @@ struct Case
     bool hasChanceGain = false;
     double chanceGain = 0.0;
     int shift = 0;
-    std::vector<ExpectedOption> options;
+    std::vector<ExpectedOption> options, asIs;
     std::vector<ExpectedScore> scores;
 };
 
@@ -178,6 +178,15 @@ std::vector<Case> readCases(const std::string& path)
             o.delayOnly = delayOnly != 0;
             c.options.push_back(o);
         }
+        else if (key == "asis")
+        {
+            ExpectedOption o;
+            o.c = readCandidate(in);
+            int small;
+            in >> o.c.score >> o.gain >> o.lowEnd >> small;
+            o.delayOnly = small != 0; // reused: "small"
+            c.asIs.push_back(o);
+        }
         else if (key == "score")
         {
             ExpectedScore s;
@@ -235,6 +244,30 @@ void checkCase(const Case& c, const std::vector<float>& x, const std::vector<flo
         CHECK(got.fromAttacks == want.fromAttacks);
         CHECK(got.delayOnly == want.delayOnly);
     }
+    // With a shift advised, the best this track can do as it is (user, 2026-10-08). The best option is checked exactly;
+    // the ones after it only for the level of their score: on case B unshifted (6.5 ms out, so a flat landscape of
+    // weak, near-tied candidates) which of them makes the top 200 leaders depends on rounding differences between
+    // numpy's FFT and ours (the C++ found 122.5 degrees at 0.1512 where the Python has 120 at 0.1495).
+    REQUIRE(r.optionsAsIs.size() == c.asIs.size());
+    for (size_t i = 0; i < c.asIs.size(); ++i)
+    {
+        const auto& got = r.optionsAsIs[i];
+        const auto& want = c.asIs[i];
+        INFO("as-is option " << i + 1 << ": " << describe(got.candidate) << " vs " << describe(want.c));
+        CHECK(got.small == want.delayOnly); // "small", read into delayOnly
+        if (i > 0)
+        {
+            CHECK(got.candidate.score == Catch::Approx(want.c.score).margin(5e-3));
+            continue;
+        }
+        CHECK(got.candidate.mode == want.c.mode);
+        CHECK(got.candidate.wide == want.c.wide);
+        CHECK(got.candidate.flip == want.c.flip);
+        CHECK(got.candidate.theta == Catch::Approx(want.c.theta).margin(1e-9));
+        CHECK(got.candidate.delayMs == Catch::Approx(want.c.delayMs).margin(1e-3));
+        CHECK(got.candidate.score == Catch::Approx(want.c.score).margin(1e-9));
+        CHECK(got.gain == Catch::Approx(want.gain).margin(1e-9));
+    }
     if (! c.scores.empty())
     {
         const auto sp = Spectra::compute(x.data(), y.data(), (int)std::min(x.size(), y.size()), c.fs);
@@ -279,9 +312,12 @@ TEST_CASE("ANALYSE's search: the known answers of the synthetic pairs", "[analys
     CHECK(r.options[0].candidate.theta == Catch::Approx(120.0).margin(angleStep));
     CHECK(r.options[0].candidate.delayMs == Catch::Approx(1.25).margin(0.01));
 
-    // B: 6.5 ms late (312 samples) is beyond the knob: shift by hand, then turn 60 degrees.
+    // B: 6.5 ms late (312 samples) is beyond the knob: shift by hand, then turn 60 degrees. The advice is the smallest
+    // shift that gets most of the gain, so it lands a little short of the whole 312 and the delay knob makes up the
+    // rest.
     r = suggestWithShift(bx.data(), ay.data(), n, fs, {});
-    CHECK(std::abs(r.shiftSamples + 312) <= 1);
+    CHECK(std::abs(r.shiftSamples + 312) <= 6);
+    CHECK(r.shiftSamples > -312 - 1);
     CHECK(r.message.find("consider shifting") != std::string::npos);
     REQUIRE(! r.options.empty());
     CHECK(r.options[0].candidate.theta == Catch::Approx(60.0).margin(angleStep));

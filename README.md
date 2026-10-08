@@ -8,9 +8,10 @@
 
 Phase Align is a free, open-source phase and time alignment plugin (AU and VST3) for lining up two tracks that capture
 the same source: a close mic and a room mic, a DI and an amp, the top and bottom of a snare. It has a delay (−4 to
-+4 ms in 0.1-sample steps), a phase rotation (all-pass or constant), a polarity flip, and a correlation meter that
-compares your track with another one, so you can see the alignment as well as hear it. Inspired by phase alignment
-tools like the Little Labs IBP.
++4 ms in 0.1-sample steps), a phase rotation (all-pass or constant), a polarity flip, a correlation meter that
+compares your track with another one, so you can see the alignment as well as hear it, and **ANALYSE**, which listens to
+the two tracks playing together and suggests the delay, polarity and phase that line them up best. Inspired by phase
+alignment tools like the Little Labs IBP.
 
 **[⬇ Download the latest release](https://github.com/tehguitarist/PhaseAlign/releases/latest)**
 
@@ -21,6 +22,7 @@ processed linked, so both channels get the same treatment.
 - [The controls](#the-controls)
 - [The phase modes](#the-phase-modes)
 - [Reading the meter](#reading-the-meter)
+- [ANALYSE (auto-suggest)](#analyse-auto-suggest)
 - [Which control for which problem](#which-control-for-which-problem)
 - [Latency and automation](#latency-and-automation)
 - [How it works](#how-it-works) (the technical part)
@@ -272,14 +274,16 @@ ear, and ORIGINAL (what you had before) to go back to.
 4. **Choose.** Click an option to apply it, then play to hear it; click the other, or **ORIGINAL**, to compare. The arrow
    marks the row the panel has now. Beside the rows, the chosen option against ORIGINAL over the captured audio: the
    six **BANDS** (ORIGINAL as the blue tick, the option as the green bar) or **ALIGNMENT** (the strongest captured hit:
-   the sidechain pale, ORIGINAL blue, the option green). **AGAIN** captures anew.
+   the sidechain pale, ORIGINAL blue, the option green). **AGAIN** captures anew. When ANALYSE advises moving the clip
+   (see the notes below), the rows that work as it is come first, then the rows marked **AFTER THE SHIFT**.
 5. **Press ANALYSE** again to go back to the meter. What you applied stays; fine-tune it with the knobs if you like.
 
 **What it searches.** Only what is switched on: with **DELAY** on, the delay (within the knob's −4 to +4 ms); with
 **PHASE** on, HIGH, LOW (both RANGEs) and CONSTANT over their whole travel; the polarity always. So turn DELAY off to
 find the best phase and polarity for the delay you have set, or PHASE off for the best delay and polarity alone. An
 option that leaves the phase out switches **PHASE** off, so the next ANALYSE won't search it until you switch it back on
-(the screen's top line always says what is being searched).
+(the screen's top line always says what is being searched). A stereo track is analysed as its mono sum, and the
+setting it suggests applies to both channels, as the plugin always treats a stereo track as one.
 
 **Each option** shows its settings as the panel will read them, **r** (how well this track then matches the sidechain
 over the capture, averaged over 1/3-octave bands so the low end doesn't dominate; +1 would be identical) and the change
@@ -289,13 +293,21 @@ from ORIGINAL. Notes:
 - **DELAY ONLY**: the waveforms barely match, but the transients clearly sit apart, so a delay alone is suggested.
 - **Two close options**: the two score within 0.01 of each other; the choice is a matter of the sound you want.
 - **Nothing worth changing**: no setting improves the match by 0.03 or more.
-- **Transient may be out of range, consider shifting N samples manually if needed**: the tracks are further apart
-  than the delay reaches. Move this track's clip by N samples in the DAW (positive moves it later); the options shown
-  are for after that shift.
+- **Transient may be out of range, consider shifting N samples manually if needed**: lining the tracks up further than
+  the delay reaches would improve the match a lot. This only appears for a significant improvement, and N is the
+  smallest shift that gets most of it, not the full alignment (a room mic's delay is part of its sound, so ANALYSE
+  doesn't push it any further than it has to; it is also held back when the transients already line up, or when the two ways
+  of reading where they sit disagree). Move this track's clip by N samples in the DAW (positive moves it
+  later). Whether or not you do, ANALYSE makes a best effort for the track where it is now: those rows come first and work
+  as they are; the rows marked **AFTER THE SHIFT** are for after the move.
+- **AFTER THE SHIFT**: this option is for after the manual shift above, not for the track as it stands.
+- **SMALL IMPROVEMENT**: the best this track can do where it is gains less than the usual 0.03 but at least 0.01, so it is
+  shown rather than hidden (it appears with the shift advice, for example for a room mic you want to leave where it is).
 - **DELAY is off: the transients are N samples apart**: with DELAY off, where the transients sit, for information.
 - **The audio seems unrelated** (amber): the best option is no better than what the search finds by chance on this
   material (it checks by running again with the sidechain moved a few seconds out of step). The sidechain may be the
-  wrong track, or the section too short. The options are still shown, to try by ear.
+  wrong track, or the section too short. The options are still shown, to try by ear. It is not raised when the match is
+  already strong (*r* of 0.30 or more).
 - **A weak match** (amber): the best option still leaves the tracks matching only a little (*r* under 0.12), as with
   different instruments playing the same part, which you may still want in phase. Choose by ear.
 
@@ -380,14 +392,14 @@ exact response (the same formulas the plugin runs) applied to the cross-spectrum
 1/3-octave bands from 40 Hz to 16 kHz. HIGH and LOW are tried in both RANGEs and CONSTANT from 0 to 180° in 2.5° steps,
 each at every delay in reach to a quarter of a sample (one inverse FFT per setting), then refined to the knob's 0.1
 sample. When the transients line up clearly (an attack-based lag over the whole capture), the delay comes from them and
-the phase and polarity are chosen within 0.3 ms of it. Options that would sound alike are merged. It runs on its own
-thread in a fraction of a second.
+the phase and polarity are chosen within 0.3 ms of it. Options that would sound alike are merged. A second pass scores every
+setting at every lag out to 40 ms to decide whether to advise a manual shift (only for a significant gain beyond the
+knob's reach, and the smallest shift that gets most of it; a clear transient reading inside the reach, or a clear one that the
+score doesn't agree with, means none). It runs on its own thread in a fraction of a second.
 
 **Efficiency.** On an Apple M1, a stereo frame costs about 18 to 23 ns in HIGH or LOW and about 30 ns in CONSTANT at
 48 kHz. The FFT is vDSP on macOS and [PFFFT](https://bitbucket.org/jpommier/pffft) on Windows and Linux. Nothing
 allocates on the audio thread, which the tests check.
-
-The design is in [PLAN.md](PLAN.md) and how it is built is in [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
 
 ## Build
 

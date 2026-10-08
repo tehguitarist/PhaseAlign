@@ -82,7 +82,7 @@ The RANGE button is the hardware's 90°/180° switch: 90 runs one all-pass secti
 
 **As built (2026-10-08): IMPLEMENTATION_PLAN R26.** The main differences from what follows: the search scores every
 candidate in closed form from one cross-spectrum of the capture (no GCC-PHAT, no offline renders), takes the delay from the
-attacks when they are clear, searches only the stages switched on, and asks for a manual shift in samples beyond ±4 ms;
+attacks when they are clear, searches only the stages switched on, and advises a manual shift in samples only for a significant gain beyond ±4 ms (the smallest that gets most of it, with a best effort for the track as it stands alongside);
 the capture ends when the transport stops (10 s minimum, 30 s recommended); clicking an option applies it, with ORIGINAL
 to go back.
 
