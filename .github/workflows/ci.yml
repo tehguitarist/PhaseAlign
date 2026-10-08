@@ -79,8 +79,11 @@ jobs:
           cp -R "build/PhaseAlign_artefacts/Release/AU/Phase Align.component" "$HOME/Library/Audio/Plug-Ins/Components/"
           # On a clean CI runner the freshly-copied .component isn't registered with the
           # AudioComponentRegistrar yet, so auval reports "didn't find the component" / -50.
-          # Bounce the registrar so it rescans ~/Library/Audio/Plug-Ins/Components and retry.
+          # Bounce the registrar so it rescans ~/Library/Audio/Plug-Ins/Components before the first
+          # attempt (so a pass at once raises no warning), and again before each retry.
           ls -la "$HOME/Library/Audio/Plug-Ins/Components/" || true
+          killall -9 AudioComponentRegistrar 2>/dev/null || true
+          sleep 5
           ok=0
           for i in 1 2 3 4; do
             if auval -v aufx PhAl Lprc; then ok=1; break; fi
@@ -116,7 +119,7 @@ jobs:
       - name: Upload pluginval logs
         # On failure, and always on Windows and Linux (their logs are small).
         if: failure() || (always() && runner.os != 'macOS')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: pluginval-logs-${{ matrix.os }}
           path: pluginval-logs

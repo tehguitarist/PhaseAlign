@@ -121,6 +121,9 @@ After changing either, run `tools/build_assets.sh` (needs ImageMagick, pngquant 
 and the embedded images in `assets/images/`. Adding a control means rows in the CSV and an entry in `toggleSpecs` in
 `src/PluginEditor.cpp`.
 
+The README's two phase charts are generated from the reference by `tools/phase_modes_figure.py` and `tools/phase_chart.py`
+(`.venv/bin/pip install -r tools/requirements.txt` first); they write into `docs/images/`.
+
 ## Releasing
 
 The **Release** workflow (`.github/workflows/release.yml`, run manually from the Actions tab or

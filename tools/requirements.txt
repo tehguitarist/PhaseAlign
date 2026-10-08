@@ -1,0 +1,4 @@
+# for the README figures (tools/phase_chart.py, tools/phase_modes_figure.py); the reference scripts need reference/requirements.txt too
+matplotlib
+numpy
+scipy

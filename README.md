@@ -119,6 +119,14 @@ quarter, half, three-quarters and the full turn of the knob.
 
 ![Phase turned by each mode and range](docs/images/phase-modes.png)
 
+The second figure shows the same six settings at the same knob positions the way a phase analyser would: the phase of
+the output against the input, signed and wrapped to ±180°, with 0° meaning no change. All-pass filters delay phase, so
+their curves run downward from 0° as the frequency rises. With RANGE in the two sections together turn 360° in all, so
+those curves reach −180° and wrap round to +180° (the turn itself is continuous). CONSTANT is a flat line at its angle
+(a 180° turn sits on the top edge), and Ø is a flat 180°, the top and bottom edges.
+
+![Phase against frequency for each mode and range, as an analyser shows it](docs/images/phase-chart.png)
+
 ### HIGH and LOW: all-pass sections
 
 Each section is a first-order all-pass. It turns the phase from 0° at the lowest frequencies up to 180° at the top, with
