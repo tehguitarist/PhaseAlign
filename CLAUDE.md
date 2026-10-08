@@ -29,8 +29,8 @@ job, better. That includes the mic and preamp models in the user's stem names: t
 
 As of 2026-10-08 everything is on master and pushed (GitHub master at the merge of `analyse-refinements`: ANALYSE and its
 refinements from the user's newer stems, larger text, a finished README); CI's first look at `src/analyse` on Windows and Linux
-is the next thing to check. **Start a session with `HANDOVER.md`**: what is next, what waits for the user (their blind listening
-test), and the ground rules. The plan's R-table (IMPLEMENTATION_PLAN.md) records every decision.
+is the next thing to check. **Start a session with `HANDOVER.md`**: what is next, what waits for the user (their DAW verdicts
+and CI; the blind listening test is done), and the ground rules. The plan's R-table (IMPLEMENTATION_PLAN.md) records every decision.
 
 1. **What is built.** The delay (−4 to +4 ms in steps of 0.1 sample, windowed-sinc kernels; latency = the reach plus the
    lookahead while on; plan 2.1a, R12), polarity, the phase stage (HIGH and LOW all-pass shapes in both RANGEs, run
@@ -50,8 +50,8 @@ test), and the ground rules. The plan's R-table (IMPLEMENTATION_PLAN.md) records
    `analyse_golden.py` → `tests/golden/analyse_*` and, from the user's pairs, `captures/analyse_user_expected.txt`.
    Regenerate whenever a reference changes, and change the C++ identically. Also: `analyse_stems.py`, `analyse_stems2.py` and
    `analyse_stems3.py` (every pair of the newer stem sets, results in `prototype/out/analyse/`), `build_blind3.py`,
-   `blind3_page.html` and `blind3_decode.py` (the blind listening test and its decoder; the key stays unopened until the user's
-   results are back), `hit_timing.py` (onset timing per hit, a candidate witness for percussive pairs),
+   `blind3_page.html`, `blind3_decode.py` and `analyse_blind3_metrics.py` (the blind listening test, its decoder and the measures
+   scored against its results; the key is open now that the results are back), `hit_timing.py` (onset timing per hit, a candidate witness for percussive pairs),
    `analyse_shootout.py` (the earlier blind listening sets), `analyse_metrics.py` (scoring measures against the user's verdicts),
    `export_pairs.py` (raw copies of the user's pairs for the hidden tests), `p3_report.py`, `p4_meter.py`,
    `subsample.py`, `hf_check.py`, `oversampling.py`, `decramp_ab.py`, `range_ab.py`, `modes_figure.py`.
@@ -68,8 +68,8 @@ test), and the ground rules. The plan's R-table (IMPLEMENTATION_PLAN.md) records
    - CI runs on master pushes, PRs and manual dispatch: tests, the DSP benchmark and pluginval on all three platforms
      (pluginval gates the Windows and Linux jobs); `release.yml` refuses a commit without a green CI run.
    - Installing (when the user asks): `/Library/Audio/Plug-Ins/{Components,VST3}`, not ~/Library.
-5. **Waiting for the user:** their blind listening test (`captures/stems2/blind/index.html`, then the results file to decode
-   against the key); their DAW verdict on the meter and ANALYSE; the CI result. Details: HANDOVER.
+5. **Waiting for the user:** their DAW verdict on the meter and ANALYSE; the CI result. The blind listening test is done (2026-10-09,
+   plan R27): ANALYSE stays as it is. Details: HANDOVER.
 
 ## Key documents
 

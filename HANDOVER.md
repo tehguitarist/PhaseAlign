@@ -1,8 +1,9 @@
 # Handover: where things stand, and what's next
 
-Updated 2026-10-08, at the end of the session that refined ANALYSE on the user's newer stem sets (plan R26, last paragraphs).
+Updated 2026-10-09, after the user's blind listening test was decoded (plan R27); before that, the session that refined ANALYSE on the
+user's newer stem sets (plan R26, last paragraphs).
 Read CLAUDE.md first; plan sections and R-numbers are IMPLEMENTATION_PLAN.md. The plugin is feature-complete for now:
-what's left is the user's listening (the blind test below), their DAW verdicts, and the CI result.
+what's left is the user's DAW verdicts and the CI result (the blind test is done: ANALYSE stays as it is, see below).
 
 ## Ground rules (from the user)
 
@@ -55,8 +56,7 @@ what's left is the user's listening (the blind test below), their DAW verdicts, 
    stereo track and its SOURCE toggle; ALIGNMENT's captured hit following the knobs, the 2 s hold-off, wheel and -/+ zoom;
    HOLD and the knob previews; the legend toggles; the Logic fix (a sidechain that is a copy of the input counts as none;
    tested with synthetic buffers only). Bleed between mics is out of scope (user).
-3. **The blind listening test** (see "The newer stem sets and the blind test"): their `results.json`, then the decode, the
-   disagreements between ear and score, and a confirmation round before any change goes in.
+3. ~~The blind listening test~~ **Done (2026-10-08, decoded 2026-10-09; plan R27)**: no change to ANALYSE; see "What the ears said".
 4. **Listening:** M2 in a DAW (the delay and phase as built) and P3 fade tuning (`prototype/out/p3/`) on multi-mic stems;
    the second blind set (`prototype/out/analyse/blind2/`, key in `key.txt`, opened after listening).
 5. **CI's first look at ANALYSE** on Windows and Linux (pushed 2026-10-08; see "Next").
@@ -92,10 +92,23 @@ Four sets of the user's stems are in `captures/` (gitignored): the first two rou
   with a spread under 0.2 ms; overheads sit 4 to 7 ms from the kick and snare (the user: up to 2.5 m); the chance flag misfired on
   strong matches; the shift advice misfired on a note's period and on cycle slips. All fixed in the search except the hit-timing
   witness, which waits for the ears.
-- **Still open (the user's call after listening):** promote `hit_timing` to the delay authority for percussive pairs (and an
-  explicit percussive-against-sustained measure from it); a low-end-weighted score for rooms; a note when the pick swings between
-  windows (AC guitar mics, overheads); the weak-match flags on the delay-only path (bass against guitar, attacks agreeing in time
-  but not in phase); a periodic-peak guard for sustained notes (a bass note repeated gives equal peaks one period apart).
+- **Still open (untested by the ears, the user's call):** a note when the pick swings between windows (AC guitar mics, overheads); the
+  weak-match flags on the delay-only path (bass against guitar, attacks agreeing in time but not in phase); a periodic-peak guard for
+  sustained notes (a bass note repeated gives equal peaks one period apart). **Closed by the listening (R27):** `hit_timing` as the delay
+  authority (0 firsts of 6) and a low-end-weighted score.
+
+## What the ears said (blind test, 2026-10-08; plan R27 has the numbers)
+
+- One listener, 45 tests, repeats up to 4 places apart: the differences between real options are mostly within that noise ("top 2 or 3
+  were gut feelings", user). The pick was best on average (0.45 of the options against 0.58 for off); the flipped control was last in 27 of 45.
+- `prototype/analyse_blind3_metrics.py results.json` scores every option on the excerpt heard, with seven measures: all at chance for the
+  ordering (50 to 54%), 77 to 80% on polarity, none better than the current mean band r. The measure and thresholds stay.
+- Confidence follows the lead's correlation: under 0.05 the polarity is a coin flip (1 of 4; already "no change worth making"), 0.05 to 0.25
+  9 of 12, 0.25 and up 25 of 28. By source: guitar, piano, hats 12 of 15 against off, bass 3 of 4, snare 6 of 10, kick 3 of 11 (off often
+  won on the first kit). No low-end preference showed. Verdicts: "suggest" 7 of 9 against off, "close" 15 of 24, "no change" 4 of 10.
+- Known misses, from one test each: kick against bleed (r 0.42, the other polarity preferred) and kick against overheads (a "suggest" at
+  r about 0.13, just over WEAK_MATCH; raising it to 0.15 would flag it, not done). The user: they are suggestions, and the algorithm is
+  good as it stands.
 
 ## Next: needs no input
 
@@ -142,7 +155,7 @@ Four sets of the user's stems are in `captures/` (gitignored): the first two rou
 
 ## ANALYSE: the check for when the listening is back
 
-1. **Decode** (`prototype/blind3_decode.py`): do the flipped controls come last and the repeats agree? Then, per option kind, which
+1. **Done 2026-10-09 (plan R27).** **Decode** (`prototype/blind3_decode.py`): do the flipped controls come last and the repeats agree? Then, per option kind, which
    wins where (the best on paper, the best under 300 Hz, ANALYSE's pick, delay only, `hit-timing`, `noshift` against the shifted
    picks, the other windows' picks), and where the ear and the score disagree (add the verdicts to `analyse_metrics.py`'s `PREFS`
    before changing the measure).
