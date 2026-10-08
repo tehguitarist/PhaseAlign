@@ -153,8 +153,10 @@ press goes back to the meter; clicking an option applies it and ORIGINAL goes ba
 ALIGNMENT toggle.
 
 **Changed in the spec while building (both in analyse.py and the C++, goldens regenerated):** the 0.1-sample refinement
-sits on the knob's own grid, and options are merged when they would sound alike (band-mean correlation of one's output
-with the other's at least cos 20°, for polarity and phase with delays within 0.5 ms, or for the whole response). On the
+sits on the knob's own grid, and options are merged when they would sound alike on the capture (band-mean correlation of
+one's output with the other's, every bin weighted by the track's spectrum, at least cos 20°, for polarity and phase with
+delays within 0.5 ms, or for the whole response). The remaining "near neighbour" second options are real alternatives:
+snare OH's CONSTANT 5° Ø and LO in 10° Ø are identical to 2 kHz and opposite at 5 to 8 kHz (the same body, another top). On the
 user's pairs: kick OH (both scopes with phase) is now one clear suggestion instead of LO in 140° vs 160°; the second
 option changed for snare sample (both), snare OH and guitar 2; the first options are unchanged everywhere.
 

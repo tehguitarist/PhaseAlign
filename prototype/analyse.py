@@ -168,20 +168,33 @@ def score_at(sp, g_k):
 
 
 def same_family(f, c, sp):
-    """Two candidates are one family when they would sound alike, as the score tells it: the band-mean correlation of one's
-    output with the other's (the mean over the active bands of cos(their phase difference at the band's centre)) at least
-    cos(FAMILY_DEGREES), either for the polarity and phase stage alone with delays within FAMILY_DELAY_MS, or for the whole
-    response, delay included (a Hi/Lo turn at a small angle is close to a short delay, so LO in 2.5 with -1.89 ms is phase
-    off with -1.85 ms). 2026-10-08; it was the same mode, polarity and RANGE with knob angles within 20 degrees, which showed
-    CONSTANT 180 next to the polarity flip it equals as two options."""
-    centres = np.array(sp.centres)
+    """Two candidates are one family when they would sound alike on this capture: the correlation of one's output with
+    the other's, band by band as the score counts it (every bin of each active band, weighted by this track's own
+    spectrum Sxx, so within-band turns count and empty bins don't), its band mean at least cos(FAMILY_DEGREES). Either for
+    the polarity and phase stage alone with delays within FAMILY_DELAY_MS, or for the whole response, delay included (a
+    Hi/Lo turn at a small angle is close to a short delay). 2026-10-08: first the same mode within 20 degrees (CONSTANT 180
+    showed beside the polarity flip it equals), then the phase difference at each band's centre alone."""
     limit = math.cos(math.radians(FAMILY_DEGREES))
-    gf = family_response(f, sp.fs, centres)
-    gc = family_response(c, sp.fs, centres)
-    if abs(f.delay_ms - c.delay_ms) < FAMILY_DELAY_MS and np.mean(np.cos(np.angle(gf * np.conj(gc)))) >= limit:
+    k = active_bins(sp)
+    gf, gc = family_response(f, sp.fs, sp.freqs[k]), family_response(c, sp.fs, sp.freqs[k])
+    if abs(f.delay_ms - c.delay_ms) < FAMILY_DELAY_MS and outputs_alike(sp, k, gf, gc, 0.0) >= limit:
         return True
-    shift = np.exp(-2j * np.pi * centres * (f.delay_ms - c.delay_ms) * 1e-3)
-    return bool(np.mean(np.cos(np.angle(gf * shift * np.conj(gc)))) >= limit)
+    return bool(outputs_alike(sp, k, gf, gc, f.delay_ms - c.delay_ms) >= limit)
+
+
+def active_bins(sp):
+    return np.concatenate([np.arange(a, b) for a, b in sp.edges])
+
+
+def outputs_alike(sp, k, gf, gc, delay_ms):
+    """The band mean of the correlation between the input through gf (and delay_ms more) and the input through gc."""
+    turn = np.real(gf * np.exp(-2j * np.pi * sp.freqs[k] * delay_ms * 1e-3) * np.conj(gc)) * sp.sxx[k]
+    r, i = [], 0
+    for a, b in sp.edges:
+        n = b - a
+        r.append(turn[i:i + n].sum() / sp.sxx[a:b].sum())
+        i += n
+    return float(np.mean(r))
 
 
 def family_response(c, fs, freqs):

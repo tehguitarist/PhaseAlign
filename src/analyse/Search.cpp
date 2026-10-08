@@ -194,40 +194,51 @@ std::vector<Setting> settings(bool phaseOn)
     return out;
 }
 
-// The polarity and the phase stage (no delay) at the centre of each active band.
+// The polarity and the phase stage (no delay) at every bin of the active bands, band after band.
 std::vector<std::complex<double>> familyResponse(const Spectra& sp, const Candidate& c)
 {
-    std::vector<std::complex<double>> g(sp.centres.size(), c.flip ? -1.0 : 1.0);
-    if (c.mode == Mode::none)
-        return g;
+    std::vector<std::complex<double>> g;
+    const auto sign = c.flip ? -1.0 : 1.0;
     const dsp::PhaseStageResponse response(c.toSettings(sp.fs), sp.fs);
-    for (size_t b = 0; b < g.size(); ++b)
-        g[b] *= response(sp.centres[b]);
+    for (const auto& [a, b] : sp.edges)
+        for (int k = a; k < b; ++k)
+            g.push_back(c.mode == Mode::none ? std::complex<double>(sign) : sign * response(sp.binHz(k)));
     return g;
 }
 
-// One family when they would sound alike, as the score tells it: the band-mean correlation of one's output with the
-// other's (the mean over the active bands of cos(their phase difference at the band's centre)) at least
-// cos(familyDegrees), either for the polarity and phase stage alone with delays within familyDelayMs, or for the whole
-// response, delay included (a Hi/Lo turn at a small angle is close to a short delay). So CONSTANT 180 is the polarity
-// flip.
-bool sameFamily(const Spectra& sp, const Candidate& f, const Candidate& c)
+// The band mean of the correlation between the input through gf (and delayMs more) and the input through gc: per band,
+// sum Sxx Re(gf e^(-j w d) conj(gc)) / sum Sxx.
+double outputsAlike(const Spectra& sp, const std::vector<std::complex<double>>& gf,
+                    const std::vector<std::complex<double>>& gc, double delayMs)
 {
-    const auto gf = familyResponse(sp, f), gc = familyResponse(sp, c);
-    const auto limit = std::cos(familyDegrees * pi / 180.0);
-    const auto meanCos = [&](double delayMs)
+    double total = 0.0;
+    size_t i = 0;
+    for (const auto& [a, b] : sp.edges)
     {
-        double sum = 0.0;
-        for (size_t b = 0; b < gf.size(); ++b)
+        double turn = 0.0, energy = 0.0;
+        for (int k = a; k < b; ++k, ++i)
         {
-            const auto w = -2.0 * pi * sp.centres[b] * delayMs * 1e-3;
-            sum += std::cos(std::arg(gf[b] * std::complex<double>(std::cos(w), std::sin(w)) * std::conj(gc[b])));
+            const auto w = -2.0 * pi * sp.binHz(k) * delayMs * 1e-3;
+            turn +=
+                (gf[i] * std::complex<double>(std::cos(w), std::sin(w)) * std::conj(gc[i])).real() * sp.sxx[(size_t)k];
+            energy += sp.sxx[(size_t)k];
         }
-        return sum / (double)gf.size();
-    };
-    if (std::abs(f.delayMs - c.delayMs) < familyDelayMs && meanCos(0.0) >= limit)
+        total += turn / energy;
+    }
+    return total / (double)sp.edges.size();
+}
+
+// One family when they would sound alike on this capture: the correlation of one's output with the other's, band by
+// band as the score counts it (every bin, weighted by this track's spectrum), its band mean at least
+// cos(familyDegrees); either for the polarity and phase stage alone with delays within familyDelayMs, or for the whole
+// response, delay included (a Hi/Lo turn at a small angle is close to a short delay). gf and gc are familyResponse's.
+bool sameFamily(const Spectra& sp, const Candidate& f, const std::vector<std::complex<double>>& gf, const Candidate& c,
+                const std::vector<std::complex<double>>& gc)
+{
+    const auto limit = std::cos(familyDegrees * pi / 180.0);
+    if (std::abs(f.delayMs - c.delayMs) < familyDelayMs && outputsAlike(sp, gf, gc, 0.0) >= limit)
         return true;
-    return meanCos(f.delayMs - c.delayMs) >= limit;
+    return outputsAlike(sp, gf, gc, f.delayMs - c.delayMs) >= limit;
 }
 
 // --- the attack lag
@@ -736,11 +747,18 @@ std::vector<Candidate> search(const Spectra& sp, const SearchOptions& o, const s
                      [](const Candidate& a, const Candidate& b) { return a.score > b.score; });
 
     std::vector<Candidate> families;
+    std::vector<std::vector<std::complex<double>>> familyResponses;
     for (const auto& c : candidates)
     {
-        const auto same = [&](const Candidate& f) { return sameFamily(sp, f, c); };
-        if (std::none_of(families.begin(), families.end(), same))
+        auto gc = familyResponse(sp, c);
+        bool known = false;
+        for (size_t f = 0; f < families.size() && ! known; ++f)
+            known = sameFamily(sp, families[f], familyResponses[f], c, gc);
+        if (! known)
+        {
             families.push_back(c);
+            familyResponses.push_back(std::move(gc));
+        }
         if ((int)families.size() == o.top)
             break;
     }
