@@ -397,9 +397,10 @@ setting at every lag out to 40 ms to decide whether to advise a manual shift (on
 knob's reach, and the smallest shift that gets most of it; a clear transient reading inside the reach, or a clear one that the
 score doesn't agree with, means none). It runs on its own thread in a fraction of a second.
 
-**Efficiency.** On an Apple M1, a stereo frame costs about 18 to 23 ns in HIGH or LOW and about 30 ns in CONSTANT at
-48 kHz. The FFT is vDSP on macOS and [PFFFT](https://bitbucket.org/jpommier/pffft) on Windows and Linux. Nothing
-allocates on the audio thread, which the tests check.
+**Efficiency.** On an Apple M1, one stereo track costs roughly 0.1% of a single CPU core in HIGH or LOW and about 0.15% in
+CONSTANT at 48 kHz (about double that at 96 kHz); the meter's analysis adds about 0.2% of a core while it is on, plus its
+drawing. The FFT is vDSP on macOS and [PFFFT](https://bitbucket.org/jpommier/pffft) on Windows and Linux. Nothing allocates
+on the audio thread, which the tests check.
 
 ## Build
 
