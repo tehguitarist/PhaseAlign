@@ -118,7 +118,22 @@ class Session : private juce::Timer
     };
     const Outcome* getOutcome() const { return state == State::results ? outcome.get() : nullptr; }
     const PanelSettings& getOriginal() const { return original; }
-    int numOptions() const { return outcome != nullptr ? (int)outcome->result.options.size() : 0; }
+    // The rows: the options as the track is (when a manual shift is advised, the best this track can do without it),
+    // then the options for after that shift.
+    int numOptions() const
+    {
+        return outcome != nullptr ? (int)(outcome->result.optionsAsIs.size() + outcome->result.options.size()) : 0;
+    }
+    const Option& optionAt(int index) const
+    {
+        const auto& as = outcome->result.optionsAsIs;
+        return (size_t)index < as.size() ? as[(size_t)index] : outcome->result.options[(size_t)index - as.size()];
+    }
+    bool afterShift(int index) const
+    {
+        return outcome != nullptr && outcome->result.shiftSamples != 0 &&
+               index >= (int)outcome->result.optionsAsIs.size();
+    }
     PanelSettings optionSettings(int index) const; // index -1: ORIGINAL
     void choose(int index);                        // applies it (-1: ORIGINAL)
     // The row whose settings the panel has now, or -2 if none (the knobs were moved since).

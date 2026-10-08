@@ -93,8 +93,8 @@ void AnalyseScreen::updatePreview()
     const auto fs = outcome->sampleRate;
     const auto before = session.getOriginal().candidate(fs);
     const auto after = session.optionSettings(row).candidate(fs);
-    // The options are for the track once shifted by hand (if the search asked for a shift); ORIGINAL is as it is.
-    const auto shifted = row >= 0 && outcome->result.shiftSamples != 0;
+    // The options after a manual shift are for the track once shifted by hand; the others and ORIGINAL are as it is.
+    const auto shifted = row >= 0 && session.afterShift(row);
     const auto& afterSpectra = shifted ? outcome->shiftedSpectra : outcome->spectra;
     for (int b = 0; b < numBands; ++b)
     {
@@ -149,7 +149,7 @@ juce::String AnalyseScreen::rowText(int row) const
         return {};
     if (row < 0)
         return "ORIGINAL";
-    const auto& option = outcome->result.options[(size_t)row];
+    const auto& option = session.optionAt(row);
     const auto s = session.optionSettings(row);
     juce::StringArray parts;
     if (outcome->scope.phaseOn)
@@ -358,7 +358,7 @@ void AnalyseScreen::paintMessage(juce::Graphics& g, juce::Rectangle<float> area,
                                  juce::Colour colour) const
 {
     g.setColour(colour);
-    g.setFont(meterFont(assets, 13.0f * getScale()));
+    g.setFont(meterFont(assets, 20.0f * getScale())); // the screen has the room: easy to read (user, 2026-10-08)
     g.drawFittedText(text, area.toNearestInt(), juce::Justification::topLeft, 3, 1.0f);
 }
 
@@ -367,8 +367,8 @@ void AnalyseScreen::paintCapturing(juce::Graphics& g) const
     const auto s = getScale();
     const auto seconds = session.capturedSeconds();
     paintHeader(g, juce::String(seconds, 1) + " s CAPTURED");
-    const auto font = meterFont(assets, 14.0f * s);
-    const auto small = meterFont(assets, 12.0f * s).withExtraKerningFactor(0.1f);
+    const auto font = meterFont(assets, 20.0f * s);
+    const auto small = meterFont(assets, 15.0f * s).withExtraKerningFactor(0.1f);
 
     // What to do now.
     juce::String instruction, status;
@@ -388,18 +388,21 @@ void AnalyseScreen::paintCapturing(juce::Graphics& g) const
         statusColour = design::meterWarning;
     }
     else if (session.isWaitingForPlay())
-        status = seconds >= Session::minSeconds ? "Press play to add more, or ANALYSE NOW." : "Waiting for playback.";
+        status = seconds >= Session::minSeconds ? "Press play and keep going for better results, or ANALYSE NOW."
+                                                : "Waiting for playback.";
+    else if (seconds >= Session::idealSeconds)
+        status = "Plenty captured: stop playback (or ANALYSE NOW) to analyse.";
     else if (seconds >= Session::minSeconds)
-        status = "Enough to analyse: stop playback (or ANALYSE NOW), or keep playing for more.";
+        status = "Keep playing for better results (" + ideal + " s is best), then stop or ANALYSE NOW.";
     else
         status = "Listening. Only stretches where both play count.";
-    paintMessage(g, designRect(textLeft, 690.0f, textRight - textLeft, 70.0f), instruction,
+    paintMessage(g, designRect(textLeft, 690.0f, textRight - textLeft, 96.0f), instruction,
                  design::meterAxisText.withAlpha(0.9f));
     g.setColour(statusColour);
-    drawTextAt(g, font, status, lx(textLeft), ly(795.0f), juce::Justification::left);
+    drawTextAt(g, font, status, lx(textLeft), ly(826.0f), juce::Justification::left);
 
     // Progress: 0 to idealSeconds, marked at the minimum.
-    const auto bar = juce::Rectangle<float>::leftTopRightBottom(lx(textLeft), ly(830.0f), lx(textRight), ly(866.0f));
+    const auto bar = juce::Rectangle<float>::leftTopRightBottom(lx(textLeft), ly(852.0f), lx(textRight), ly(888.0f));
     g.setColour(design::meterGrid);
     g.drawRect(bar, juce::jmax(1.0f, 1.2f * s));
     const auto fraction = (float)juce::jlimit(0.0, 1.0, seconds / Session::idealSeconds);
@@ -409,12 +412,12 @@ void AnalyseScreen::paintCapturing(juce::Graphics& g) const
     g.setColour(design::meterAxisText.withAlpha(0.8f));
     g.fillRect(juce::Rectangle<float>(minX - 0.6f * s, bar.getY() - 6.0f * s, juce::jmax(1.0f, 1.2f * s),
                                       bar.getHeight() + 12.0f * s));
-    drawTextAt(g, small, minimum + " s MINIMUM", minX, bar.getBottom() + 26.0f * s,
+    drawTextAt(g, small, minimum + " s MINIMUM", minX, bar.getBottom() + 28.0f * s,
                juce::Justification::horizontallyCentred);
-    drawTextAt(g, small, ideal + " s", bar.getRight(), bar.getBottom() + 26.0f * s, juce::Justification::right);
+    drawTextAt(g, small, ideal + " s", bar.getRight(), bar.getBottom() + 28.0f * s, juce::Justification::right);
     if (seconds >= Session::maxSeconds - 0.05)
         drawTextAt(g, small, "KEEPS THE LAST " + juce::String((int)Session::maxSeconds) + " s", bar.getX(),
-                   bar.getBottom() + 26.0f * s, juce::Justification::left);
+                   bar.getBottom() + 28.0f * s, juce::Justification::left);
 
     // Levels: is anything arriving?
     const auto level = [&](float baseline, const juce::String& name, float db, juce::Colour colour)
@@ -478,7 +481,7 @@ void AnalyseScreen::paintResults(juce::Graphics& g) const
             drawTextAt(g, rowFont, rowText(row), lx(rowsLeft) + 60.0f * s, baseline, juce::Justification::left);
 
         // The score: r, and the change from ORIGINAL.
-        const auto score = row < 0 ? outcome->originalScore : result.options[(size_t)row].candidate.score;
+        const auto score = row < 0 ? outcome->originalScore : session.optionAt(row).candidate.score;
         auto scoreText = "r " + juce::String(score, 2);
         if (row >= 0)
             scoreText += "  " + signedValue(score - outcome->originalScore, 2);
@@ -489,7 +492,11 @@ void AnalyseScreen::paintResults(juce::Graphics& g) const
         if (row >= 0)
         {
             juce::StringArray flags;
-            const auto& option = result.options[(size_t)row];
+            const auto& option = session.optionAt(row);
+            if (session.afterShift(row))
+                flags.add("AFTER THE SHIFT");
+            if (option.small)
+                flags.add("SMALL IMPROVEMENT");
             if (option.delayOnly)
                 flags.add("DELAY ONLY");
             if (option.lowEndChange < 0.0)
@@ -525,9 +532,15 @@ void AnalyseScreen::paintResults(juce::Graphics& g) const
     if (result.shiftSamples != 0 && result.verdict == analyse::Verdict::nothing)
         note.clear(); // the shift is the change
     if (result.shiftSamples != 0)
-        warning = result.message + " (positive moves this track later). " +
-                  (result.options.empty() ? "After that shift nothing else needs changing."
-                                          : "The options are for after that shift.");
+    {
+        const auto asIs = ! result.optionsAsIs.empty(), after = ! result.options.empty();
+        warning = juce::String(result.message) + " (positive moves this track later). " +
+                  juce::String(! after ? "After that shift nothing else needs changing. " : "") +
+                  (asIs && after ? "Rows marked AFTER THE SHIFT are for after it; the others work as it is."
+                   : asIs        ? "The option shown works as it is."
+                   : after       ? "The options are for after that shift. As it is, no setting helps."
+                                 : "As it is, no setting helps.");
+    }
     else if (result.message.size() > 0)
         note = note.isEmpty() ? juce::String(result.message) : note + " " + juce::String(result.message) + ".";
     // The two match warnings (user, 2026-10-08): the options stay; this says how far to trust them.
@@ -542,7 +555,7 @@ void AnalyseScreen::paintResults(juce::Graphics& g) const
     const auto noteTop = firstRowBaseline + rowPitch * (float)(session.numOptions() + 1) - 24.0f;
     {
         juce::AttributedString text;
-        const auto noteFont = meterFont(assets, 13.0f * s);
+        const auto noteFont = meterFont(assets, 17.0f * s);
         if (note.isNotEmpty())
             text.append(note + (warning.isNotEmpty() ? " " : ""), noteFont, design::meterAxisText.withAlpha(0.85f));
         if (warning.isNotEmpty())

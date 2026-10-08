@@ -19,7 +19,7 @@
 // is searched with one inverse FFT per phase setting (the band mean is linear in the spectrum, so the Python's one
 // transform per band and setting adds up to one), zero-padded 4x, then refined on the knob's 0.1-sample grid. The
 // attack lag (plan R18, whole capture) fixes the delay when its peak is strong; options must gain over doing nothing; a
-// big offset asks for a manual shift in samples.
+// significant gain beyond the knob's reach asks for the smallest manual shift (in samples) that gets most of it.
 //
 // Offline: allocates, and takes a fraction of a second to a few seconds. Run it on a background thread; `cancel` (may
 // be null) stops it early, and the result is then empty with `cancelled` set.
@@ -70,6 +70,7 @@ struct Option
         0.0; // the score of the bands below 300 Hz with the option, minus without: < 0 is "less low end"
     bool fromAttacks = false; // the delay came from the attack reading (else the waveform score)
     bool delayOnly = false;
+    bool small = false; // an "as it is" option kept although its gain is under minGain (shown as a small improvement)
 };
 
 enum class Verdict
@@ -83,8 +84,12 @@ enum class Verdict
 
 struct Result
 {
-    std::vector<Option> options; // 0 to 2
-    double baseline = 0.0;       // the score of doing nothing
+    std::vector<Option> options; // 0 to 2 (after the manual shift, if one is advised)
+    // With a manual shift advised: the best this track can do as it is, inside the knob's reach (user, 2026-10-08: if
+    // it is too far out to shift, still make a best phase effort, e.g. a room mic kept at its own distance). The
+    // ordinary options, or else the single best one if it gains at least smallGain, marked small.
+    std::vector<Option> optionsAsIs;
+    double baseline = 0.0; // the score of doing nothing
     AttackReading attack;
     Verdict verdict = Verdict::nothing;
     bool lessLowEnd = false; // any option lowers the correlation below 300 Hz
@@ -99,12 +104,20 @@ struct Result
 };
 
 // The search's constants (prototype/analyse.py).
-inline constexpr double maxDelayMs = 4.0, wideReachMs = 10.0, attackStrong = 0.35, minGain = 0.03, minDelayMs = 0.3,
-                        minMargin = 0.01, lowEndHz = 300.0, angleStep = 2.5;
+inline constexpr double maxDelayMs = 4.0, attackStrong = 0.35, minGain = 0.03, minDelayMs = 0.3, minMargin = 0.01,
+                        smallGain = 0.01, lowEndHz = 300.0, angleStep = 2.5;
+// The manual shift (prototype/analyse.py shift_advice; user, 2026-10-08): advised only when the best score out to
+// shiftReachMs beyond the knob's reach beats the best inside it by shiftGain, and then the smallest shift that gets
+// shiftFraction of that gain.
+// Only shiftGainEdge when the best delay inside the reach sits within edgeMarginMs of its limit (pinned at the knob's
+// end).
+inline constexpr double shiftReachMs = 40.0, shiftGain = 0.04, shiftFraction = 0.75, shiftGainEdge = 0.02,
+                        edgeMarginMs = 0.15;
 // The chance test (prototype/analyse.py CHANCE_*, WEAK_MATCH, with the measurements behind them): the sidechain is
 // turned round by these fractions of the capture.
 inline constexpr double chanceShifts[] = {0.37, 0.61};
-inline constexpr double chanceMargin = 0.02, weakMatch = 0.12;
+// An option whose score is at least chanceSkipScore is not tested (tracks that agree this well are not unrelated).
+inline constexpr double chanceMargin = 0.02, weakMatch = 0.12, chanceSkipScore = 0.30;
 
 // The cross-spectrum of a capture, summed over frames, and its active 1/3-octave bands.
 struct Spectra
@@ -146,6 +159,9 @@ struct SearchOptions
     double windowLoMs = 0.0, windowHiMs = 0.0;
 };
 std::vector<Candidate> search(const Spectra&, const SearchOptions&, const std::atomic<bool>* cancel = nullptr);
+
+// The manual shift to advise, in samples (positive delays the track; 0 for none): prototype/analyse.py shift_advice.
+int shiftAdvice(const Spectra&, bool phaseOn, const AttackReading&, const std::atomic<bool>* cancel = nullptr);
 
 // suggest(), then the shift advice: prototype/analyse.py suggest_with_shift. `progress` (may be null) is kept at the
 // fraction of the work done, 0 to 0.99, never going back (any thread may read it).

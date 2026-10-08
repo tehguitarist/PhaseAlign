@@ -533,6 +533,7 @@ TEST_CASE("ANALYSE snapshots", "[.][snapshot]")
     session.analyseNow();
     snapshot("analyse_too_short.png");
     player.play(proc, 8.0, &session);
+    snapshot("analyse_capturing_enough.png"); // past the minimum: the text asks for more playing
     session.analyseNow();
     snapshot("analyse_analysing.png");
     juce::Thread::sleep(400); // part way: the bar filling, a dot or two

@@ -9,7 +9,7 @@ Synthetic pairs, 3 s at 48 kHz, each signal int16 little-endian (value / 32768; 
   B: the same sidechain, the input 6.5 ms late and turned 60°: beyond the knob, so a manual shift and then the options.
   C: steady coloured noise, the input 2 ms late and turned 70°: weak attacks, so the joint (waveform score) search.
 The cases run A with both stages on, with DELAY off and with PHASE off, B and C with both on, and A's input against C's
-sidechain (unrelated: nothing worth changing). Each case also pins a few closed-form scores.
+sidechain (unrelated: nothing worth changing). Each case also pins a few closed-form scores, and when a manual shift is advised the options as the track is (`asis` lines).
 
 The user's pairs (gitignored): the first set's captures/<tag>_a.f32 / _b.f32 (prototype/export_pairs.py) and the second
 set's captures/stems/<tag>_a.f32 / _b.f32 (written here from the wavs). captures/analyse_user_expected.txt is what the
@@ -85,9 +85,15 @@ def describe_case(name, xname, yname, x, y, delay_on, phase_on, fs, scores=()):
         lines.append(f"option {c.mode} {int(c.wide)} {c.theta:.6f} {c.delay_ms:.12g} {int(c.flip)} {c.score:.12g} "
                      f"{gain:.12g} {lf:.12g} {int(oname == 'delay from the attacks' or oname == 'delay only')} "
                      f"{int(oname == 'delay only')}")
+    if shift:
+        for oname, c, gain, lf, small in an.as_is_options(x, y, fs, delay_on, phase_on):
+            lf = 0.0 if np.isnan(lf) else lf
+            lines.append(f"asis {c.mode} {int(c.wide)} {c.theta:.6f} {c.delay_ms:.12g} {int(c.flip)} {c.score:.12g} {gain:.12g} {lf:.12g} "
+                         f"{int(small)}")
     if opts and not verdict.startswith("delay only"):
         shifted = an.shift_samples(x, shift) if shift else x
-        lines.append(f"chanceGain {an.chance_gain(shifted, y, fs, delay_on, phase_on):.12g}")
+        tested = opts[0][1].score < an.CHANCE_SKIP_R       # the chance test is skipped for options that agree this well
+        lines.append(f"chanceGain {an.chance_gain(shifted, y, fs, delay_on, phase_on) if tested else 0.0:.12g}")
     if scores:
         sp = an.spectra(x, y, fs)
         for mode, wide, theta, delay, flip in scores:

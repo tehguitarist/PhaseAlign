@@ -37,7 +37,8 @@ void checkCancel(const std::atomic<bool>* cancel)
 // Progress through one suggestWithShift, for the screen's bar: work done against the work expected, in units of one
 // full search (every setting of the phase stage). The weights are Release timings ("[.analysecost]", 27 s of audio on
 // the M1: a full search 0.086 s, the attack reading 0.21 s and the cross-spectrum 0.032 s; those two scale with the
-// length, the search doesn't). The expectation is raised when the search takes a longer path (a manual shift), and what
+// length, the search doesn't). The expectation is raised when the search takes a longer path (a manual shift) and
+// lowered when work is skipped (the chance test for a strong match, the shift pass when the attacks line up), and what
 // is published never goes back.
 constexpr double attackUnitsPerSecond = 0.09, spectraUnitsPerSecond = 0.014;
 constexpr double fullSettings = 289.0; // settings(true).size()
@@ -50,14 +51,25 @@ struct Tracker
     double baseDone = 0.0, basePublished = 0.0;
     float published = 0.0f;
 
-    void add(double units)
+    void publish()
     {
-        done += units;
-        total = std::max(total, done);
         const auto f = basePublished + (1.0 - basePublished) * (done - baseDone) / std::max(1e-9, total - baseDone);
         published = std::max(published, (float)std::min(0.99, f));
         if (out != nullptr)
             out->store(published, std::memory_order_relaxed);
+    }
+    void add(double units)
+    {
+        done += units;
+        total = std::max(total, done);
+        publish();
+    }
+    // Work that was expected and won't be done (the chance test for a strong match, the shift pass when the attacks
+    // line up).
+    void skip(double units)
+    {
+        total = std::max(done + 1e-6, total - units);
+        publish();
     }
     void expect(double remaining)
     {
@@ -74,6 +86,12 @@ void progress(double units)
 {
     if (tracker != nullptr)
         tracker->add(units);
+}
+
+void skipProgress(double units)
+{
+    if (tracker != nullptr)
+        tracker->skip(units);
 }
 
 int roundHalfEven(double v)
@@ -454,10 +472,21 @@ double chanceGain(const float* x, const float* y, int length, double fs, Scope s
 void addMatchFlags(Result& r, const float* x, const float* y, int length, double fs, Scope scope,
                    const std::atomic<bool>* cancel)
 {
+    // What the chance test would cost (two cross-spectra and two searches), for the progress bar when it isn't run.
+    const auto chanceUnits =
+        2.0 * (spectraUnitsPerSecond * length / fs + (double)settings(scope.phaseOn).size() / fullSettings);
     if (r.options.empty() || r.verdict == Verdict::delayOnly)
+    {
+        skipProgress(chanceUnits);
         return;
-    r.chanceGain = chanceGain(x, y, length, fs, scope, cancel);
-    r.chanceLevel = r.options[0].gain - r.chanceGain < chanceMargin;
+    }
+    if (r.options[0].candidate.score >= chanceSkipScore)
+        skipProgress(chanceUnits);
+    else
+    {
+        r.chanceGain = chanceGain(x, y, length, fs, scope, cancel);
+        r.chanceLevel = r.options[0].gain - r.chanceGain < chanceMargin;
+    }
     r.weakMatch = r.options[0].candidate.score < weakMatch;
 }
 
@@ -826,6 +855,90 @@ AttackReading attackLag(const float* x, const float* y, int length, double fs)
     return r;
 }
 
+int shiftAdvice(const Spectra& sp, bool phaseOn, const AttackReading& attack, const std::atomic<bool>* cancel)
+{
+    if (! sp.valid())
+        return 0;
+    const auto reach = (int)std::ceil(shiftReachMs * 1e-3 * sp.fs) * pad;
+    auto size = 1;
+    while (size < sp.n * pad)
+        size <<= 1;
+    Fft fft(size);
+    const auto bandWeight = 1.0 / (double)sp.edges.size();
+    // The best score at every lag over every setting and both polarities (as search() scores them).
+    std::vector<double> curve((size_t)(2 * reach + 1), -9.0);
+    for (const auto& setting : settings(phaseOn))
+    {
+        checkCancel(cancel);
+        progress(1.0 / fullSettings);
+        const auto h = stageResponse(sp, setting.mode, setting.wide, setting.theta);
+        auto* p = fft.data();
+        std::fill(p, p + size, 0.0);
+        for (size_t b = 0; b < sp.edges.size(); ++b)
+            for (int k = sp.edges[b].first; k < sp.edges[b].second; ++k)
+            {
+                const auto v = h[(size_t)k] * sp.sxy[(size_t)k] * (bandWeight / sp.norms[b]);
+                p[2 * k] = v.real();
+                p[2 * k + 1] = v.imag();
+            }
+        fft.inverse();
+        for (int m = -reach; m <= reach; ++m)
+        {
+            const auto v = 0.5 * p[(size - m) % size];
+            auto& c = curve[(size_t)(m + reach)];
+            c = std::max(c, std::max(v, -v));
+        }
+    }
+    const auto limit = maxDelayMs * 1e-3 * sp.fs;
+    auto bestIn = -9.0, bestOut = -9.0, lagIn = 0.0;
+    for (int m = -reach; m <= reach; ++m)
+    {
+        const auto c = curve[(size_t)(m + reach)];
+        if (std::abs(m / (double)pad) <= limit)
+        {
+            if (c > bestIn) // the first of equals, like the Python's argmax
+            {
+                bestIn = c;
+                lagIn = m / (double)pad;
+            }
+        }
+        else
+            bestOut = std::max(bestOut, c);
+    }
+    const auto need = std::abs(lagIn) >= (maxDelayMs - edgeMarginMs) * 1e-3 * sp.fs ? shiftGainEdge : shiftGain;
+    // A clear attack reading beyond the reach is a second witness that has to agree: the advice is that lag if the
+    // score there beats the best inside the reach by shiftGain, and none otherwise (a snare sample's attack and score
+    // peaks are cycle slips).
+    if (attack.clear && std::abs(attack.lagMs) > maxDelayMs && std::abs(attack.lagMs) <= shiftReachMs)
+    {
+        const auto atk = attack.lagMs * 1e-3 * sp.fs;
+        auto atScore = -9.0;
+        for (int m = -reach; m <= reach; ++m)
+            if (std::abs(m / (double)pad - atk) <= 1.0)
+                atScore = std::max(atScore, curve[(size_t)(m + reach)]);
+        return atScore - bestIn >= need ? roundHalfEven(atk) : 0;
+    }
+    if (bestOut - bestIn < need)
+        return 0;
+    const auto target = bestIn + shiftFraction * (bestOut - bestIn);
+    auto bestLag = 0.0, bestScore = -9.0;
+    auto found = false;
+    for (int m = -reach; m <= reach; ++m)
+    {
+        const auto lag = m / (double)pad;
+        const auto c = curve[(size_t)(m + reach)];
+        if (std::abs(lag) <= limit || c < target)
+            continue;
+        if (! found || std::abs(lag) < std::abs(bestLag) || (std::abs(lag) == std::abs(bestLag) && c > bestScore))
+        {
+            found = true;
+            bestLag = lag;
+            bestScore = c;
+        }
+    }
+    return found ? roundHalfEven(bestLag) : 0;
+}
+
 Result suggestWithShift(const float* x, const float* y, int length, double fs, Scope scope,
                         const std::atomic<bool>* cancel, std::atomic<float>* progressOut)
 {
@@ -861,22 +974,12 @@ Result suggestWithShift(const float* x, const float* y, int length, double fs, S
             addMatchFlags(r, x, y, length, fs, scope, cancel);
             return r;
         }
-        int shift = 0;
-        if (lag.clear && std::abs(lag.lagMs) > maxDelayMs)
-            shift = roundHalfEven(lag.lagMs * 1e-3 * fs);
-        else if (! r.options.empty() && std::abs(r.options[0].candidate.delayMs) >= maxDelayMs - 0.15)
-            shift = roundHalfEven(r.options[0].candidate.delayMs * 1e-3 * fs);
-        else
-        {
-            SearchOptions o;
-            o.top = 1;
-            o.phaseOn = scope.phaseOn;
-            o.reachMs = wideReachMs;
-            const auto wide = search(sp, o, cancel);
-            const auto inside = r.options.empty() ? r.baseline : r.options[0].candidate.score;
-            if (! wide.empty() && std::abs(wide[0].delayMs) > maxDelayMs && wide[0].score - inside >= minGain)
-                shift = roundHalfEven(wide[0].delayMs * 1e-3 * fs);
-        }
+        // A clear attack reading inside the knob's reach: the transients already line up, so no manual shift (and no
+        // pass for it).
+        if (lag.clear && std::abs(lag.lagMs) <= maxDelayMs)
+            skipProgress(search1);
+        const auto shift =
+            lag.clear && std::abs(lag.lagMs) <= maxDelayMs ? 0 : shiftAdvice(sp, scope.phaseOn, lag, cancel);
         if (shift == 0)
         {
             addMatchFlags(r, x, y, length, fs, scope, cancel);
@@ -884,7 +987,23 @@ Result suggestWithShift(const float* x, const float* y, int length, double fs, S
         }
 
         // The track as it will be once shifted by hand (positive delays it), and the options for that: the work again.
-        track.expect(oneSuggest + chanceTest);
+        track.expect(oneSuggest + chanceTest + search1);
+        // As it is, inside the reach: the options already found, or else the single best if it gains a little (shown,
+        // small).
+        auto asIs = r.options;
+        if (asIs.empty())
+        {
+            SearchOptions o;
+            o.top = 1;
+            o.phaseOn = scope.phaseOn;
+            const auto best = search(sp, o, cancel);
+            if (! best.empty() && best[0].score - r.baseline >= smallGain)
+            {
+                Option option{best[0], best[0].score - r.baseline, lowEndChange(sp, best[0]), false, false};
+                option.small = true;
+                asIs.push_back(option);
+            }
+        }
         std::vector<float> shifted((size_t)length, 0.0f);
         for (int i = 0; i < length; ++i)
             if (i - shift >= 0 && i - shift < length)
@@ -897,6 +1016,7 @@ Result suggestWithShift(const float* x, const float* y, int length, double fs, S
         after.baseline = r.baseline;
         after.attack = lag;
         after.shiftSamples = shift;
+        after.optionsAsIs = std::move(asIs);
         after.message =
             "Transient may be out of range, consider shifting " + signedInt(shift) + " samples manually if needed";
         return after;

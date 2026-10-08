@@ -381,7 +381,7 @@ PanelSettings Session::optionSettings(int index) const
 {
     if (index < 0 || outcome == nullptr || index >= numOptions())
         return original;
-    return settingsFor(outcome->result.options[(size_t)index].candidate, original, outcome->scope);
+    return settingsFor(optionAt(index).candidate, original, outcome->scope);
 }
 
 void Session::choose(int index)
