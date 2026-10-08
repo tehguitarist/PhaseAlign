@@ -485,9 +485,8 @@ void AnalyseScreen::paintResults(juce::Graphics& g) const
         }
     }
 
-    // What the search says, under the rows.
-    juce::String note;
-    auto noteColour = design::meterAxisText.withAlpha(0.85f);
+    // What the search says, under the rows: information in grey, what needs a look in amber.
+    juce::String note, warning;
     switch (result.verdict)
     {
     case analyse::Verdict::nothing:
@@ -505,17 +504,39 @@ void AnalyseScreen::paintResults(juce::Graphics& g) const
     case analyse::Verdict::suggest:
         break;
     }
+    if (result.shiftSamples != 0 && result.verdict == analyse::Verdict::nothing)
+        note.clear(); // the shift is the change
     if (result.shiftSamples != 0)
-    {
-        note = result.message + " (positive moves this track later). " +
-               (result.options.empty() ? "After that shift nothing else needs changing."
-                                       : "The options are for after that shift.");
-        noteColour = design::meterWarning;
-    }
+        warning = result.message + " (positive moves this track later). " +
+                  (result.options.empty() ? "After that shift nothing else needs changing."
+                                          : "The options are for after that shift.");
     else if (result.message.size() > 0)
         note = note.isEmpty() ? juce::String(result.message) : note + " " + juce::String(result.message) + ".";
+    // The two match warnings (user, 2026-10-08): the options stay; this says how far to trust them.
+    if (result.chanceLevel)
+        warning += juce::String(warning.isEmpty() ? "" : " ") +
+                   "The audio seems unrelated: this match is no better than chance. Check the sidechain is the right "
+                   "track, or play a longer section; the options are there to try by ear.";
+    else if (result.weakMatch)
+        warning += juce::String(warning.isEmpty() ? "" : " ") +
+                   "A weak match: these tracks share little (different instruments playing the same part, say). "
+                   "Choose by ear.";
     const auto noteTop = firstRowBaseline + rowPitch * (float)(session.numOptions() + 1) - 24.0f;
-    paintMessage(g, designRect(rowsLeft, noteTop, rowsRight - rowsLeft, previewBottom - noteTop), note, noteColour);
+    {
+        juce::AttributedString text;
+        const auto noteFont = meterFont(assets, 13.0f * s);
+        if (note.isNotEmpty())
+            text.append(note + (warning.isNotEmpty() ? " " : ""), noteFont, design::meterAxisText.withAlpha(0.85f));
+        if (warning.isNotEmpty())
+            text.append(warning, noteFont, design::meterWarning);
+        text.setWordWrap(juce::AttributedString::byWord);
+        const auto box = designRect(rowsLeft, noteTop, rowsRight - rowsLeft, previewBottom + 40.0f - noteTop);
+        juce::TextLayout layout;
+        layout.createLayout(text, box.getWidth());
+        juce::Graphics::ScopedSaveState clip(g);
+        g.reduceClipRegion(box.toNearestInt());
+        layout.draw(g, box);
+    }
 
     // The preview of the chosen row against ORIGINAL.
     const auto area = juce::Rectangle<float>::leftTopRightBottom(lx(previewLeft), ly(previewTop), lx(previewRight),

@@ -41,7 +41,9 @@ struct Player
     bool inverted = true;
     float sidechainGain = 1.0f;
     bool sidechainIsTrack = false; // the sidechain carries the track's own input (the Logic case, plan R24)
-    std::mt19937 rng{5};
+    bool unrelated = false;        // the track is other bursts, from their own generator, at another tempo
+    std::mt19937 rng{5}, other{17};
+    long long otherCounter = 0;
     std::vector<float> history = std::vector<float>(4096, 0.0f);
     size_t h = 0;
     long long counter = 0;
@@ -60,7 +62,12 @@ struct Player
                 history[h] = source;
                 const auto late = history[(h + history.size() - (size_t)lag) % history.size()];
                 h = (h + 1) % history.size();
-                const auto track = inverted ? -late : late;
+                auto track = inverted ? -late : late;
+                if (unrelated)
+                {
+                    const auto m = (double)(otherCounter++ % 17280);
+                    track = (float)(0.6 * std::exp(-m / 2000.0) + 0.02) * unit(other);
+                }
                 const auto sc = sidechainIsTrack ? track : source * sidechainGain;
                 b.setSample(0, i, track);
                 b.setSample(1, i, track);
@@ -174,6 +181,25 @@ TEST_CASE("ANALYSE: only stretches where both play are kept; too little audio wa
     CHECK(session.getState() == Session::State::analysing);
     session.waitForAnalysisForTesting();
     CHECK(session.getState() == Session::State::results);
+}
+
+TEST_CASE("ANALYSE: unrelated material gives nothing, or options flagged as no better than chance", "[analyse]")
+{
+    PhaseAlignProcessor proc;
+    setParam(proc, id::delayOn, 1.0f);
+    proc.prepareToPlay(fs, block);
+    auto& session = proc.getAnalyseSession();
+    Player player;
+    player.unrelated = true;
+    session.start();
+    player.play(proc, 12.0, &session);
+    session.analyseNow();
+    session.waitForAnalysisForTesting();
+    REQUIRE(session.getState() == Session::State::results);
+    const auto& r = session.getOutcome()->result;
+    INFO("verdict " << (int)r.verdict << ", options " << r.options.size() << ", chance gain " << r.chanceGain);
+    CHECK((r.verdict == pa::analyse::Verdict::nothing || r.chanceLevel));
+    CHECK(r.shiftSamples == 0);
 }
 
 TEST_CASE("ANALYSE: a sidechain that is a copy of the track counts as none", "[analyse]")
@@ -501,5 +527,15 @@ TEST_CASE("ANALYSE snapshots", "[.][snapshot]")
     session.waitForAnalysisForTesting();
     editor->getAnalyseScreen().setPreview(pa::ui::AnalyseScreen::Preview::bands);
     snapshot("analyse_results_shift.png");
+    session.stop();
+
+    // Unrelated material.
+    Player other;
+    other.unrelated = true;
+    session.start();
+    other.play(proc, 12.0, &session);
+    session.analyseNow();
+    session.waitForAnalysisForTesting();
+    snapshot("analyse_results_unrelated.png");
     session.stop();
 }

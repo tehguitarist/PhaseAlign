@@ -93,7 +93,9 @@ struct Case
     double baseline = 0.0;
     AttackReading attack;
     std::string verdict, message;
-    bool lessLowEnd = false;
+    bool lessLowEnd = false, chanceLevel = false, weakMatch = false;
+    bool hasChanceGain = false;
+    double chanceGain = 0.0;
     int shift = 0;
     std::vector<ExpectedOption> options;
     std::vector<ExpectedScore> scores;
@@ -151,6 +153,18 @@ std::vector<Case> readCases(const std::string& path)
         }
         else if (key == "shift")
             in >> c.shift;
+        else if (key == "flags")
+        {
+            int chance, weak;
+            in >> chance >> weak;
+            c.chanceLevel = chance != 0;
+            c.weakMatch = weak != 0;
+        }
+        else if (key == "chanceGain")
+        {
+            in >> c.chanceGain;
+            c.hasChanceGain = true;
+        }
         else if (key == "message")
             c.message = line.size() > 8 ? line.substr(8) : std::string();
         else if (key == "option")
@@ -182,8 +196,9 @@ void checkCase(const Case& c, const std::vector<float>& x, const std::vector<flo
     const auto start = std::chrono::steady_clock::now();
     const auto r = suggestWithShift(x.data(), y.data(), (int)std::min(x.size(), y.size()), c.fs, c.scope);
     const auto seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
-    std::printf("analyse %-20s %5.2f s of audio in %.3f s: %s, shift %d", c.name.c_str(), (double)x.size() / c.fs,
-                seconds, verdictName(r.verdict), r.shiftSamples);
+    std::printf("analyse %-20s %5.2f s of audio in %.3f s: %s%s%s, shift %d", c.name.c_str(), (double)x.size() / c.fs,
+                seconds, verdictName(r.verdict), r.chanceLevel ? " (chance level)" : "",
+                r.weakMatch ? " (weak match)" : "", r.shiftSamples);
     for (const auto& o : r.options)
         std::printf("; %s (%.4f)", describe(o.candidate).c_str(), o.candidate.score);
     std::printf("\n");
@@ -196,6 +211,10 @@ void checkCase(const Case& c, const std::vector<float>& x, const std::vector<flo
     CHECK(r.attack.runnerUp == Catch::Approx(c.attack.runnerUp).margin(1e-4));
     CHECK(verdictName(r.verdict) == c.verdict);
     CHECK(r.lessLowEnd == c.lessLowEnd);
+    CHECK(r.chanceLevel == c.chanceLevel);
+    CHECK(r.weakMatch == c.weakMatch);
+    if (c.hasChanceGain)
+        CHECK(r.chanceGain == Catch::Approx(c.chanceGain).margin(1e-9));
     CHECK(r.shiftSamples == c.shift);
     CHECK(r.message == c.message);
     REQUIRE(r.options.size() == c.options.size());

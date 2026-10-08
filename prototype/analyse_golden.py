@@ -77,6 +77,7 @@ def describe_case(name, xname, yname, x, y, delay_on, phase_on, fs, scores=()):
              f"attack {lag[0]:.12g} {int(lag[1])} {lag[2]:.12g} {lag[3]:.12g}",
              f"verdict {label_verdict(verdict)}",
              f"lessLowEnd {int('less low end' in verdict)}",
+             f"flags {int('chance level' in verdict)} {int('weak match' in verdict)}",
              f"shift {shift}",
              f"message {message}"]
     for oname, c, gain, lf in opts:
@@ -84,6 +85,9 @@ def describe_case(name, xname, yname, x, y, delay_on, phase_on, fs, scores=()):
         lines.append(f"option {c.mode} {int(c.wide)} {c.theta:.6f} {c.delay_ms:.12g} {int(c.flip)} {c.score:.12g} "
                      f"{gain:.12g} {lf:.12g} {int(oname == 'delay from the attacks' or oname == 'delay only')} "
                      f"{int(oname == 'delay only')}")
+    if opts and not verdict.startswith("delay only"):
+        shifted = an.shift_samples(x, shift) if shift else x
+        lines.append(f"chanceGain {an.chance_gain(shifted, y, fs, delay_on, phase_on):.12g}")
     if scores:
         sp = an.spectra(x, y, fs)
         for mode, wide, theta, delay, flip in scores:

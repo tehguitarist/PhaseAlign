@@ -160,13 +160,12 @@ option changed for snare sample (both), snare OH and guitar 2; the first options
 **Next (needs the user):** the verdict in a DAW (the flow, the screen at the real size, applying and A/B by ear, the
 undo behaviour of the seven-parameter gesture in their host, the Logic no-sidechain case). Then the refinement, in this
 order unless the user says otherwise:
-1. **A chance-level guard.** On unrelated material the best gain over doing nothing is +0.044 to +0.049 at 5 s (noise
+1. **Done (2026-10-08): the chance test and the weak-match warning, and a minimum attack peak** (plan R26). The
+   constants (`CHANCE_MARGIN` 0.02, `WEAK_MATCH` 0.12, `ATTACK_MIN_PEAK` 0.15) separate the user's 19 pairs with small
+   margins; check them on new stems. Background: on unrelated material the best gain over doing nothing is +0.044 to +0.049 at 5 s (noise
    against noise, and mismatched pairs of the user's stems), over `MIN_GAIN` 0.03; about +0.02 at 10 s and +0.005 at
-   20 s. The minimum is now 10 s (user), which puts chance under the threshold but not by much (noise against noise
-   +0.024), so the guard is still worth having.
-   Proposed: a null search on the same capture with the sidechain circularly shifted by a second or so (which keeps both
-   signals' spectra and destroys their relationship), and require the real gain to beat the null's by a margin (about
-   0.2 s more search). Alternative: scale `MIN_GAIN` with 1/sqrt(seconds).
+   20 s; the minimum is now 10 s (user). The user's call: warn, don't hide (guitar and bass playing one part may still
+   want lining up).
 2. The thresholds (`ATTACK_STRONG`, `MIN_GAIN`, `MIN_MARGIN`) with the new stems, and the second blind set
    (`prototype/out/analyse/blind2/`).
 3. Then **clean up what ANALYSE doesn't use in `meter/CorrelationAnalyser`** (the user's standing request): the C++ search

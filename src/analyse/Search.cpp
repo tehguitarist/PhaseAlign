@@ -264,7 +264,9 @@ struct AttackBand
     double lo, hi, smoothMs;
 };
 constexpr AttackBand attackBands[] = {{35.0, 150.0, 12.0}, {150.0, 600.0, 5.0}, {600.0, 0.0, 1.5}};
-constexpr double attackRunnerUp = 0.65, attackSearchMs = 40.0;
+// A reading is clear when the strongest rival outside the peak's lobe is under attackRunnerUp of it, and the peak is at
+// least attackMinPeak (the user's genuine pairs peak at 0.17 to 0.88; unrelated instruments read 0.01 to 0.12).
+constexpr double attackRunnerUp = 0.65, attackMinPeak = 0.15, attackSearchMs = 40.0;
 
 // One band's feature: the log of the smoothed magnitude, its positive differences.
 std::vector<float> attackFeature(const float* x, int length, double fs, const AttackBand& band)
@@ -360,7 +362,31 @@ double lowEndChange(const Spectra& sp, const Candidate& c)
     return std::isnan(change) ? 0.0 : change;
 }
 
-Result suggest(const Spectra& sp, const AttackReading& lag, Scope scope, const std::atomic<bool>* cancel)
+// What the search gains by chance on this material: the same search with the sidechain circularly shifted (which keeps
+// both signals' spectra and breaks their relationship) by chanceShifts of the capture; the smaller of the two, since a
+// shift that lands on a repeat of the music makes the copy genuinely related.
+double chanceGain(const float* x, const float* y, int length, double fs, Scope scope, const std::atomic<bool>* cancel)
+{
+    auto smallest = std::numeric_limits<double>::infinity();
+    std::vector<float> rolled((size_t)length);
+    for (const auto fraction : chanceShifts)
+    {
+        const auto k = (int)(fraction * length);
+        for (int i = 0; i < length; ++i) // np.roll(y, k)
+            rolled[(size_t)i] = y[((i - k) % length + length) % length];
+        const auto sp = Spectra::compute(x, rolled.data(), length, fs);
+        SearchOptions o;
+        o.top = 1;
+        o.phaseOn = scope.phaseOn;
+        o.reachMs = scope.delayOn ? maxDelayMs : 0.0;
+        const auto best = search(sp, o, cancel);
+        smallest = std::min(smallest, best.empty() ? 0.0 : best[0].score - scoreAt(sp, nothingChanged()));
+    }
+    return smallest;
+}
+
+Result suggest(const Spectra& sp, const AttackReading& lag, Scope scope, const std::atomic<bool>* cancel,
+               const float* x, const float* y, int length)
 {
     Result r;
     r.attack = lag;
@@ -407,6 +433,10 @@ Result suggest(const Spectra& sp, const AttackReading& lag, Scope scope, const s
         r.verdict = r.options.size() == 1 ? Verdict::suggest : Verdict::close;
         for (const auto& option : r.options)
             r.lessLowEnd = r.lessLowEnd || option.lowEndChange < 0.0;
+        // Warnings, not rejections (user, 2026-10-08: guitar and bass playing one part may still want lining up).
+        r.chanceGain = chanceGain(x, y, length, sp.fs, scope, cancel);
+        r.chanceLevel = r.options[0].gain - r.chanceGain < chanceMargin;
+        r.weakMatch = r.options[0].candidate.score < weakMatch;
         return r;
     }
     if (scope.delayOn && lag.clear && std::abs(lag.lagMs) >= minDelayMs && std::abs(lag.lagMs) <= maxDelayMs)
@@ -710,7 +740,7 @@ AttackReading attackLag(const float* x, const float* y, int length, double fs)
         frac = den != 0.0 ? 0.5 * (y0 - y2) / den : 0.0;
     }
     r.lagMs = ((k - reach) + frac) / fs * 1e3;
-    r.clear = r.peak > 0.0 && r.runnerUp < attackRunnerUp;
+    r.clear = r.peak >= attackMinPeak && r.runnerUp < attackRunnerUp;
     return r;
 }
 
@@ -723,7 +753,7 @@ Result suggestWithShift(const float* x, const float* y, int length, double fs, S
         checkCancel(cancel);
         const auto lag = attackLag(x, y, length, fs);
         checkCancel(cancel);
-        auto r = suggest(sp, lag, scope, cancel);
+        auto r = suggest(sp, lag, scope, cancel, x, y, length);
         if (r.verdict == Verdict::noSignal)
             return r;
         if (! scope.delayOn)
@@ -760,7 +790,7 @@ Result suggestWithShift(const float* x, const float* y, int length, double fs, S
         const auto spShifted = Spectra::compute(shifted.data(), y, length, fs);
         checkCancel(cancel);
         const auto lagShifted = attackLag(shifted.data(), y, length, fs);
-        auto after = suggest(spShifted, lagShifted, scope, cancel);
+        auto after = suggest(spShifted, lagShifted, scope, cancel, shifted.data(), y, length);
         after.baseline = r.baseline;
         after.attack = lag;
         after.shiftSamples = shift;

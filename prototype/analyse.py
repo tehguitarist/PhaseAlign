@@ -238,6 +238,9 @@ def search(sp, top=6, verbose=False, window_ms=None, phase_on=True, reach_ms=Non
 # --- the attack lag (plan R18, offline) ----------------------------------------------------------------------------------------
 ATTACK_BANDS = [(35.0, 150.0, 12.0), (150.0, 600.0, 5.0), (600.0, None, 1.5)]   # low Hz, high Hz, smoothing ms
 ATTACK_RUNNER_UP = 0.65     # a peak is clear when the strongest rival outside its lobe is below this fraction of it
+ATTACK_MIN_PEAK = 0.15      # ... and at least this high (2026-10-08: the user's genuine pairs peak at 0.17 to 0.88; unrelated
+                            # instruments read "clear" at 0.01 to 0.12, bass against kick, hats against snare, and gave a
+                            # delay-only option and a manual-shift message)
 SEARCH_MS = 40.0
 
 
@@ -280,7 +283,7 @@ def attack_lag(x, y, fs):
         y0, y1, y2 = acc[k - 1], acc[k], acc[k + 1]
         den = y0 - 2 * y1 + y2
         frac = 0.5 * (y0 - y2) / den if den != 0 else 0.0
-    return (d[k] + frac) / fs * 1e3, bool(peak > 0 and runner < ATTACK_RUNNER_UP), float(peak), float(runner)
+    return (d[k] + frac) / fs * 1e3, bool(peak >= ATTACK_MIN_PEAK and runner < ATTACK_RUNNER_UP), float(peak), float(runner)
 
 
 # --- render check against the plugin's own DSP -----------------------------------------------------------------------------
@@ -428,7 +431,8 @@ def suggest(x, y, fs, delay_on=True, phase_on=True):
         options = options[:1]     # a clear winner (user, 2026-10-08): one option; two only when they are close
     if options:
         verdict = "suggest" if len(options) == 1 else "close: two options"
-        return options, base, lag, verdict + (" (less low end)" if any(o[3] < 0 for o in options) else "")
+        return options, base, lag, verdict + (" (less low end)" if any(o[3] < 0 for o in options) else "") + \
+            match_flags(x, y, fs, options, delay_on, phase_on)
     if delay_on and lag[1] and MIN_DELAY_MS <= abs(lag[0]) <= MAX_DELAY_MS:
         c = Candidate("none", False, 0.0, lag[0], False, base)
         return [("delay only", c, 0.0, low_end_change(sp, c))], base, lag, f"delay only, {lag[0]:+.2f} ms"
@@ -473,6 +477,37 @@ def suggest_with_shift(x, y, fs, delay_on=True, phase_on=True):
 
 
 MIN_GAIN = 0.03      # r gained over doing nothing below which ANALYSE says there is nothing worth changing
+CHANCE_SHIFTS = (0.37, 0.61)  # the chance test turns the sidechain round by these fractions of the capture
+CHANCE_MARGIN = 0.02          # an option's gain must beat the chance test's by this, or it is flagged "chance level"
+WEAK_MATCH = 0.12             # an option whose r stays under this is flagged "weak match"
+# From the user's pairs (2026-10-08): genuine ones beat the chance test by +0.037 (set 1 kick) to +0.53, GTR 1 against
+# Bass DI (both ways, unrelated) by +0.016 and +0.007; guitar against bass playing one part beat it by +0.09 and +0.14 (a
+# real but weak link: r 0.075 and 0.082 after the best option, where every genuine pair reached 0.13 or more). The set 1
+# hats show why the smaller of the two shifts: one landed on a repeat of the pattern (+0.066 against +0.002).
+
+
+def chance_gain(x, y, fs, delay_on=True, phase_on=True):
+    """What the search gains by chance on this material: the same search with the sidechain circularly shifted (which
+    keeps both signals' spectra and breaks their relationship), at CHANCE_SHIFTS of the capture, the smaller of the two
+    (a shift that lands on a repeat of the music would make the copy genuinely related). User, 2026-10-08: unrelated
+    material should be flagged, not hidden (guitar and bass playing one part may still want lining up)."""
+    gains = []
+    for frac in CHANCE_SHIFTS:
+        sp = spectra(x, np.roll(y, int(frac * len(y))), fs)
+        fam, base = search(sp, top=1, phase_on=phase_on, reach_ms=None if delay_on else 0.0)
+        gains.append(fam[0].score - base if fam else 0.0)
+    return min(gains)
+
+
+def match_flags(x, y, fs, options, delay_on, phase_on):
+    """" (chance level)" when the best option doesn't beat the chance test by CHANCE_MARGIN, " (weak match)" when its r
+    stays under WEAK_MATCH: warnings on the screen, the options still shown."""
+    flags = ""
+    if options[0][2] - chance_gain(x, y, fs, delay_on, phase_on) < CHANCE_MARGIN:
+        flags += " (chance level)"
+    if options[0][1].score < WEAK_MATCH:
+        flags += " (weak match)"
+    return flags
 MIN_DELAY_MS = 0.3   # a clear attack offset at least this large is worth a delay on its own
 MIN_MARGIN = 0.01    # r lead over the next family below which two options are shown
 

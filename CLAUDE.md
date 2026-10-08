@@ -126,8 +126,8 @@ job, better.
    10. **ANALYSE built (2026-10-08, branch `analyse`, not merged; plan R26, HANDOVER "ANALYSE: built into the plugin").**
       `src/analyse/` (Search: the port of `prototype/analyse.py`, which stays the spec, golden-tested via
       `prototype/analyse_golden.py`; Session and CaptureFifo: the capture and the background search, in the processor) and
-      `src/ui/AnalyseScreen`. Pending: the user's DAW verdict, then the refinement (a chance-level guard first: at the 10 s
-      minimum, user 2026-10-08, unrelated material comes within 0.006 of `MIN_GAIN`), then the CorrelationAnalyser cleanup.
+      `src/ui/AnalyseScreen`. Pending: the user's DAW verdict, then the refinement (thresholds on new stems; the chance test,
+      weak-match warning and attack-peak floor are built, from 19 pairs), then the CorrelationAnalyser cleanup.
    - The stem analysis and auto-suggest (ANALYSE) work is dead last. Real multi-mic stem pairs are still wanted for the
      P2/P3 listening.
    - Installing (when the user asks): `/Library/Audio/Plug-Ins/{Components,VST3}`, not ~/Library.

@@ -293,6 +293,11 @@ from ORIGINAL. Notes:
   than the delay reaches. Move this track's clip by N samples in the DAW (positive moves it later); the options shown
   are for after that shift.
 - **DELAY is off: the transients are N samples apart**: with DELAY off, where the transients sit, for information.
+- **The audio seems unrelated** (amber): the best option is no better than what the search finds by chance on this
+  material (it checks by running again with the sidechain moved a few seconds out of step). The sidechain may be the
+  wrong track, or the section too short. The options are still shown, to try by ear.
+- **A weak match** (amber): the best option still leaves the tracks matching only a little (*r* under 0.12), as with
+  different instruments playing the same part, which you may still want in phase. Choose by ear.
 
 Choosing an option sets up to seven parameters at once, as one gesture. Some hosts undo that in one step and some in
 several; ORIGINAL always goes back. The capture and the options stay while the plugin window is closed and opened again.

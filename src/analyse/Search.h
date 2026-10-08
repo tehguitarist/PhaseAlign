@@ -88,6 +88,11 @@ struct Result
     AttackReading attack;
     Verdict verdict = Verdict::nothing;
     bool lessLowEnd = false; // any option lowers the correlation below 300 Hz
+    // Warnings on the options (shown, not hidden; user 2026-10-08): the best option doesn't beat what the search finds
+    // by chance on this material (the sidechain circularly shifted) by chanceMargin, or its score stays under
+    // weakMatch.
+    bool chanceLevel = false, weakMatch = false;
+    double chanceGain = 0.0; // what the chance test found (set with the options from the waveform score)
     int shiftSamples = 0;    // a manual shift to make first (positive delays the track); the options are for after it
     std::string message;     // the shift advice, or (DELAY off) where the transients sit; empty if neither
     bool cancelled = false;
@@ -96,6 +101,10 @@ struct Result
 // The search's constants (prototype/analyse.py).
 inline constexpr double maxDelayMs = 4.0, wideReachMs = 10.0, attackStrong = 0.35, minGain = 0.03, minDelayMs = 0.3,
                         minMargin = 0.01, lowEndHz = 300.0, angleStep = 2.5;
+// The chance test (prototype/analyse.py CHANCE_*, WEAK_MATCH, with the measurements behind them): the sidechain is
+// turned round by these fractions of the capture.
+inline constexpr double chanceShifts[] = {0.37, 0.61};
+inline constexpr double chanceMargin = 0.02, weakMatch = 0.12;
 
 // The cross-spectrum of a capture, summed over frames, and its active 1/3-octave bands.
 struct Spectra
