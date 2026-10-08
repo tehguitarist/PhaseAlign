@@ -292,17 +292,35 @@ void AnalyseScreen::paint(juce::Graphics& g)
     case Session::State::analysing:
     {
         paintHeader(g, juce::String(session.capturedSeconds(), 1) + " s CAPTURED");
-        const auto s = getScale();
-        g.setColour(design::phosphor);
-        drawTextAt(g, meterFont(assets, 20.0f * s, true).withExtraKerningFactor(0.1f), "ANALYSING...",
-                   0.5f * (float)getWidth(), ly(design::meterZeroY) + 10.0f * s,
-                   juce::Justification::horizontallyCentred);
+        paintAnalysing(g);
         break;
     }
     case Session::State::results:
         paintResults(g);
         break;
     }
+}
+
+void AnalyseScreen::paintAnalysing(juce::Graphics& g) const
+{
+    // ANALYSING with its dots coming one at a time (the word held where it sits with all three, so it doesn't move),
+    // and the search's progress as a bar.
+    const auto s = getScale();
+    const auto font = meterFont(assets, 20.0f * s, true).withExtraKerningFactor(0.1f);
+    const auto dots = (int)(session.analysingSeconds() / dotSeconds) % 4;
+    const auto left = 0.5f * (float)getWidth() - 0.5f * textWidth(font, "ANALYSING...");
+    const auto baseline = ly(design::meterZeroY) + 30.0f * s; // the block centred under the header
+    g.setColour(design::phosphor);
+    drawTextAt(g, font, "ANALYSING" + juce::String::repeatedString(".", dots), left, baseline,
+               juce::Justification::left);
+
+    const auto bar =
+        juce::Rectangle<float>(560.0f * s, 22.0f * s).withCentre({0.5f * (float)getWidth(), baseline + 40.0f * s});
+    g.setColour(design::meterGrid);
+    g.drawRect(bar, juce::jmax(1.0f, 1.2f * s));
+    const auto inner = bar.reduced(3.0f * s);
+    g.setColour(design::phosphor.withAlpha(0.9f));
+    g.fillRect(inner.withWidth(inner.getWidth() * juce::jlimit(0.0f, 1.0f, session.analysisProgress())));
 }
 
 void AnalyseScreen::paintHeader(juce::Graphics& g, const juce::String& right) const

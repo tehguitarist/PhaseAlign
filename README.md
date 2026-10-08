@@ -266,7 +266,7 @@ ear, and ORIGINAL (what you had before) to go back to.
    only while the transport plays. It needs **at least 10 s**; 30 s is best, especially for sustained parts
    (bass, guitars), whose best setting changes with the notes played. Shorter captures can make tracks that have little
    in common look related by chance. Past 30 s it keeps the most recent 30 s.
-3. **Stop** the transport: it analyses at once (well under a second). Stopped too early, it says how much it has and
+3. **Stop** the transport: it analyses at once (well under a second; the screen shows ANALYSING and a progress bar). Stopped too early, it says how much it has and
    keeps it for the next play. **ANALYSE NOW** does the same without stopping (for hosts that don't report their
    transport, and the standalone app); **CLEAR** starts the capture again.
 4. **Choose.** Click an option to apply it, then play to hear it; click the other, or **ORIGINAL**, to compare. The arrow

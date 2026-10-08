@@ -183,6 +183,33 @@ TEST_CASE("ANALYSE: only stretches where both play are kept; too little audio wa
     CHECK(session.getState() == Session::State::results);
 }
 
+TEST_CASE("ANALYSE: the analysing bar only moves forward, and shows for at least its minimum time", "[analyse]")
+{
+    PhaseAlignProcessor proc;
+    setParam(proc, id::delayOn, 1.0f);
+    proc.prepareToPlay(fs, block);
+    auto& session = proc.getAnalyseSession();
+    Player player;
+    session.start();
+    player.play(proc, 11.0, &session);
+    session.analyseNow();
+    float last = 0.0f;
+    int ticks = 0;
+    while (session.getState() == Session::State::analysing && ticks++ < 1000)
+    {
+        const auto p = session.analysisProgress();
+        CHECK(p >= last);
+        CHECK(p <= 1.0f);
+        last = p;
+        juce::Thread::sleep(10);
+        session.tickForTesting();
+    }
+    CHECK(session.getState() == Session::State::results);
+    CHECK(last > 0.5f);
+    CHECK(ticks * 10 >= (int)(Session::minAnalysingSeconds * 1000.0) - 50);
+    CHECK(session.analysisProgress() == 1.0f);
+}
+
 TEST_CASE("ANALYSE: unrelated material gives nothing, or options flagged as no better than chance", "[analyse]")
 {
     PhaseAlignProcessor proc;
@@ -508,6 +535,8 @@ TEST_CASE("ANALYSE snapshots", "[.][snapshot]")
     player.play(proc, 8.0, &session);
     session.analyseNow();
     snapshot("analyse_analysing.png");
+    juce::Thread::sleep(400); // part way: the bar filling, a dot or two
+    snapshot("analyse_analysing_part_way.png");
     session.waitForAnalysisForTesting();
     snapshot("analyse_results_bands.png");
     session.choose(0);

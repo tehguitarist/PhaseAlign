@@ -14,9 +14,10 @@ namespace pa::ui
 // draws what the session is doing and passes clicks to it; the session (in the processor) does the work.
 //
 //   - Capturing: what is being searched (the DELAY and PHASE buttons decide; polarity always), how much audio is in
-//     (a bar to the recommended 30 s, marked at the 10 s minimum), the two levels, and what to do next. CLEAR starts the capture again;
-//     ANALYSE NOW analyses without waiting for the transport to stop (hosts that don't report one, the standalone app).
-//   - Analysing: a line, for the fraction of a second it takes.
+//     (a bar to the recommended 30 s, marked at the 10 s minimum), the two levels, and what to do next. CLEAR starts
+//     the capture again; ANALYSE NOW analyses without waiting for the transport to stop (hosts that don't report one,
+//     the standalone app).
+//   - Analysing: ANALYSING with its dots cycling and a progress bar, for at least 0.6 s.
 //   - Results: up to two options and ORIGINAL (the settings before ANALYSE). Clicking a row applies it, so the next
 //   play
 //     is heard with it; the row the panel matches is marked. Beside them, the chosen row against ORIGINAL on the
@@ -67,6 +68,8 @@ class AnalyseScreen : public DesignComponent
 
     void paintHeader(juce::Graphics&, const juce::String& right) const;
     void paintCapturing(juce::Graphics&) const;
+    void paintAnalysing(juce::Graphics&) const;
+    static constexpr double dotSeconds = 0.3; // ANALYSING's dots: one more every 0.3 s, then none again
     void paintResults(juce::Graphics&) const;
     void paintBandsPreview(juce::Graphics&, juce::Rectangle<float>) const;
     void paintAlignmentPreview(juce::Graphics&, juce::Rectangle<float>) const;

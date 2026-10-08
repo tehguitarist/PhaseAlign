@@ -25,8 +25,9 @@
 // streams are cut at the same places, so they stay lined up. At least minSeconds of it is needed and idealSeconds is
 // recommended (user, 2026-10-08): on 5 s of unrelated material the search's chance gain reached +0.05, over its 0.03
 // minimum, against about +0.02 at 10 s and +0.005 at 20 s; on the user's pairs drums settled within 3 to 5 s, while
-// sustained parts kept changing with the section played. Past maxSeconds the oldest is dropped. When a host that reports its transport stops, the session analyses if it has
-// enough, and otherwise says so and keeps what it has for the next play.
+// sustained parts kept changing with the section played. Past maxSeconds the oldest is dropped. When a host that
+// reports its transport stops, the session analyses if it has enough, and otherwise says so and keeps what it has for
+// the next play.
 namespace pa::analyse
 {
 // The seven panel settings an option sets, in the parameters' own terms (params/Parameters.h).
@@ -62,6 +63,8 @@ class Session : private juce::Timer
     };
     static constexpr double minSeconds = 10.0, idealSeconds = 30.0, maxSeconds = 30.0;
     static constexpr double chunkSeconds = 0.01, signalFloorDb = -60.0;
+    // The analysing screen stays up at least this long, its bar filling over it, so a quick search doesn't just flash.
+    static constexpr double minAnalysingSeconds = 0.6;
 
     // What the session reads from and does to the processor.
     struct Host
@@ -94,6 +97,11 @@ class Session : private juce::Timer
     float inputLevelDb() const { return inputLevel; } // the last 0.3 s's peak, dBFS
     float sidechainLevelDb() const { return sidechainLevel; }
     Scope currentScope() const { return host.scope(); }
+
+    // Analysing: how far the bar is, 0 to 1 (the search's own progress, but filling over minAnalysingSeconds at least),
+    // and how long it has been going.
+    float analysisProgress() const;
+    double analysingSeconds() const;
 
     // Results.
     struct Outcome
@@ -152,6 +160,8 @@ class Session : private juce::Timer
     std::unique_ptr<Outcome> outcome;
     std::unique_ptr<Outcome> pending; // written by the worker before `done`
     std::atomic<bool> done{false}, cancel{false};
+    std::atomic<float> searchProgress{0.0f};
+    double analysingSinceMs = 0.0;
     std::thread worker;
 
     JUCE_DECLARE_NON_COPYABLE(Session)

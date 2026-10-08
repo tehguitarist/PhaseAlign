@@ -431,8 +431,7 @@ def suggest(x, y, fs, delay_on=True, phase_on=True):
         options = options[:1]     # a clear winner (user, 2026-10-08): one option; two only when they are close
     if options:
         verdict = "suggest" if len(options) == 1 else "close: two options"
-        return options, base, lag, verdict + (" (less low end)" if any(o[3] < 0 for o in options) else "") + \
-            match_flags(x, y, fs, options, delay_on, phase_on)
+        return options, base, lag, verdict + (" (less low end)" if any(o[3] < 0 for o in options) else "")
     if delay_on and lag[1] and MIN_DELAY_MS <= abs(lag[0]) <= MAX_DELAY_MS:
         c = Candidate("none", False, 0.0, lag[0], False, base)
         return [("delay only", c, 0.0, low_end_change(sp, c))], base, lag, f"delay only, {lag[0]:+.2f} ms"
@@ -452,13 +451,19 @@ def suggest_with_shift(x, y, fs, delay_on=True, phase_on=True):
     sits at its edge, or when the waveform score has a clearly better delay beyond the reach (WIDE_REACH_MS), the message asks
     for a manual shift of that many samples, and the options are those for the signal once it has been shifted (so within the
     knob's reach). With DELAY off nothing is shifted; a clear attack offset is only mentioned. Returns (options, baseline r,
-    attack reading, verdict, shift in samples or 0, message or "")."""
+    attack reading, verdict, shift in samples or 0, message or ""). The match flags (match_flags) are worked out once, for
+    the options returned (2026-10-08: so the chance test isn't run for options a shift replaces)."""
+    def flagged(xx, opts, verdict):
+        if opts and not verdict.startswith("delay only"):
+            return verdict + match_flags(xx, y, fs, opts, delay_on, phase_on)
+        return verdict
+
     opts, base, lag, verdict = suggest(x, y, fs, delay_on, phase_on)
     if not delay_on:
         note = ""
         if lag[1] and abs(lag[0]) >= MIN_DELAY_MS:
             note = f"DELAY is off: the transients are {int(round(lag[0] * 1e-3 * fs)):+d} samples apart"
-        return opts, base, lag, verdict, 0, note
+        return opts, base, lag, flagged(x, opts, verdict), 0, note
     shift = 0
     if lag[1] and abs(lag[0]) > MAX_DELAY_MS:
         shift = int(round(lag[0] * 1e-3 * fs))
@@ -470,10 +475,11 @@ def suggest_with_shift(x, y, fs, delay_on=True, phase_on=True):
         if abs(wide[0].delay_ms) > MAX_DELAY_MS and wide[0].score - inside >= MIN_GAIN:
             shift = int(round(wide[0].delay_ms * 1e-3 * fs))
     if shift == 0:
-        return opts, base, lag, verdict, 0, ""
-    opts, _, _, verdict = suggest(shift_samples(x, shift), y, fs, delay_on, phase_on)
+        return opts, base, lag, flagged(x, opts, verdict), 0, ""
+    shifted = shift_samples(x, shift)
+    opts, _, _, verdict = suggest(shifted, y, fs, delay_on, phase_on)
     message = f"Transient may be out of range, consider shifting {shift:+d} samples manually if needed"
-    return opts, base, lag, verdict, shift, message
+    return opts, base, lag, flagged(shifted, opts, verdict), shift, message
 
 
 MIN_GAIN = 0.03      # r gained over doing nothing below which ANALYSE says there is nothing worth changing

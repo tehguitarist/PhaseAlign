@@ -179,8 +179,10 @@ void Session::timerCallback()
 {
     if (state == State::analysing)
     {
-        if (done.load(std::memory_order_acquire))
+        if (done.load(std::memory_order_acquire) && analysingSeconds() >= minAnalysingSeconds)
             finishAnalysis();
+        else
+            changed(); // the bar and the dots move
         return;
     }
     if (state != State::capturing)
@@ -302,6 +304,7 @@ void Session::analyseNow()
     }
 
     cancelWorker();
+    searchProgress.store(0.0f);
     const auto scope = host.scope();
     const auto rate = fs;
     const auto originalCandidate = original.candidate(rate);
@@ -313,7 +316,7 @@ void Session::analyseNow()
             out->scope = scope;
             out->sampleRate = rate;
             out->seconds = n / rate;
-            out->result = suggestWithShift(x.data(), y.data(), n, rate, scope, &cancel);
+            out->result = suggestWithShift(x.data(), y.data(), n, rate, scope, &cancel, &searchProgress);
             if (out->result.cancelled)
                 return;
             out->spectra = Spectra::compute(x.data(), y.data(), n, rate);
@@ -339,7 +342,21 @@ void Session::analyseNow()
             done.store(true, std::memory_order_release);
         });
     tooShort = false;
+    analysingSinceMs = juce::Time::getMillisecondCounterHiRes();
     setState(State::analysing);
+}
+
+double Session::analysingSeconds() const
+{
+    return state == State::analysing ? (juce::Time::getMillisecondCounterHiRes() - analysingSinceMs) / 1000.0 : 0.0;
+}
+
+float Session::analysisProgress() const
+{
+    if (state != State::analysing)
+        return state == State::results ? 1.0f : 0.0f;
+    const auto work = done.load(std::memory_order_acquire) ? 1.0f : searchProgress.load(std::memory_order_relaxed);
+    return std::min(work, (float)(analysingSeconds() / minAnalysingSeconds));
 }
 
 void Session::finishAnalysis()

@@ -34,6 +34,48 @@ void checkCancel(const std::atomic<bool>* cancel)
         throw Cancelled{};
 }
 
+// Progress through one suggestWithShift, for the screen's bar: work done against the work expected, in units of one
+// full search (every setting of the phase stage). The weights are Release timings ("[.analysecost]", 27 s of audio on
+// the M1: a full search 0.086 s, the attack reading 0.21 s and the cross-spectrum 0.032 s; those two scale with the
+// length, the search doesn't). The expectation is raised when the search takes a longer path (a manual shift), and what
+// is published never goes back.
+constexpr double attackUnitsPerSecond = 0.09, spectraUnitsPerSecond = 0.014;
+constexpr double fullSettings = 289.0; // settings(true).size()
+
+struct Tracker
+{
+    std::atomic<float>* out = nullptr;
+    double done = 0.0, total = 1.0;
+    // When more work turns up, it is spread over what is left of the bar from where it stands, so the bar keeps moving.
+    double baseDone = 0.0, basePublished = 0.0;
+    float published = 0.0f;
+
+    void add(double units)
+    {
+        done += units;
+        total = std::max(total, done);
+        const auto f = basePublished + (1.0 - basePublished) * (done - baseDone) / std::max(1e-9, total - baseDone);
+        published = std::max(published, (float)std::min(0.99, f));
+        if (out != nullptr)
+            out->store(published, std::memory_order_relaxed);
+    }
+    void expect(double remaining)
+    {
+        if (done + remaining <= total)
+            return;
+        baseDone = done;
+        basePublished = published;
+        total = done + remaining;
+    }
+};
+thread_local Tracker* tracker = nullptr;
+
+void progress(double units)
+{
+    if (tracker != nullptr)
+        tracker->add(units);
+}
+
 int roundHalfEven(double v)
 {
     return (int)std::nearbyint(v);
@@ -269,8 +311,13 @@ constexpr AttackBand attackBands[] = {{35.0, 150.0, 12.0}, {150.0, 600.0, 5.0}, 
 constexpr double attackRunnerUp = 0.65, attackMinPeak = 0.15, attackSearchMs = 40.0;
 
 // One band's feature: the log of the smoothed magnitude, its positive differences.
+// Each band's share of the attack reading's progress: the two features' filtering most of it, the correlation the rest.
+constexpr double featureShare = 0.4, correlationShare = 0.2;
+constexpr int progressChunk = 1 << 16;
+
 std::vector<float> attackFeature(const float* x, int length, double fs, const AttackBand& band)
 {
+    const auto units = attackUnitsPerSecond / 3.0 * featureShare * length / fs;
     const auto sections = butterworth4(fs, band.lo, band.hi > 0.0 ? std::min(band.hi, fs * 0.45) : 0.0);
     std::vector<double> state(sections.size() * 2, 0.0);
     std::vector<double> magnitude((size_t)length);
@@ -288,6 +335,8 @@ std::vector<float> attackFeature(const float* x, int length, double fs, const At
             v = out;
         }
         magnitude[(size_t)i] = std::abs(v);
+        if ((i + 1) % progressChunk == 0)
+            progress(units * progressChunk / length);
     }
 
     // np.convolve(m, ones(n) / n, "same"): the window [i - n/2, i + (n-1)/2], zeros outside.
@@ -309,7 +358,9 @@ std::vector<float> attackFeature(const float* x, int length, double fs, const At
 }
 
 // c[m] = sum_t a[t + m] b[t] for m in [-reach, reach], linear (not circular), in blocks through one FFT size.
-std::vector<double> crossCorrelation(const std::vector<double>& a, const std::vector<double>& b, int reach)
+// `units`: its share of the progress, reported a block at a time.
+std::vector<double> crossCorrelation(const std::vector<double>& a, const std::vector<double>& b, int reach,
+                                     double units)
 {
     const auto length = (int)a.size();
     int size = 1 << 16;
@@ -343,6 +394,7 @@ std::vector<double> crossCorrelation(const std::vector<double>& a, const std::ve
         fa.inverse();
         for (int m = -reach; m <= reach; ++m)
             c[(size_t)(m + reach)] += pa[reach + m] / size;
+        progress(units * std::min(block, length - t0) / length);
     }
     return c;
 }
@@ -385,8 +437,20 @@ double chanceGain(const float* x, const float* y, int length, double fs, Scope s
     return smallest;
 }
 
-Result suggest(const Spectra& sp, const AttackReading& lag, Scope scope, const std::atomic<bool>* cancel,
-               const float* x, const float* y, int length)
+// The two match warnings on the options returned (warnings, not rejections; user, 2026-10-08: guitar and bass playing
+// one part may still want lining up), worked out once for the result returned, so the chance test isn't run for options
+// a shift replaces.
+void addMatchFlags(Result& r, const float* x, const float* y, int length, double fs, Scope scope,
+                   const std::atomic<bool>* cancel)
+{
+    if (r.options.empty() || r.verdict == Verdict::delayOnly)
+        return;
+    r.chanceGain = chanceGain(x, y, length, fs, scope, cancel);
+    r.chanceLevel = r.options[0].gain - r.chanceGain < chanceMargin;
+    r.weakMatch = r.options[0].candidate.score < weakMatch;
+}
+
+Result suggest(const Spectra& sp, const AttackReading& lag, Scope scope, const std::atomic<bool>* cancel)
 {
     Result r;
     r.attack = lag;
@@ -433,10 +497,6 @@ Result suggest(const Spectra& sp, const AttackReading& lag, Scope scope, const s
         r.verdict = r.options.size() == 1 ? Verdict::suggest : Verdict::close;
         for (const auto& option : r.options)
             r.lessLowEnd = r.lessLowEnd || option.lowEndChange < 0.0;
-        // Warnings, not rejections (user, 2026-10-08: guitar and bass playing one part may still want lining up).
-        r.chanceGain = chanceGain(x, y, length, sp.fs, scope, cancel);
-        r.chanceLevel = r.options[0].gain - r.chanceGain < chanceMargin;
-        r.weakMatch = r.options[0].candidate.score < weakMatch;
         return r;
     }
     if (scope.delayOn && lag.clear && std::abs(lag.lagMs) >= minDelayMs && std::abs(lag.lagMs) <= maxDelayMs)
@@ -548,6 +608,7 @@ Spectra Spectra::compute(const float* x, const float* y, int length, double fs)
     }
     const auto maxX = px.empty() ? 0.0 : *std::max_element(px.begin(), px.end());
     const auto maxY = py.empty() ? 0.0 : *std::max_element(py.begin(), py.end());
+    progress(spectraUnitsPerSecond * length / fs);
     if (maxX <= 0.0 || maxY <= 0.0)
         return sp; // silence in one of them: no bands, nothing to score
     const auto floor = std::pow(10.0, activeDb / 10.0);
@@ -614,6 +675,7 @@ std::vector<Candidate> search(const Spectra& sp, const SearchOptions& o, const s
     for (size_t s = 0; s < all.size(); ++s)
     {
         checkCancel(cancel);
+        progress(0.75 / fullSettings);
         const auto h = stageResponse(sp, all[s].mode, all[s].wide, all[s].theta);
         auto* p = fft.data();
         std::fill(p, p + size, 0.0);
@@ -645,9 +707,11 @@ std::vector<Candidate> search(const Spectra& sp, const SearchOptions& o, const s
 
     // Refine the leaders on the knob's 0.1-sample grid.
     std::vector<Candidate> candidates;
-    for (size_t i = 0; i < std::min<size_t>(refineLeaders, best.size()); ++i)
+    const auto leaders = std::min<size_t>(refineLeaders, best.size());
+    for (size_t i = 0; i < leaders; ++i)
     {
         checkCancel(cancel);
+        progress(0.25 * (double)all.size() / fullSettings / (double)leaders);
         const auto& e = best[i];
         const auto& setting = all[e.setting];
         const auto h = stageResponse(sp, setting.mode, setting.wide, setting.theta);
@@ -712,7 +776,7 @@ AttackReading attackLag(const float* x, const float* y, int length, double fs)
         const auto norm = std::sqrt(energyA * energyB);
         if (! (norm > 0.0))
             continue;
-        const auto c = crossCorrelation(a, b, reach);
+        const auto c = crossCorrelation(a, b, reach, attackUnitsPerSecond / numBands * correlationShare * length / fs);
         for (size_t i = 0; i < c.size(); ++i)
             acc[i] += c[i] / norm / numBands;
     }
@@ -745,15 +809,30 @@ AttackReading attackLag(const float* x, const float* y, int length, double fs)
 }
 
 Result suggestWithShift(const float* x, const float* y, int length, double fs, Scope scope,
-                        const std::atomic<bool>* cancel)
+                        const std::atomic<bool>* cancel, std::atomic<float>* progressOut)
 {
+    Tracker track;
+    track.out = progressOut;
+    struct Scoped
+    {
+        explicit Scoped(Tracker* t) { tracker = t; }
+        ~Scoped() { tracker = nullptr; }
+    } scoped(&track);
+    // The work expected: the cross-spectrum, the attack reading, the search (and a second one if the attack reading is
+    // weak), the wide search for a shift, and the chance test at the end (two of each). A shift adds a second round.
+    const auto seconds = length / fs;
+    const auto search1 = (double)settings(scope.phaseOn).size() / fullSettings;
+    const auto spectra1 = spectraUnitsPerSecond * seconds;
+    const auto oneSuggest = spectra1 + attackUnitsPerSecond * seconds + 2.0 * search1;
+    const auto chanceTest = 2.0 * (spectra1 + search1);
+    track.expect(oneSuggest + (scope.delayOn ? search1 : 0.0) + chanceTest);
     try
     {
         const auto sp = Spectra::compute(x, y, length, fs);
         checkCancel(cancel);
         const auto lag = attackLag(x, y, length, fs);
         checkCancel(cancel);
-        auto r = suggest(sp, lag, scope, cancel, x, y, length);
+        auto r = suggest(sp, lag, scope, cancel);
         if (r.verdict == Verdict::noSignal)
             return r;
         if (! scope.delayOn)
@@ -761,6 +840,7 @@ Result suggestWithShift(const float* x, const float* y, int length, double fs, S
             if (lag.clear && std::abs(lag.lagMs) >= minDelayMs)
                 r.message = "DELAY is off: the transients are " + signedInt(roundHalfEven(lag.lagMs * 1e-3 * fs)) +
                             " samples apart";
+            addMatchFlags(r, x, y, length, fs, scope, cancel);
             return r;
         }
         int shift = 0;
@@ -780,9 +860,13 @@ Result suggestWithShift(const float* x, const float* y, int length, double fs, S
                 shift = roundHalfEven(wide[0].delayMs * 1e-3 * fs);
         }
         if (shift == 0)
+        {
+            addMatchFlags(r, x, y, length, fs, scope, cancel);
             return r;
+        }
 
-        // The track as it will be once shifted by hand (positive delays it), and the options for that.
+        // The track as it will be once shifted by hand (positive delays it), and the options for that: the work again.
+        track.expect(oneSuggest + chanceTest);
         std::vector<float> shifted((size_t)length, 0.0f);
         for (int i = 0; i < length; ++i)
             if (i - shift >= 0 && i - shift < length)
@@ -790,7 +874,8 @@ Result suggestWithShift(const float* x, const float* y, int length, double fs, S
         const auto spShifted = Spectra::compute(shifted.data(), y, length, fs);
         checkCancel(cancel);
         const auto lagShifted = attackLag(shifted.data(), y, length, fs);
-        auto after = suggest(spShifted, lagShifted, scope, cancel, shifted.data(), y, length);
+        auto after = suggest(spShifted, lagShifted, scope, cancel);
+        addMatchFlags(after, shifted.data(), y, length, fs, scope, cancel);
         after.baseline = r.baseline;
         after.attack = lag;
         after.shiftSamples = shift;

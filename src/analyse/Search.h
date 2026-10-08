@@ -147,9 +147,10 @@ struct SearchOptions
 };
 std::vector<Candidate> search(const Spectra&, const SearchOptions&, const std::atomic<bool>* cancel = nullptr);
 
-// suggest(), then the shift advice: prototype/analyse.py suggest_with_shift.
+// suggest(), then the shift advice: prototype/analyse.py suggest_with_shift. `progress` (may be null) is kept at the
+// fraction of the work done, 0 to 0.99, never going back (any thread may read it).
 Result suggestWithShift(const float* x, const float* y, int length, double fs, Scope,
-                        const std::atomic<bool>* cancel = nullptr);
+                        const std::atomic<bool>* cancel = nullptr, std::atomic<float>* progress = nullptr);
 
 // "LOW in 62.5°, Ø, +1.21 ms" style, for tests and logs (the screen writes its own, in panel numbers).
 std::string describe(const Candidate&);

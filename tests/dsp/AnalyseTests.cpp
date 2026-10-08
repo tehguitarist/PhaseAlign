@@ -12,6 +12,7 @@
 #include <map>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 // ANALYSE's search against its spec (prototype/analyse.py): prototype/analyse_golden.py runs suggest_with_shift on
@@ -391,5 +392,70 @@ TEST_CASE("ANALYSE's search matches the Python on the user's pairs", "[.useranal
         const auto x = loadF32(c.x + ".f32"), y = loadF32(c.y + ".f32");
         REQUIRE(! x.empty());
         checkCase(c, x, y);
+    }
+}
+
+// Hidden, Release: what each part of the search costs on the user's longest pair (the progress bar's weights).
+TEST_CASE("ANALYSE's search: the cost of its parts", "[.analysecost]")
+{
+    const auto x = loadF32("captures/kick_a.f32"), y = loadF32("captures/kick_b.f32");
+    REQUIRE(! x.empty());
+    const auto n = (int)std::min(x.size(), y.size());
+    const auto time = [](auto&& f)
+    {
+        const auto start = std::chrono::steady_clock::now();
+        f();
+        return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+    };
+    Spectra sp;
+    const auto spectra = time([&] { sp = Spectra::compute(x.data(), y.data(), n, 48000.0); });
+    const auto attack = time([&] { attackLag(x.data(), y.data(), n, 48000.0); });
+    SearchOptions o;
+    const auto full = time([&] { search(sp, o); });
+    o.phaseOn = false;
+    const auto noPhase = time([&] { search(sp, o); });
+    std::printf("%.1f s of audio: spectra %.3f s, attack %.3f s, search %.3f s (phase off %.3f s), whole %.3f s\n",
+                n / 48000.0, spectra, attack, full, noPhase,
+                time([&] { suggestWithShift(x.data(), y.data(), n, 48000.0, {}); }));
+}
+
+// Hidden, Release: how the progress fraction follows the clock on the user's pairs (the bar should move steadily).
+TEST_CASE("ANALYSE's search: progress against time", "[.analysecost]")
+{
+    for (const auto* name : {"captures/kick", "captures/bass", "captures/stems/kick_oh", "captures/stems/snare_sample"})
+    {
+        const auto x = loadF32(std::string(name) + "_a.f32"), y = loadF32(std::string(name) + "_b.f32");
+        if (x.empty())
+            continue;
+        const auto n = (int)std::min(x.size(), y.size());
+        std::atomic<float> fraction{0.0f};
+        std::vector<std::pair<double, float>> samples;
+        const auto start = std::chrono::steady_clock::now();
+        std::thread worker([&] { suggestWithShift(x.data(), y.data(), n, 48000.0, {}, nullptr, &fraction); });
+        std::atomic<bool> running{true};
+        std::thread watcher(
+            [&]
+            {
+                while (running)
+                {
+                    samples.push_back({std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count(),
+                                       fraction.load()});
+                    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+                }
+            });
+        worker.join();
+        running = false;
+        watcher.join();
+        const auto total = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+        std::printf("%-28s %.2f s:", name, total);
+        for (const auto q : {0.25, 0.5, 0.75, 0.95})
+        {
+            float f = 0.0f;
+            for (const auto& [t, v] : samples)
+                if (t <= q * total)
+                    f = v;
+            std::printf("  at %2.0f%% of the time %3.0f%%", q * 100.0, f * 100.0);
+        }
+        std::printf("\n");
     }
 }
