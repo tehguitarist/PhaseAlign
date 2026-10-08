@@ -195,6 +195,7 @@ TEST_CASE("ANALYSE: the analysing bar only moves forward, and shows for at least
     session.analyseNow();
     float last = 0.0f;
     int ticks = 0;
+    const auto startMs = juce::Time::getMillisecondCounterHiRes();
     while (session.getState() == Session::State::analysing && ticks++ < 1000)
     {
         const auto p = session.analysisProgress();
@@ -206,7 +207,9 @@ TEST_CASE("ANALYSE: the analysing bar only moves forward, and shows for at least
     }
     CHECK(session.getState() == Session::State::results);
     CHECK(last > 0.5f);
-    CHECK(ticks * 10 >= (int)(Session::minAnalysingSeconds * 1000.0) - 50);
+    // The bar is held for its minimum: wall time, not ticks (a sleep of 10 ms takes longer on a busy runner, and the
+    // search is quick).
+    CHECK(juce::Time::getMillisecondCounterHiRes() - startMs >= Session::minAnalysingSeconds * 1000.0 - 50.0);
     CHECK(session.analysisProgress() == 1.0f);
 }
 
