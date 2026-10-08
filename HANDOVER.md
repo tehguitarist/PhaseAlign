@@ -127,8 +127,22 @@ order unless the user says otherwise:
    against noise, and mismatched pairs of the user's stems), over `MIN_GAIN` 0.03; about +0.02 at 10 s and +0.005 at
    20 s; the minimum is now 10 s (user). The user's call: warn, don't hide (guitar and bass playing one part may still
    want lining up).
-2. The thresholds (`ATTACK_STRONG`, `MIN_GAIN`, `MIN_MARGIN`) with the new stems, and the second blind set
-   (`prototype/out/analyse/blind2/`).
+2. **Waiting for the user's new stems (user, 2026-10-08: "wait for more samples for a really comprehensive check before
+   modifying too much").** Then, together: the thresholds (`ATTACK_STRONG`, `MIN_GAIN`, `MIN_MARGIN`, `ATTACK_MIN_PEAK`,
+   `CHANCE_MARGIN`, `WEAK_MATCH`), the second blind set (`prototype/out/analyse/blind2/`), and these, measured or proposed
+   on 2026-10-08:
+   - **The scoring measure is as good as any tried.** `prototype/analyse_metrics.py` scores the candidates the user
+     compared by ear with five measures: the current one (mean band r) agrees with 14 of 21 verdicts, a loudness-weighted
+     sum gain also 14, the others 12 or 13. The misses are transient timing (handled by the attack-first/joint switch),
+     the bass's low end (the "less low end" flag) and near-ties within 0.003 (the two-option display). Add the new
+     verdicts to its `PREFS` before changing the measure.
+   - **A finer angle grid gains nothing:** refining the best option to 0.5 degree adds at most 0.0001 r on every pair.
+   - **To hear (a proposed third blind set, sums with the sidechain):** the set 1 kick, where ANALYSE now picks LO in 72.5
+     Ø at +3.19 ms (its attack peak, 0.27, is under `ATTACK_STRONG`, so the waveform score sets the delay) but the user
+     preferred +1.57 ms in the first listening and the attack reading says +1.28 ms (+3.19 was never heard); snare sample
+     after its shift against CONSTANT 50 at -5.94 ms; the bass amp's pick against off.
+   - **Optional, the user's call:** a note when the best setting swings between parts of the capture (split into thirds).
+     ANALYSE keeps giving the averaged best option, which is what the user wants.
 3. **Done (2026-10-08): `meter/CorrelationAnalyser` cleaned up** (the user's standing request): the curve, phase angles,
    PHAT lag and attack lag (and their tests: the time and phase views', the kick sample's, `[.userpairs]`,
    `[.attacktrace]`) are gone; it keeps the averages, the six bands, the overall pair, the held preview and the
