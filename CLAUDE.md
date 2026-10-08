@@ -27,11 +27,10 @@ job, better. That includes the mic and preamp models in the user's stem names: t
 
 ## Current status (update as work progresses)
 
-As of 2026-10-08 master has ANALYSE (merged that day; GitHub has master up to `8f906f0`, green in CI on all three platforms, the
-ANALYSE work after it is not pushed). The refinements from the user's newer stems (the shift rule, the chance flag, the best
-effort as it is, larger text) are on the branch `analyse-refinements`, not merged. **Start a session with `HANDOVER.md`**: what is
-next, what waits for the user (their blind listening test), and the ground rules. The plan's R-table (IMPLEMENTATION_PLAN.md)
-records every decision.
+As of 2026-10-08 everything is on master and pushed (GitHub master at the merge of `analyse-refinements`: ANALYSE and its
+refinements from the user's newer stems, larger text, a finished README); CI's first look at `src/analyse` on Windows and Linux
+is the next thing to check. **Start a session with `HANDOVER.md`**: what is next, what waits for the user (their blind listening
+test), and the ground rules. The plan's R-table (IMPLEMENTATION_PLAN.md) records every decision.
 
 1. **What is built.** The delay (−4 to +4 ms in steps of 0.1 sample, windowed-sinc kernels; latency = the reach plus the
    lookahead while on; plan 2.1a, R12), polarity, the phase stage (HIGH and LOW all-pass shapes in both RANGEs, run
@@ -70,7 +69,7 @@ records every decision.
      (pluginval gates the Windows and Linux jobs); `release.yml` refuses a commit without a green CI run.
    - Installing (when the user asks): `/Library/Audio/Plug-Ins/{Components,VST3}`, not ~/Library.
 5. **Waiting for the user:** their blind listening test (`captures/stems2/blind/index.html`, then the results file to decode
-   against the key); their DAW verdict on the meter and ANALYSE; a merge and a push. Details: HANDOVER.
+   against the key); their DAW verdict on the meter and ANALYSE; the CI result. Details: HANDOVER.
 
 ## Key documents
 

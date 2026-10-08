@@ -2,7 +2,7 @@
 
 Updated 2026-10-08, at the end of the session that refined ANALYSE on the user's newer stem sets (plan R26, last paragraphs).
 Read CLAUDE.md first; plan sections and R-numbers are IMPLEMENTATION_PLAN.md. The plugin is feature-complete for now:
-what's left is the user's listening (the blind test below), their DAW verdicts, a merge and a push.
+what's left is the user's listening (the blind test below), their DAW verdicts, and the CI result.
 
 ## Ground rules (from the user)
 
@@ -32,9 +32,9 @@ what's left is the user's listening (the blind test below), their DAW verdicts, 
 
 ## State
 
-- **Master has ANALYSE** (merged 2026-10-08); the refinements from the newer stems are committed on the branch
-  `analyse-refinements`, **not merged and not pushed** (the user merges and pushes when they say). GitHub has master up to
-  `8f906f0` (green in CI on all three platforms, with all the meter work). No worktrees.
+- **Everything is on master and pushed** (2026-10-08, the merge of `analyse-refinements`, which was deleted): ANALYSE and its
+  refinements from the user's newer stems. Before this push GitHub had master up to `8f906f0` (green in CI on all three
+  platforms); this push is CI's first look at `src/analyse` and PFFFT's double engine on Windows and Linux. No worktrees.
 - The build installed in `/Library/Audio/Plug-Ins/{Components,VST3}` (when the user asks: not ~/Library) is the Release
   build of `cb3df41` (ANALYSE with its warnings and progress bar), arm64; auval passes. Master differs from it only in
   ways nobody would see or hear: the option merging measured over every bin (no result changed on any pair), the
@@ -59,7 +59,7 @@ what's left is the user's listening (the blind test below), their DAW verdicts, 
    disagreements between ear and score, and a confirmation round before any change goes in.
 4. **Listening:** M2 in a DAW (the delay and phase as built) and P3 fade tuning (`prototype/out/p3/`) on multi-mic stems;
    the second blind set (`prototype/out/analyse/blind2/`, key in `key.txt`, opened after listening).
-5. **A push** when the user says: master's ANALYSE work goes to GitHub, and CI's first look at it (below).
+5. **CI's first look at ANALYSE** on Windows and Linux (pushed 2026-10-08; see "Next").
 
 **Decided (user):** HIGH with RANGE in keeps the asterisk (the tooltip explains it); the de-cramping of LOW with RANGE in
 is left; latency re-alignment per host is fine; no host-specific sidechain steps in the README, and other hosts are not
@@ -99,7 +99,7 @@ Four sets of the user's stems are in `captures/` (gitignored): the first two rou
 
 ## Next: needs no input
 
-- **After the next push, watch CI** (`gh run list --branch master`; a watcher in the background is fine) and report. It
+- **Watch CI after a push** (`gh run list --branch master`; a watcher in the background is fine) and report. It
   is the first time Windows and Linux build `src/analyse` and PFFFT's double-precision engine (`pffft_double.c`, SSE2 on
   x86); nothing in it is platform specific, but CI hasn't seen it. `release.yml` refuses a commit without a green CI run
   (`skip_ci_check` overrides); its first real run also checks the Windows and Linux installers' docs step.
