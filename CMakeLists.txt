@@ -1,10 +1,17 @@
 cmake_minimum_required(VERSION 3.15)
 
-project(PhaseAlign VERSION 1.0.0)   # release.yml greps this line for the version; keep the format
+# The deployment target MUST be set before project(): CMake reads it there, and a later set() is silently ignored
+# (the build then takes the runner's own OS as its minimum, e.g. macOS 26, and loads on nothing older).
+set(CMAKE_OSX_DEPLOYMENT_TARGET "10.13" CACHE STRING "Minimum macOS deployment version")
+# Windows: link the C/C++ runtime statically (/MT), so the plug-in does not depend on the Visual C++ Redistributable
+# installed on the user's machine (a plug-in built with a newer MSVC than the user's redistributable fails to load or
+# crashes). Needs CMP0091 (NEW from cmake_minimum_required 3.15); must precede the targets, so JUCE.
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
+project(PhaseAlign VERSION 1.0.1)   # release.yml greps this line for the version; keep the format
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_OSX_DEPLOYMENT_TARGET "10.13" CACHE STRING "Minimum macOS deployment version")
 # macOS ships two separate builds, not a universal binary: arm64, the default here and locally, and x86_64
 # ("Intel"), which release.yml cross-compiles with -DCMAKE_OSX_ARCHITECTURES=x86_64.
 
