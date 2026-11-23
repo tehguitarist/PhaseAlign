@@ -452,8 +452,10 @@ jobs:
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DPA_BUILD_TESTS=OFF
 
-      - name: Build VST3
-        run: cmake --build build --config Release --target PhaseAlign_VST3 --parallel
+      - name: Build VST3 and LV2
+        run: |
+          cmake --build build --config Release --target PhaseAlign_VST3 --parallel
+          cmake --build build --config Release --target PhaseAlign_LV2 --parallel
 
       - name: Package
         run: |
@@ -462,6 +464,7 @@ jobs:
           STAGE="$RUNNER_TEMP/Phase Align"
           mkdir -p "$STAGE"
           cp -R "build/PhaseAlign_artefacts/Release/VST3/Phase Align.vst3" "$STAGE/"
+          cp -R "build/PhaseAlign_artefacts/Release/LV2/Phase Align.lv2" "$STAGE/"
           installer/stage_docs.sh "$STAGE" "$VERSION"
           (cd "$RUNNER_TEMP" && zip -r "${GITHUB_WORKSPACE}/PhaseAlign-Linux-v${VERSION}.zip" "Phase Align")
 

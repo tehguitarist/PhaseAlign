@@ -15,7 +15,7 @@ alignment tools like the Little Labs IBP.
 
 **[⬇ Download the latest release](https://github.com/tehguitarist/PhaseAlign/releases/latest)**
 
-macOS (Apple silicon and Intel; AU and VST3), Windows (VST3) and Linux (VST3). Mono and stereo tracks; stereo is
+macOS (Apple silicon and Intel; AU and VST3), Windows (VST3) and Linux (VST3, LV2). Mono and stereo tracks; stereo is
 processed linked, so both channels get the same treatment.
 
 - [Quick start](#quick-start)

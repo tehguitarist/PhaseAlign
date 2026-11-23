@@ -67,12 +67,19 @@ if (PA_STANDALONE)
     list(APPEND PA_FORMATS Standalone)
 endif()
 
+# LV2 is built on Linux only (an empty value elsewhere, so the FORMATS list below is unchanged).
+set(PLUGIN_LV2_FORMAT "")
+if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(PLUGIN_LV2_FORMAT LV2)
+endif()
+
 juce_add_plugin(PhaseAlign
     COMPANY_NAME "Leigh Pierce"
     BUNDLE_ID com.leighpierce.phasealign
     PLUGIN_MANUFACTURER_CODE Lprc   # 4 chars, one uppercase
     PLUGIN_CODE PhAl                # 4 chars, one uppercase, unique per plugin
-    FORMATS ${PA_FORMATS}
+    FORMATS ${PA_FORMATS} ${PLUGIN_LV2_FORMAT}
+    LV2URI "https://github.com/tehguitarist/PhaseAlign"   # permanent: hosts identify the plug-in by it
     PRODUCT_NAME "Phase Align"
     IS_SYNTH FALSE
     NEEDS_MIDI_INPUT FALSE
