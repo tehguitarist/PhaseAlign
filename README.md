@@ -6,7 +6,7 @@
 
 ![Phase Align](docs/images/plugin.png)
 
-Phase Align is a free, open-source phase and time alignment plugin (AU and VST3) for lining up two tracks that capture
+Phase Align is a free, open-source phase and time alignment plugin (AU and VST3, plus LV2 on Linux) for lining up two tracks that capture
 the same source: a close mic and a room mic, a DI and an amp, the top and bottom of a snare. It has a delay (−4 to
 +4 ms in 0.1-sample steps), a phase rotation (all-pass or constant), a polarity flip, a correlation meter that
 compares your track with another one, so you can see the alignment as well as hear it, and **ANALYSE**, which listens to
@@ -419,7 +419,7 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release --parallel 3
 ```
 
-Artefacts land in `build/PhaseAlign_artefacts/Release/{AU,VST3}`. Testing, the reference implementations and the release
+Artefacts land in `build/PhaseAlign_artefacts/Release/{AU,VST3,LV2}` (AU on macOS only, LV2 on Linux only). Testing, the reference implementations and the release
 process are in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
 ## Licence
